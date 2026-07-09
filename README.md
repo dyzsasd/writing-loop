@@ -1,6 +1,6 @@
 # writing-loop
 
-**English** · [中文](README.zh-CN.md)
+**English** · [中文](README.zh-CN.md) · [Français](README.fr.md)
 
 **An autonomous short-drama writers' room in a folder.** Nine launchable agents
 (Showrunner, Story-Designer, Episode-Writer, Reviewer, Script-Doctor, Evaluator,

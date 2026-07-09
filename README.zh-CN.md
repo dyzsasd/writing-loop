@@ -1,6 +1,6 @@
 # writing-loop
 
-[English](README.md) · **中文**
+[English](README.md) · **中文** · [Français](README.fr.md)
 
 **一个文件夹里的自治短剧编剧团队。** 9 个可启动 agent（总编剧、细纲师、编剧、
 审读、剧本医生、评估官、市场监察、reflect、sweep）在一块本地工单板上，通过工单
