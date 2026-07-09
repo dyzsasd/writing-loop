@@ -1,0 +1,13 @@
+{
+  "name": "writing-loop",
+  "owner": { "name": "Shuai" },
+  "description": "Autonomous short-drama writers' room: Showrunner/Story-Designer/Episode-Writer/Reviewer plus Script-Doctor, Evaluator, Sweep and Reflect, coordinated through ticket state on a local board, with a story bible + beat-card + ledger document system built to keep 60-100 episode vertical micro-dramas coherent.",
+  "plugins": [
+    {
+      "name": "writing-loop",
+      "source": "./",
+      "version": "0.1.0",
+      "description": "Runs a script-writing loop coordinated through ticket state on a local file board. Each project is one drama: north-star bible, master outline, per-arc beat cards, foreshadow + story-state ledgers, episode scripts, and rubric-scored milestone evaluations (outline gate, first-paywall pack, finale). Supports novel-adaptation and original-creation intake."
+    }
+  ]
+}
