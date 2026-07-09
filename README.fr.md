@@ -16,6 +16,10 @@ pivots (keystone) passent d'abord sous la plume du Story-Designer, chaque brouil
 est vérifié indépendamment des affirmations de son auteur, et les jalons sont
 filtrés par une grille de notation que vous pouvez lire.
 
+> ### ▶ Commencez ici → **[Guide : d'un roman à un scénario](docs/GUIDE.fr.md)**
+> Le document le plus utile — le parcours complet et pratique, de l'installation du
+> plugin à la livraison de votre premier livrable (le 一卡包). À lire en premier.
+
 > Comment ça marche à l'intérieur — les couches, les registres (ledgers), la
 > topologie des portes de contrôle, les protocoles anti-dérive :
 > [`docs/DESIGN.md`](docs/DESIGN.md). Ce README parle de l'**utilisation**.

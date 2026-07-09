@@ -14,6 +14,10 @@ through the Showrunner (never straight to a writer), keystone episodes get the
 Story-Designer's own pen first, every draft is verified independently of the
 writer's own claims, and milestones are gated by a rubric you can read.
 
+> ### ▶ Start here → **[Guide: From a Novel to a Script](docs/GUIDE.md)**
+> The single most useful doc — the complete, hands-on path from installing the
+> plugin to shipping your first deliverable (the 一卡包). Read this first.
+
 > How it works inside — the layers, the ledgers, the gate topology, the
 > anti-drift protocols: [`docs/DESIGN.md`](docs/DESIGN.md). This README is about
 > **using** it.
