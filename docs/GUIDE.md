@@ -32,11 +32,16 @@ You now have the `/writing-loop:*` slash commands (9 agents + `add-script`).
 
 ## Step 1 — Make the script project folder, drop in the novel
 
-Each drama = its own git repo (“documents *are* the code”). Create an empty folder
-and put the source novel inside:
+**Workspace vs. script repo**: a **workspace** is a plain folder holding one or more
+**script repos** (each drama is its own git repo — “documents *are* the code”) plus a
+`.writing-loop/` runtime-state dir (config + board + lessons, created automatically by
+`add-script`). **Copying this one workspace folder = migrating every drama + its
+in-flight tickets** (see "Migration" at the end).
+
+Below, `~/dramas/` is your workspace and `my-drama/` is one drama's repo:
 
 ```bash
-mkdir -p ~/dramas/my-drama/source
+mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace, my-drama = script repo
 git -C ~/dramas/my-drama init
 cp /path/to/your-novel.txt ~/dramas/my-drama/source/novel.txt
 ```
@@ -45,7 +50,9 @@ cp /path/to/your-novel.txt ~/dramas/my-drama/source/novel.txt
 > adaptation teardown works from it.
 
 In Claude Code, change the working directory to this project folder
-(`cd ~/dramas/my-drama`), then go to Step 2.
+(`cd ~/dramas/my-drama`), then go to Step 2. (`add-script` treats `~/dramas/` as the
+workspace root and creates `.writing-loop/` under it; for the first drama it confirms
+that root with you.)
 
 ---
 
@@ -98,8 +105,8 @@ Then `add-script` automatically:
 - **SCAFFOLD**: generates `bible/` (north-star / characters / world), `outline.md`,
   `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
   `evaluation/`; `git commit`.
-- **REGISTER**: registers the project in `~/.writing-loop/config.json`, creates the
-  board dir `~/.writing-loop/my-drama/board/`, scaffolds `lessons.md`.
+- **REGISTER**: registers the project in `~/dramas/.writing-loop/config.json`, creates the
+  board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds `lessons.md`.
 - **First outline ticket**: files one outline ticket (owner=showrunner,
   tier=story-designer).
 - **VERIFY**: re-reads, validates, and tells you the next step.
@@ -166,7 +173,30 @@ producing. This is your main control lever.
   and anti-lost-foreshadow)
 - **Evaluation reports**: `evaluation/`
 - **Ticket board** (what the team is working on):
-  `~/.writing-loop/my-drama/board/tickets/*.md`
+  `~/dramas/.writing-loop/my-drama/board/tickets/*.md`
+
+> All runtime state (config + board + lessons + reports) lives under
+> `~/dramas/.writing-loop/` — a **sibling of the script repos**, so ticket state
+> **never pollutes your prose git history**.
+
+---
+
+## Migration: copy one workspace to move everything
+
+Because config uses **relative `repoPath`** and the runtime state lives inside the
+workspace, migrating everything (in-flight tickets included) is one copy:
+
+```bash
+cp -r ~/dramas /new/place/dramas      # scripts + outlines + ledgers + in-flight board, together
+```
+
+- Use **`cp` (not `git clone`)**: a clone brings only one script repo's creative
+  output, not the in-flight tickets.
+- To move only the **finished creative output** (no in-flight scheduling state):
+  `git clone ~/dramas/my-drama` — each script repo is self-contained (bible / outline
+  / ledgers / episodes all inside it).
+- Don't put the workspace on a network share for concurrent multi-machine writing (it
+  would race); sequential copy-to-migrate is fine.
 
 ---
 

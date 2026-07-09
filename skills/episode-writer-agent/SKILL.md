@@ -47,7 +47,7 @@ description: >-
 
 **Boot —— 跑标准 boot 六步（conventions §0）**：
 1. 读 conventions（本文件冲突时它赢）。
-2. 读 workspace 配置（§11 `~/.writing-loop/config.json`）定位本项目条目；读不到 ⇒ 问
+2. 读 workspace 配置（§11 `<workspace>/.writing-loop/config.json`）定位本项目条目；读不到 ⇒ 问
    操作者，绝不猜路径（尤其 `repoPath`、`genre`、`monetization`、`paywall`、
    `episodeWordBand`、`maxPrimaryScenes`、`maxNamedCharacters`、`airedThrough`）。
 3. 确认 backend（v1 恒为 local 文件板，§18）与数据目录、本项目剧本 repo。
@@ -240,7 +240,7 @@ MISUNDERSTANDING（写歪了）。**金句候选** 1-2 句写入清单（R8.2）
 
 ## 3. Close with a report（§22）
 
-收尾在 `~/.writing-loop/<key>/reports/` 追加 **daily 一行**（agent / 时间 / 干了什么 /
+收尾在 `<workspace>/.writing-loop/<key>/reports/` 追加 **daily 一行**（agent / 时间 / 干了什么 /
 票号）：本 fire 写了哪几集、交付到 In Review 的票（带 commit sha）、跳过前置的候选、block
 的票（及 Bail-shape 与路由去向）、标 Duplicate/Canceled 的票、账本锁竞争顺延。**纯 no-op
 fire 不写行**；`mode:"dry-run"` 标注 preview。

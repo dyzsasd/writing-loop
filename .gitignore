@@ -9,4 +9,4 @@
 node_modules/
 
 # local runtime state never belongs in the plugin repo
-# (boards/lessons/reports live under ~/.writing-loop/)
+# (boards/lessons/reports live under <workspace>/.writing-loop/)

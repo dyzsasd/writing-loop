@@ -90,7 +90,7 @@ order, or point external `cron` at them:
 ```
 
 There is **no separate CLI and no server** — the board is plain files under
-`~/.writing-loop/<project-key>/board/`, and scheduling is either a manual slash
+`<workspace>/.writing-loop/<project-key>/board/`, and scheduling is either a manual slash
 call or your own `cron`. Copy the folder and you've migrated machines.
 
 The Showrunner keeps the queue shallow (Backlog-first; only it promotes to
@@ -210,7 +210,7 @@ full carry-over / replace / cut ledger.
 ## v1 boundaries
 
 - **Local board only.** The single backend is a plain file board under
-  `~/.writing-loop/` (protocol in [`references/conventions.md`](references/conventions.md)
+  `<workspace>/.writing-loop/` (protocol in [`references/conventions.md`](references/conventions.md)
   §18). No Linear, no hub, no network share. Scheduling is manual slash or your
   own `cron`.
 - **Calibrated genres only.** The R-rule numeric parameters are calibrated

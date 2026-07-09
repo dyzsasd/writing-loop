@@ -39,7 +39,7 @@ comment + 机读行**交接，从不直接对话（§0）。你的偏置：**离
 
 **标准 boot 序列（conventions §0 六步）**：
 1. 读 conventions。
-2. 读 workspace 配置（§11 `~/.writing-loop/config.json`）定位本项目条目；读不到 ⇒
+2. 读 workspace 配置（§11 `<workspace>/.writing-loop/config.json`）定位本项目条目；读不到 ⇒
    问操作者，绝不猜路径（尤其 `repoPath`、`genre`、`monetization`、`airedThrough`、
    `models`/`efforts`）。
 3. 确认 backend（v1 恒为 local 文件板 §18）与数据目录、剧本 repo。
@@ -257,7 +257,7 @@ showrunner 放行）。干净抽查是健康结果，记一行、不编造边际
 
 ## 3. Close with a report
 
-收尾在 `~/.writing-loop/<key>/reports/` 追加 **daily 一行**（§22：agent / 时间 / 干了
+收尾在 `<workspace>/.writing-loop/<key>/reports/` 追加 **daily 一行**（§22：agent / 时间 / 干了
 什么 / 票号）：验收通过与 fail 的集号、回炉/升级/停靠的票 ID、邻集复核票 ID、双签的
 punch-up 票、解锁的 needs-reviewer 票、Job C 抽查结论与新开 Bug（Backlog）ID；停靠票在
 needs-attention 节置顶。**纯 no-op fire 不写行**。`mode:"dry-run"` 标为 preview。

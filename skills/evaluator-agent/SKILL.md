@@ -216,7 +216,7 @@ profile 的 X」而非写死数值）：
   pass。
 
 ## 3. Close with a report
-收尾在 `~/.writing-loop/<key>/reports/` 追加 **daily 一行**（§22：agent / 时间 /
+收尾在 `<workspace>/.writing-loop/<key>/reports/` 追加 **daily 一行**（§22：agent / 时间 /
 干了什么 / 票号）——例：「evaluator (run <tok>)：跑一卡门（WL-42），定级 A；file
 WL-58（redline Urgent）+ WL-59（punch-up 切片不达标）；市场层因 market-watch 评估
 过期(>2w) 判 inconclusive；票转 In Review 交 showrunner。」纯 no-op fire 不写。

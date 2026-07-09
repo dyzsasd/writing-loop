@@ -243,7 +243,7 @@ fail 即人工停靠。回主循环 Step 1。
 
 ## 4. Close with a report（§22）
 
-收尾在 `~/.writing-loop/<key>/reports/` 追加 **daily 一行**：agent（story-designer）/
+收尾在 `<workspace>/.writing-loop/<key>/reports/` 追加 **daily 一行**：agent（story-designer）/
 时间 / 干了什么（拾了哪些票及其模式；写/更新的节拍单或 outline/bible；spawn 并暂存到
 Backlog 的子票 ID + 交 In Review 的 design 父票；亲写并交审的 direct-write 单集[带
 commit 引用]；punch-up 结果；裁决的 needs-designer 提案；滚存的 arc 账本；block 了什么

@@ -95,7 +95,7 @@ Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 ```
 
 Il n'y a **ni CLI séparé ni serveur** — le tableau est de simples fichiers sous
-`~/.writing-loop/<clé-projet>/board/`, et l'ordonnancement est soit un appel slash
+`<workspace>/.writing-loop/<clé-projet>/board/`, et l'ordonnancement est soit un appel slash
 manuel, soit votre propre `cron`. Copiez le dossier et vous avez migré de machine.
 
 Le Showrunner garde la file peu profonde (Backlog-first ; lui seul promeut vers
@@ -219,7 +219,7 @@ le registre complet reprise / remplacement / suppression.
 ## Limites de la v1
 
 - **Tableau local uniquement.** L'unique backend est un simple tableau de fichiers
-  sous `~/.writing-loop/` (protocole dans
+  sous `<workspace>/.writing-loop/` (protocole dans
   [`references/conventions.md`](references/conventions.md) §18). Pas de Linear, pas
   de hub, pas de partage réseau. L'ordonnancement est manuel (slash) ou votre
   propre `cron`.

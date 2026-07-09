@@ -32,11 +32,17 @@ Vous disposez maintenant des slash commands `/writing-loop:*` (9 agents + `add-s
 
 ## Étape 1 — Créer le dossier du projet et y déposer le roman
 
-Chaque drame = son propre repo git (« les documents *sont* le code »). Créez un
-dossier vide et placez-y le roman source :
+**Workspace vs. repo de scénario** : un **workspace** est un dossier ordinaire
+contenant un ou plusieurs **repos de scénario** (chaque drame est son propre repo git
+— « les documents *sont* le code ») plus un répertoire d'état d'exécution
+`.writing-loop/` (config + tableau + lessons, créé automatiquement par `add-script`).
+**Copier ce seul dossier workspace = migrer chaque drame + ses tickets en cours**
+(voir « Migration » à la fin).
+
+Ci-dessous, `~/dramas/` est votre workspace et `my-drama/` le repo d'un drame :
 
 ```bash
-mkdir -p ~/dramas/my-drama/source
+mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace, my-drama = repo de scénario
 git -C ~/dramas/my-drama init
 cp /chemin/vers/votre-roman.txt ~/dramas/my-drama/source/novel.txt
 ```
@@ -45,7 +51,9 @@ cp /chemin/vers/votre-roman.txt ~/dramas/my-drama/source/novel.txt
 > décorticage d'adaptation travaille à partir de lui.
 
 Dans Claude Code, placez le répertoire de travail sur ce dossier de projet
-(`cd ~/dramas/my-drama`), puis passez à l'étape 2.
+(`cd ~/dramas/my-drama`), puis passez à l'étape 2. (`add-script` considère `~/dramas/`
+comme la racine du workspace et y crée `.writing-loop/` ; pour le premier drame, il
+confirme cette racine avec vous.)
 
 ---
 
@@ -101,8 +109,8 @@ Ensuite `add-script` automatiquement :
 - **SCAFFOLD** : génère `bible/` (north-star / characters / world), `outline.md`,
   `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
   `evaluation/` ; `git commit`.
-- **REGISTER** : enregistre le projet dans `~/.writing-loop/config.json`, crée le
-  répertoire de tableau `~/.writing-loop/my-drama/board/`, échafaude `lessons.md`.
+- **REGISTER** : enregistre le projet dans `~/dramas/.writing-loop/config.json`, crée le
+  répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude `lessons.md`.
 - **Premier ticket de plan** : crée un ticket outline (owner=showrunner,
   tier=story-designer).
 - **VERIFY** : relit, valide et vous indique l'étape suivante.
@@ -170,7 +178,30 @@ réelles, ou continuer à produire. C'est votre principal levier de contrôle.
   l'anti-fracture et de l'anti-préfiguration-perdue)
 - **Rapports d'évaluation** : `evaluation/`
 - **Tableau de tickets** (ce sur quoi l'équipe travaille) :
-  `~/.writing-loop/my-drama/board/tickets/*.md`
+  `~/dramas/.writing-loop/my-drama/board/tickets/*.md`
+
+> Tout l'état d'exécution (config + tableau + lessons + rapports) se trouve sous
+> `~/dramas/.writing-loop/` — un **frère des repos de scénario**, donc l'état des
+> tickets **ne pollue jamais l'historique git de vos textes**.
+
+---
+
+## Migration : copier un workspace pour tout déplacer
+
+Comme le config utilise un **`repoPath` relatif** et que l'état d'exécution vit dans
+le workspace, tout migrer (tickets en cours compris) tient en une copie :
+
+```bash
+cp -r ~/dramas /nouvel/endroit/dramas   # scénarios + plans + registres + tableau en cours, ensemble
+```
+
+- Utilisez **`cp` (pas `git clone`)** : un clone n'apporte que la sortie créative d'un
+  seul repo de scénario, pas les tickets en cours.
+- Pour ne déplacer que la **sortie créative finie** (sans l'état d'ordonnancement en
+  cours) : `git clone ~/dramas/my-drama` — chaque repo de scénario est autonome (bible
+  / outline / ledgers / episodes, tout à l'intérieur).
+- Ne mettez pas le workspace sur un partage réseau pour une écriture multi-machine
+  concurrente (cela ferait une race) ; une copie-migration séquentielle est correcte.
 
 ---
 

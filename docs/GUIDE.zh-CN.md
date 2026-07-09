@@ -30,10 +30,15 @@
 
 ## 第 1 步：建剧本工程目录，放进小说
 
-每部剧 = 一个独立的 git 仓库（“文档即代码”）。先建空目录、放原著：
+**workspace 与剧本 repo 的关系**：一个 **workspace** 是一个普通文件夹，里面放若干
+**剧本 repo**（每部剧一个独立 git 仓库，“文档即代码”）+ 一个 `.writing-loop/` 运行时
+状态目录（config + 看板 + lessons，由 `add-script` 自动创建）。**复制这一个 workspace
+文件夹 = 整体迁移全部剧本 + 在制工单**（见文末「迁移」）。
+
+下面 `~/dramas/` 就是你的 workspace，`my-drama/` 是其中一部剧的仓库：
 
 ```bash
-mkdir -p ~/dramas/my-drama/source
+mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace，my-drama = 剧本 repo
 git -C ~/dramas/my-drama init
 cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 ```
@@ -41,6 +46,8 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 > 关键：小说文本必须落在剧本仓库的 `source/` 里——改编线的拆书就基于它。
 
 在 Claude Code 里把工作目录切到这个剧本目录（`cd ~/dramas/my-drama`），再进入第 2 步。
+（`add-script` 会把 `~/dramas/` 认作 workspace 根，并在其下建 `.writing-loop/`；首剧时会
+先跟你确认这个根。）
 
 ---
 
@@ -73,7 +80,7 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 跑完后，`add-script` 自动：
 
 - **SCAFFOLD**：生成 `bible/`（north-star / characters / world）、`outline.md`、`ledgers/`（foreshadow / story-state / production + archive/）、`episodes/`、`evaluation/`；`git commit`。
-- **REGISTER**：在 `~/.writing-loop/config.json` 登记项目，建看板目录 `~/.writing-loop/my-drama/board/`，铺 `lessons.md` 骨架。
+- **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons.md` 骨架。
 - **首张大纲票**：file 一张 outline 工单（owner=showrunner，tier=story-designer）。
 - **VERIFY**：回读校验并告诉你下一步。
 
@@ -124,7 +131,26 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 - **大纲与圣经**：`outline.md`、`bible/`
 - **伏笔 / 状态 / 制作账本**：`ledgers/`（防割裂、防伏笔丢失的核心）
 - **评估报告**：`evaluation/`
-- **工单看板**（团队在忙什么）：`~/.writing-loop/my-drama/board/tickets/*.md`
+- **工单看板**（团队在忙什么）：`~/dramas/.writing-loop/my-drama/board/tickets/*.md`
+
+> 运行时状态（config + 看板 + lessons + 报告）都在 `~/dramas/.writing-loop/` 里——它是
+> **各剧本 repo 之外**的兄弟目录，所以工单状态**不会污染你的正文 git 历史**。
+
+---
+
+## 迁移：复制一个 workspace 就搬走全部
+
+因为 config 用**相对 `repoPath`**、运行时状态就在 workspace 内，整体迁移只需复制这一个
+文件夹（含在制工单）：
+
+```bash
+cp -r ~/dramas /new/place/dramas      # 剧本 + 大纲 + 账本 + 在制看板一起搬
+```
+
+- 用 **`cp`（不是 `git clone`）**：clone 只带单个剧本 repo 的创作成果，不带在制工单。
+- 只想搬**已完成的创作成果**（不要在制调度状态）：`git clone ~/dramas/my-drama` 即可——
+  每部剧本 repo 本身就自包含（bible / outline / ledgers / episodes 全在里面）。
+- 别把 workspace 放到网络盘上多机同时写（会 race）；顺序复制迁移没问题。
 
 ---
 

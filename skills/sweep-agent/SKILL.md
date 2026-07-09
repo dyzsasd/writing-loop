@@ -43,10 +43,10 @@ story-designer / episode-writer 各按 **tier 切片** 拾 `Todo`；reviewer 验
 
 **标准 boot 六步（conventions §0）** + sweep 补充：
 1. 读 conventions。
-2. 读 workspace 配置 `~/.writing-loop/config.json`（§11）定位项目条目；读不到 ⇒
+2. 读 workspace 配置 `<workspace>/.writing-loop/config.json`（§11）定位项目条目；读不到 ⇒
    **问操作者，绝不猜路径**。取 `repoPath`、`ticketPrefix`、`airedThrough`、`mode`。
 3. 确认 backend = **local 文件板（v1 唯一，§18）**：板目录
-   `~/.writing-loop/<project-key>/board/`（`WRITINGLOOP_DATA_DIR` 可覆盖）；剧本 repo =
+   `<workspace>/.writing-loop/<project-key>/board/`（`WRITINGLOOP_DATA_DIR` 可覆盖）；剧本 repo =
    `repoPath`。landing 恒为 **direct-commit，无 PR**（§19）——孤儿判据只看 main 上的
    commit，无 PR 分支复杂度。
 4. 读 lessons（§14）：`## Shared` + `## sweep` 分节，规则可预先改本 fire 动作。
@@ -188,7 +188,7 @@ sweep 是 hygiene-only，**从不 file 票、从不 revert、从不改正文/账
   重标是零信号 churn。
 
 ## 3. 收尾报告（§22）
-每 fire 收尾在 `~/.writing-loop/<key>/reports/` 追加 **daily 一行**（agent / 时间 /
+每 fire 收尾在 `<workspace>/.writing-loop/<key>/reports/` 追加 **daily 一行**（agent / 时间 /
 干了什么 / 涉及票号）；**纯 no-op fire 不写**。正文汇报：重标/重路由的票（ID + 改了什么）、
 回收的孤儿、清的陈旧锁、补 promote/补关的父子票、为操作者旗标的项（含 §15.4/§19 稽核
 与一切「不猜」），以及 Job 7 板健康摘要。`mode:"dry-run"` ⇒ 全文标注 preview。
