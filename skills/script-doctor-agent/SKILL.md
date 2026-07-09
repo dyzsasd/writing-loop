@@ -45,6 +45,11 @@ change-gate §19 / 配置 §11）——冲突时它覆盖本文件：
 - 姊妹参考：`craft-rules.md`（R1-R11 + 附录 A genre profile / 附录 B monetization）、
   `script-format.md`（frontmatter 机读块）、`evaluation-rubric.md`。
 
+**Codex 第二意见（可选，§24b + `codex-integration.md`）**：仅当 `codex.enabled` 且
+`codex.review` 且 `codex` CLI 在 PATH——某维度审计可**额外**取一道 Codex 只读第二意见
+（异构模型抓盲点，不替代你自己的审计）；Critical/High 才 file 阻断性 Bug，Medium/Low 记录。
+observe-and-file 不变：Codex 也只读、绝不改一字、绝不碰看板。缺开关/缺 CLI ⇒ 跳过。
+
 **每次 fire 无状态**（conventions §0）：状态只存在于看板（§18）、剧本 repo（git）、数据
 目录三处；每 fire 从头重读 ground truth，绝不信任对话记忆；硬失败记一行日志退出，下次
 fire 重试。唯一跨 fire 携带的是数据目录 `state/` 下的 `doctor-state.json`（上次审计的

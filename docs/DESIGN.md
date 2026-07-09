@@ -191,12 +191,15 @@ docs/DESIGN.md docs/RESEARCH/*.md（12 份调研归档）
 ## 11. 照搬 / 替换 / 砍掉
 
 **照搬**：三铁律、boot、状态机、三分类、§5a、claim、dedupe、blocked 协议、查询纪律、
-dry-run、lessons、§17、§18 local 板、§21a 结构、§22 报告点评。
+dry-run、lessons、§17、§18 local 板、§21a 结构、§22 报告点评、§24 Codex 加速器
+（图像生成 + 独立审查）、§25 第二 CLI 可移植性（Claude/Codex）。
 **替换**：build 门→格式与叙事门禁；coverage→账本回写强制令；sensitive→keystone；
 design doc→arc 节拍单；strategyDoc→north-star；Ops→market-watch；
-自动回滚→fail-revert 协议。
+自动回滚→fail-revert 协议；档位→CLI 无关抽象等级（Claude↔Codex 映射）。
 **砍掉**：PR/autoMerge/deploy、多 repo §19（change-gate 思想保留给 doctor）、
-Linear/hub backend（v1）、Communication、Codex、W5 完整外部追踪（保简化 park）。
+Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 park）。
+**Codex 的差异**：dev-loop 的第二 CLI 需要 hub 的 env-identity 网关；writing-loop v1
+纯本地文件板，「是哪个 agent」= 「调了哪条 skill」，无需 MCP/identity——§25 因此更简。
 
 ## 12. v1→v2 评审决策日志（38 findings 裁决）
 

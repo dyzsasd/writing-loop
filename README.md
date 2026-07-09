@@ -56,12 +56,24 @@ two comparison dramas).
 
 ## Quick start
 
-**1. Install the plugin** (once, inside Claude Code):
+**1. Install the plugin** (once). In **Claude Code**:
 
 ```
 /plugin marketplace add dyzsasd/writing-loop
 /plugin install writing-loop
 ```
+
+Or in **Codex** (the writers' room runs on either CLI — same skills, same local
+board; see conventions §24–§25):
+
+```
+codex plugin marketplace add dyzsasd/writing-loop
+```
+
+Codex is also an optional in-loop accelerant (opt-in via the project's `codex`
+config): **image generation** — turn the bible's visual tokens into character /
+scene concept art — and an **independent second-engine review** for the Reviewer /
+Script-Doctor. Absent or disabled ⇒ everything behaves exactly the same.
 
 **2. Start a project** — run the intake skill from an empty project folder. It
 interviews you (genre, audience profile, monetization, compliance pre-screen;

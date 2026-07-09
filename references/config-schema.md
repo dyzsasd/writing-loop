@@ -63,7 +63,17 @@
       "keystoneEpisodes": "auto",          // auto = 第1集 + 各卡点集±1 + 深谷集 + 终局3集；或显式数组
       "writerSplit": true,                 // true=story-designer/episode-writer 两层（默认）；false=单 writer
 
-      // —— agent 档位覆盖（默认见 conventions 拓扑表） ——
+      // —— Codex 可选加速器（§24；缺块或 enabled:false ⇒ 100% 不变） ——
+      "codex": {
+        "enabled": false,                  // 且需 codex CLI 在 PATH；任一为假 ⇒ 优雅降级不用 Codex
+        "imageGen": false,                 // §24a：story-designer 把 bible 视觉 token → 概念图
+        "review": false,                   // §24b：reviewer/script-doctor 的异构第二引擎只读复审
+        "assetsDir": "assets/concept/",    // 概念图落盘目录（剧本 repo 内，相对 repoPath）
+        "model": null,                     // 传给 codex exec 的 --model（null=Codex 默认）
+        "effort": null                     // 传给 codex exec 的 effort（null=Codex 默认）
+      },
+
+      // —— agent 档位覆盖（默认见 conventions 拓扑表；CLI 无关，Claude/Codex 名见拓扑表下映射） ——
       "models":  { "episode-writer": "sonnet" },
       "efforts": { "showrunner": "max", "story-designer": "max" }
     }

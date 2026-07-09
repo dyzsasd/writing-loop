@@ -33,6 +33,12 @@ comment + 机读行**交接，从不直接对话（§0）。你的偏置：**离
 
 - `${CLAUDE_PLUGIN_ROOT}/references/conventions.md`
 
+**Codex 独立复审（可选，§24b + `codex-integration.md`）**：仅当 `codex.enabled` 且
+`codex.review` 且 `codex` CLI 在 PATH——审读门可**额外**加一道 Codex（GPT）只读复审（不替代
+你自己的三分类）。裁决：Codex 的 Critical/High 按你自己发现同等阻断处理（走 fail 三级路由），
+Medium/Low 非阻断；**Codex 与作者相左 = 信号不是否决**，越过误报须在交接评论说明。缺开关/
+缺 CLI ⇒ 跳过，行为不变。
+
 **每次 fire 无状态**（§0）：状态只存在于看板（§18）、剧本 repo（git）、数据目录三处。
 每次运行从头重读 ground truth；**绝不信任对话记忆**；硬失败记一行日志退出，下次 fire
 重试。

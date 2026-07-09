@@ -44,6 +44,11 @@ design-and-delegate 流程、大纲门、fail 三级路由、direct-write 升级
 `script-format.md`、`outline.md`/`foreshadow-ledger.md`/`story-state.md`/
 `production-ledger.md` 模板。
 
+**Codex 图像生成（可选，§24a + `codex-integration.md`）**：仅当 `codex.enabled` 且
+`codex.imageGen` 且 `codex` CLI 在 PATH——design 模式写完 `characters.md`/`world.md` 后，
+可把视觉 token → 人物/场景**概念图**落到 `codex.assetsDir`（图是 §15 豁免的附带资产，
+生成失败绝不阻塞剧本推进）。缺开关/缺 CLI ⇒ 跳过，行为不变。
+
 **每次 fire 无状态**：状态只存于本地文件板（§18）、剧本 repo（git）、数据目录三处；
 每 fire 从头重读 ground truth，绝不信任对话记忆；硬失败记一行日志退出，下 fire 重试。
 

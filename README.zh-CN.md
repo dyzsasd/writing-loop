@@ -44,12 +44,22 @@
 
 ## Quick start
 
-**1. 安装插件**（一次，在 Claude Code 内）：
+**1. 安装插件**（一次）。在 **Claude Code** 内：
 
 ```
 /plugin marketplace add dyzsasd/writing-loop
 /plugin install writing-loop
 ```
+
+或在 **Codex** 内（同一套 skill、同一块本地看板，两个 CLI 都能跑；见 conventions §24–§25）：
+
+```
+codex plugin marketplace add dyzsasd/writing-loop
+```
+
+Codex 还可作为可选的**加速器**（按项目 `codex` 配置 opt-in）：**图像生成**——把 bible 的
+视觉 token 变成人物/场景概念图；以及给审读/剧本医生的**异构第二引擎审查**。未装或关闭 ⇒
+一切行为完全不变。
 
 **2. 立项**——在一个空的项目文件夹里运行立项 skill。它会做 interview（题材、
 受众画像、monetization、合规预筛；改编项目另加原著文本 + 拆书），脚手架出 bible /

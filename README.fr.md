@@ -61,12 +61,25 @@ léger d'un ou deux drames de comparaison).
 
 ## Démarrage rapide
 
-**1. Installer le plugin** (une fois, dans Claude Code) :
+**1. Installer le plugin** (une fois). Dans **Claude Code** :
 
 ```
 /plugin marketplace add dyzsasd/writing-loop
 /plugin install writing-loop
 ```
+
+Ou dans **Codex** (la writers' room tourne sur l'un ou l'autre CLI — mêmes skills,
+même tableau local ; voir conventions §24–§25) :
+
+```
+codex plugin marketplace add dyzsasd/writing-loop
+```
+
+Codex est aussi un accélérateur optionnel dans la boucle (opt-in via la config
+`codex` du projet) : **génération d'images** — transformer les tokens visuels de la
+bible en concept art de personnages / décors — et une **revue indépendante par un
+second moteur** pour le Reviewer / Script-Doctor. Absent ou désactivé ⇒ tout se
+comporte exactement pareil.
 
 **2. Démarrer un projet** — lancez la skill d'accueil depuis un dossier de projet
 vide. Elle vous interroge (genre, profil d'audience, monétisation, pré-filtrage
