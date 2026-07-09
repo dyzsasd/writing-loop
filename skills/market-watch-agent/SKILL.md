@@ -158,9 +158,10 @@ file。拿不到数据就记「本周无数据」，绝不编造。
 （§5a：一切新发现落 Backlog，由 showrunner 放行——你**不自行放行 Todo**）：
 
 - **A. 本剧题材入打压期 / 红海（产品定位与市场现实冲突 = 缺陷）** ⇒
-  `Type: Bug` + 子标签 `market` + 工作流信号 `needs-showrunner`，落 `Backlog`。
-  labels 全集 = `[writing-loop, Bug, market, needs-showrunner]`（§10 REPLACE 语义：
-  一次传全集，漏传即删）。`priority` **视严重度**：题材被明令打压 / 面临下架风险 =
+  `Type: Bug` + 子标签 `market` + owner `showrunner` + 工作流信号 `needs-showrunner`，
+  落 `Backlog`。labels 全集 = `[writing-loop, Bug, market, showrunner, needs-showrunner]`
+  （owner=`showrunner`：§4 的第二条 owner 例外——`market` 子标签的 Bug 是战略/定位层缺陷，
+  归 showrunner 验收；§10 REPLACE 语义：一次传全集，漏传即删）。`priority` **视严重度**：题材被明令打压 / 面临下架风险 =
   `Urgent(1)`；转红海 / 热度显著下滑但仍可投 = `High(2)`。Context 写：窗口态 + 判据
   （来源 + 日期，§16 蒸馏不抄原文）+ 反抖动依据（两来源 / 两周）。AC 写 showrunner 可判定
   的战略动作（如「north-star 定位 / Non-goals 已按新窗口修订；若需转轨已 file 后续票」）。
@@ -175,12 +176,6 @@ file/刷新后：把票记进 `market-state.json.openTickets`（id + 信号 key 
 标 `filed`。**带外通知**：`comms.provider` 配置且为 `Urgent` 首次停靠级信号时，按 §9 推
 一条（票 ID + 需要的决定）并加 `notified` 防重推；未配置 ⇒ 该票在 daily digest 的
 needs-attention 节呈现（v1 显式 fallback，**不臆造 webhook**）。通知失败绝不使本 fire 失败。
-
-> **owner 不由我定（照 §4，不发明规则）**：owner 标签决定谁在 In Review 验收，由 showrunner
-> 梳理 Backlog 时按票类设定 / 校正。我只把票 file 进 Backlog 并挂 `needs-showrunner` 让
-> showrunner 拾取梳理（§9），**不替它决定 owner**。§4「全部 Bug ⇒ owner=reviewer」与
-> 「market Bug 实为战略 / 定位缺陷、reviewer 无从对正文验收」之间存在张力——我**不在此
-> 发明新 owner 规则**，交由 showrunner + sweep 按板梳理裁定（该张力已在返回 notes 上呈）。
 
 ### Job 5 —— 收敛已恢复的信号（记录，不验收）
 对 `openTickets` 里的信号，本 fire 若已**明确逆转**（题材窗口重开 / 政策撤销 / 红海降温，

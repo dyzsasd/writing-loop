@@ -60,8 +60,8 @@
         "provider": null,                  // "slack" | "lark" | null（null=仅 daily digest 的 needs-attention 节）
         "webhookEnv": null                 // 存 webhook 的环境变量名——config 本身不放秘密
       },
-      "keystoneEpisodes": "auto",          // auto = 第1集 + 各卡点集±1 + 深谷集 + 终局3集；或显式数组
-      "writerSplit": true,                 // true=story-designer/episode-writer 两层（默认）；false=单 writer
+      // 注：keystone 集不在 config 配置——由 conventions §21a 硬规则决定
+      //   （前3集 + 各卡点集±1 + 深谷集 + 终局3集 + 改编项目 S 级名场面集）
 
       // —— Codex 可选加速器（§24；缺块或 enabled:false ⇒ 100% 不变） ——
       "codex": {
@@ -80,6 +80,11 @@
   }
 }
 ```
+
+多项目语义（§11）：`enabled:false` 的项目对**一切 agent 不可见**（探针与 boot 都跳过
+它）——这是操作者暂停一部剧的开关；多项目 workspace 时每 fire 恰选**一个**项目，
+定位规则见 conventions §11（CWD 在某 repoPath 内 ⇒ 该项目；否则恰一个 enabled ⇒
+该项目；否则问操作者，绝不猜、绝不遍历）。
 
 ## 数据目录布局 — `<workspace>/.writing-loop/<project-key>/`
 

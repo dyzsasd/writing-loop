@@ -40,11 +40,12 @@ story-designer / episode-writer 各按 **tier 切片** 拾 `Todo`；reviewer 验
 先做**纯板 glob**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析
 frontmatter** 求值，用 §18 稳定字段：`state`/`labels`/`owner`/`assignee`/`updated` + `Episode:`
 机读行；**不读 conventions/lessons**），求 **lane 谓词**——命中下列任一即为真（保守超集）：
-- **cadence gate**：距上次 sweep fire ≥ 卫生周期（日频 / 900s，按 config）——janitor 兜底扫板。
+- **cadence gate**：距上次 sweep fire ≥ 卫生周期（无 config 字段，默认 30min 级，即
+  900–1800s；本探针与全文 cadence 同此口径）——janitor 兜底扫板。
 - **错标 / 孤儿**（逃逸口②）：`∃` 非终态票缺 owner/tier 标签，或 `∃ In Progress` + assignee 陈旧 >60min（§7）。
-- **keystone-stall（新增 Job，§1 护栏）**：`∃` 带 `keystone` 标签的 `In Review` 票，`updated` 陈旧
-  > 阈值 T（如 30min）且近窗无顶配 reviewer 迹象 ⇒ 在板健康 digest **旗标**「keystone 集 `<ID>`
-  停滞，需顶配 reviewer」。**这是把 §1「跳过留待」silent stall 浮出的唯一机制**（并入下面 Job 清单）。
+- **keystone-stall（§1 固定 Job，见 Job 6.5）**：`∃` 带 `keystone` 标签的 `In Review` 票，
+  `updated` 陈旧 > 阈值 T（默认 30min）**且** assignee 为空或陈旧——判据**只用 frontmatter
+  年龄**，机械可判。
 - **求助 / 结算**（逃逸口①③）：`∃` 本角色 `needs-*` 票（带 `blocked`），或到期 weekly/monthly 汇总 /
   `reports/` 有未分发 `*.review.md`（§22）。
 
@@ -92,17 +93,20 @@ frontmatter** 求值，用 §18 稳定字段：`state`/`labels`/`owner`/`assigne
 
 - **缺 owner 标签**（`reviewer` 与 `showrunner` **皆无**）：无 owner 的票会搁浅在
   In Review（§4）。按**票类**补 owner（**不按 Type**）：`episode` 票（含
-  `Mode: direct-write` 重写票）/ 全部 `Bug` / reviewer 所 file 的 Improvement ⇒
-  `reviewer`；outline / arc-design / milestone-eval / 立项票 / 其余 Improvement（含
-  punch-up）⇒ `showrunner`。票类无法从标题/子类型标签判明 ⇒ **旗标，不猜**（留言 +
-  digest）。
-- **合法组合不得改回**：`episode` + `Feature` + `reviewer` 是 **§4 显式合法组合**
-  （离观众最近的产物必须独立验收）——**绝不**按「Feature ⇒ showrunner」把它改回。
-  这是 sweep 最易犯的错标，牢记。
+  `Mode: direct-write` 重写票）/ 全部 `Bug`（**`market` 子标签的 Bug 除外 ⇒
+  `showrunner`**）/ reviewer 所 file 的 Improvement ⇒ `reviewer`；outline / arc-design /
+  milestone-eval / 立项票 / 其余 Improvement（含 punch-up）/ **`market` 子标签的 Bug**
+  ⇒ `showrunner`。票类无法从标题/子类型标签判明 ⇒ **旗标，不猜**（留言 + digest）。
+- **合法组合不得改回**：`episode` + `Feature` + `reviewer` 与 `market` + `Bug` +
+  `showrunner` 是 **§4 的两个显式合法组合**（前者：离观众最近的产物必须独立验收；
+  后者：市场/定位缺陷是战略层，reviewer 无从对正文验收）——**绝不**分别按
+  「Feature ⇒ showrunner」「Bug ⇒ reviewer」把它们改回。这是 sweep 最易犯的错标，牢记。
 - **owner/票类矛盾**：如 `Bug` 却只挂 `showrunner`、outline 票却只挂 `reviewer` ⇒
   按上条改成对的 owner，让正确的验收者接手。
-- **缺 tier**（创作票——`episode`/`arc-design`/`outline`/`milestone-eval`——**恰一**
-  tier 缺失）：未标 tier 的创作票对两个拾取查询**都不可见**（§4）。按 §21a 路由补：
+- **缺 tier**（创作票——`episode`/`arc-design`/`outline`——**恰一** tier 缺失）：
+  未标 tier 的创作票对两个拾取查询**都不可见**（§4）。**`milestone-eval` 票无 tier**
+  （evaluator 按 `milestone-eval` 子类型标签拾取，不经 tier 切片，§4）——**不得**对它
+  报「缺 tier」。按 §21a 路由补：
   `keystone` 集 / arc-design ⇒ `story-designer`；其余 `episode` ⇒ `episode-writer`；
   单从标题/子类型判不明 ⇒ 旗标，不猜。
 - **keystone 票 tier ≠ story-designer**：挂 `keystone` 却 tier=`episode-writer`（§21a
@@ -178,18 +182,25 @@ sweep 是 hygiene-only，**从不 file 票、从不 revert、从不改正文/账
   （§9）——别抢它们的判断，只保证没东西**隐形**。
 - **终态票**（`Done`/`Canceled`/`Duplicate`）**永不触碰**。
 
-### Job 7 — 板健康摘要（只报告，零变更）
+### Job 6.5 — keystone-stall 护栏（§1 固定 Job；只旗标，零变更）
+**这是把 §1「跳过留待」silent stall 浮出的唯一机制**，每 fire 必查，不只是探针条件。
+判据**只用 frontmatter 年龄，机械可判**：`∃` 带 `keystone` 标签的 `In Review` 票，
+`updated` 陈旧 > 阈值 T（默认 30min）**且** assignee 为空或陈旧 ⇒ 在板健康 digest
+（Job 7）**旗标**：`keystone 集 <ID> 停滞 >T，需顶配 reviewer`。「是否真有顶配
+reviewer fire 在排」由看到旗标的操作者/launcher 判断——sweep 不判 reviewer 档位、
+不改票状态、不催任何 agent。
 算一屏健康快照——纯信号，帮操作者与其他 agent 看见系统性漂移：
 - **open 票龄**：最老 `In Review` / `In Progress` 票的滞留时长（大数 = 验收/生产滞后）；
 - **blocked 数** 按 `Bail-shape`（§9）分组（一堆 `external-prereq` = 循环在等操作者；
   `fix-exhausted` 堆积 = 三级路由用尽的人工停靠积压）；
 - **needs-\* 积压**：`needs-showrunner`/`needs-reviewer`/`needs-designer` 各计数；
-- 本 fire 修了什么（Job 1-4）+ 为操作者旗标了什么（Job 5-6 及一切「不猜」项）。
+- 本 fire 修了什么（Job 1-4）+ 为操作者旗标了什么（Job 5-6.5 及一切「不猜」项，
+  含 keystone-stall 旗标）。
 
 ## 2. Guardrails
 - **report-don't-mutate（宪章）**：只做 Job 1-4 + Job 3 的机械修复（改标签/补 tier/补
   `Episode:`/promote/补关/回收孤儿/清陈旧锁）。**绝不**验收、写正文/账本、`git` 提交、
-  file 任何 Feature/Bug/Improvement、或推进任何创作工序。Job 5/6 的稽核发现**只旗标**。
+  file 任何 Feature/Bug/Improvement、或推进任何创作工序。Job 5/6/6.5 的稽核发现**只旗标**。
 - **§2 安全边界**：项目 + `writing-loop` 双重限定；只 glob 本项目板；绝不碰无标签票；
   一次一票；绝不批量；板目录外零写。
 - **§17 不自改治理文件**：**绝不**改 conventions / 任何 SKILL.md / craft-rules /

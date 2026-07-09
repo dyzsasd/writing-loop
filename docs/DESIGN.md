@@ -1,5 +1,9 @@
 # writing-loop 设计文档（v2 — 经 4 视角对抗性评审修订）
 
+> **定位注记**：本文档是**设计决策日志**（为什么这样设计+评审裁决史）；机制的
+> **现行规范**以 `references/conventions.md` 为准，两者不一致时以 conventions
+> 为准，本文档不随每次机制微调回写。
+
 > 基于 dev-loop v1.1.0 机制骨架的自治 AI 短剧编剧团队。workspace 中每个 project =
 > 一部剧本；立项两式：小说改编 / 原创。设计输入：22 个示例剧本六组格式分析、
 > 集间机制专项（R1-R7）、citron-script 尸检（10 条机制级教训）、行业三方调研、
@@ -88,7 +92,7 @@ outline 定稿后的结构性变更（结局/卡点/单元表）重过 evaluator
   dedupe、blocked/bail-shape 全部原样。
 - **Owner 按票类**（v2 修订）：`episode` 票（含 direct-write 重写票）owner=**reviewer**
   （Feature 中的显式例外——离观众最近的产物必须独立验收）；outline/arc-design/
-  milestone-eval/立项票 owner=showrunner；Bug owner=reviewer；Improvement 默认
+  milestone-eval/立项票 owner=showrunner；Bug owner=reviewer（market 子标签除外⇒showrunner）；Improvement 默认
   showrunner（reviewer 所 file 归 reviewer）。sweep 错标清单同步（episode+Feature+
   reviewer 合法）。
 - **子票放行**（v2 写死）：大纲门 pass ⇒ **一次性 promote 全部子票，父票最后 Done**
@@ -246,3 +250,4 @@ Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 p
 - [34] 主动性字段 + 被动率滑窗 → §6
 - [35] 改编断言（对齐表/名场面 keystone/原著对照/忠实度入节拍单）→ §4
 - [37] 续季钩规划 + 兼容断言 → §2/§4
+- 本轮全面评审（6 视角+Codex 二审，80 findings）的修复清单见 git log；critical：punch-up 双签死锁/showrunner 探针漏 Job C 触发/ep-writer 探针过窄/Blocked-by 无解除路径/GUIDE 缺 market-watch。

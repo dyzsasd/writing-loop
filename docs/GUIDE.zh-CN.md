@@ -9,7 +9,7 @@
 
 ## 前提
 
-- 已装好 **Claude Code**（本项目是一套 Claude Code 插件）。
+- 已装好 **Claude Code 或 Codex** CLI——两个皆可（安装命令见 README；本指南以 Claude Code 为例）。
 - 本机有 `git`。
 - 准备好小说的**纯文本**（`.txt` / `.md`；PDF/EPUB 请先转成文本）。
 
@@ -84,7 +84,7 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 - **首张大纲票**：file 一张 outline 工单（owner=showrunner，tier=story-designer）。
 - **VERIFY**：回读校验并告诉你下一步。
 
-> 建议第一次先加一句「用 dry-run 模式」，它只打印“会做什么”、不写盘不 commit——确认采访结论无误后再切 `live` 正式跑。
+> `add-script` 采访时会问 mode——首次回答 `dry-run`，它只打印“会做什么”、不写盘不 commit。确认采访结论无误后，再跑一次 `/writing-loop:add-script` 回答 `live` 正式立项。
 
 ---
 
@@ -95,14 +95,17 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 **第一轮（改编线的自然顺序）：**
 
 ```
-/writing-loop:showrunner-agent       # 把大纲票放行到 Todo；后续管方向、门禁、里程碑
+/writing-loop:showrunner-agent       # 管方向、门禁、里程碑与后续放行（大纲票已由 add-script 直接 file 进 Todo——§5a 豁免，story-designer 直接可拾）
 /writing-loop:story-designer-agent    # 读拆书三清单 → 写 outline.md + bible；再逐个 arc 写「逐集节拍单」
+/writing-loop:market-watch-agent      # 带日期的题材窗口评估——大纲定稿门的市场层评分依赖它；缺数据时该项 inconclusive，红线类会人工停靠等你补
 /writing-loop:evaluator-agent         # 大纲定稿门（市场层+内容层预评+合规）
 /writing-loop:episode-writer-agent    # 按集号顺序写正文；keystone 集由 story-designer 亲写
 /writing-loop:reviewer-agent          # 逐集独立审读（三分类 + 邻集对读 + 每条论断带原文引用），fail 走三级回炉
 ```
 
 之后就是**循环推进**：`showrunner → story-designer → episode-writer → reviewer → evaluator → script-doctor`，反复轮转，直到里程碑。
+
+**keystone 档位提醒**：keystone 集（前 3 集 / 卡点集 / 终局）的验收需要顶配档 reviewer——用 `opus`/`max` 跑 `/writing-loop:reviewer-agent`，否则该集会被跳过留待更高档 fire 并卡住流水线（sweep 会在板健康 digest 旗标提醒你）。
 
 你不用记精确顺序——**看板会强制真实次序**：前一集没 Done 就写不了下一集；大纲没过门子票不放行；里程碑门用 `Blocked-by` 挡住越界生产。任何 agent 跑一次没事做，就报告“无活”并退出，你接着跑下一个即可。
 
@@ -122,6 +125,15 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 | 卡二 / 卡三 / 完本门 | 中段 / 2/3 处 / 全剧完成 | 逐级评分，完本门给 S+~C 定级 |
 
 **一卡门后是「操作者决策点」**——系统会停下等你拍板：拿一卡包去投放测数据，还是直接续产。这是你介入的主控点。
+
+---
+
+## 系统怎么找你（人机交互回路）
+
+- **人工停靠票**：真正需要你决策的事（方向变更、一票否决、fix-exhausted、等投放数据）会以停靠票形式出现。配置了 `comms.provider` 时，系统会向带外通道推送一条通知（票 ID + 需要的决定）；未配置则每天看 daily digest 的 needs-attention 节（在 `~/dramas/.writing-loop/my-drama/reports/`）。
+- **门后等待**：一卡门后系统停下等你决策，不会自行续产（见第 4 步）。
+- **给某个 agent 反馈**：对它的某份报告写一个 `<报告名>.review.md` **兄弟文件**（与被点评的报告同在 `~/dramas/.writing-loop/my-drama/reports/` 目录）。该 agent 下次运行会把你的点评蒸馏进自己的 lessons 分节，长期改变行为。
+- **评估报告**：在剧本 repo 的 `evaluation/` 里。
 
 ---
 
@@ -174,9 +186,10 @@ cp ~/Downloads/百万打工嫂.txt ~/dramas/nanny-revenge/source/novel.txt
 # monetization=paid-app，format=ai-anime，totalEpisodes=40，一卡=第 10 集
 ```
 ```
-# 4. 驱动团队（确认无误后 config 切 live，然后循环轮转）
+# 4. 驱动团队（dry-run 确认结论后，再跑一次 add-script 答 live 正式立项，然后循环轮转）
 /writing-loop:showrunner-agent
 /writing-loop:story-designer-agent
+/writing-loop:market-watch-agent
 /writing-loop:evaluator-agent
 /writing-loop:episode-writer-agent
 /writing-loop:reviewer-agent
@@ -198,5 +211,5 @@ cp ~/Downloads/百万打工嫂.txt ~/dramas/nanny-revenge/source/novel.txt
 
 ---
 
-想直接看效果？把一部小说文本给我，或指定 `examples/` 里的某一部，我可以实跑一遍
+想直接看效果？把你手头的任一部小说文本给我，我可以实跑一遍
 `add-script` + 第一轮，把真实产物（大纲、前几集、评估报告）生成出来。

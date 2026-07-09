@@ -11,7 +11,8 @@
 
 ## Prerequisites
 
-- **Claude Code** installed (this project is a Claude Code plugin).
+- **Claude Code or Codex** CLI installed — either works (install commands in the
+  README; this guide uses Claude Code in its examples).
 - `git` on your machine.
 - The novel as **plain text** (`.txt` / `.md`; convert PDF/EPUB to text first).
 
@@ -111,9 +112,10 @@ Then `add-script` automatically:
   tier=story-designer).
 - **VERIFY**: re-reads, validates, and tells you the next step.
 
-> For the first run, add “use dry-run mode” — it only prints what it *would* do,
-> writing nothing and committing nothing. Confirm the interview conclusions, then
-> switch to `live`.
+> The `add-script` interview asks for the mode — answer `dry-run` the first time:
+> it only prints what it *would* do, writing nothing and committing nothing. Once
+> you've confirmed the interview conclusions, run `/writing-loop:add-script` again
+> and answer `live` to onboard for real.
 
 ---
 
@@ -126,8 +128,9 @@ from the board + repo and does whatever its role has ready, or no-ops. They hand
 **First cycle (the natural order for adaptation):**
 
 ```
-/writing-loop:showrunner-agent       # promotes the outline ticket to Todo; then owns direction, gates, milestones
+/writing-loop:showrunner-agent       # owns direction, gates, milestones and later releases (the outline ticket was filed straight to Todo by add-script — §5a exemption — so the story-designer can pick it up directly)
 /writing-loop:story-designer-agent    # reads the teardown worksheets → writes outline.md + bible; then per-arc beat cards
+/writing-loop:market-watch-agent      # dated genre-window assessment — the outline-lock gate's market layer depends on it; missing data makes that item inconclusive, and red-line cases park for you to supply it
 /writing-loop:evaluator-agent         # outline-lock gate (market + content pre-score + compliance)
 /writing-loop:episode-writer-agent    # writes episodes in order; keystone episodes are written by the Story-Designer
 /writing-loop:reviewer-agent          # independent per-episode review (three-way classification + adjacent read + quoted assertions); fails route three ways
@@ -135,6 +138,11 @@ from the board + repo and does whatever its role has ready, or no-ops. They hand
 
 After that it's a **rotation**: `showrunner → story-designer → episode-writer →
 reviewer → evaluator → script-doctor`, repeat, until a milestone.
+
+**Keystone-tier reminder**: keystone episodes (first 3 / paywall episodes / finale)
+must be reviewed by a top-tier reviewer — run `/writing-loop:reviewer-agent` on
+`opus`/`max`, otherwise the episode is skipped for a higher-tier fire and the
+pipeline stalls (sweep flags it in the board-health digest).
 
 You don't need to memorize the exact order — **the board enforces the real
 ordering**: episode N can't be written until `ep-(N-1)` is Done; child tickets
@@ -162,6 +170,23 @@ The Evaluator produces reports at key points (into `evaluation/`):
 **After the first-paywall gate comes the "operator decision point"** — the system
 stops and waits for your call: take the pack out to test with real data, or keep
 producing. This is your main control lever.
+
+---
+
+## How the system reaches you (the human-in-the-loop circuit)
+
+- **Human-parked tickets**: anything only you can decide (direction change, veto,
+  fix-exhausted, waiting on launch data) surfaces as a parked ticket. With
+  `comms.provider` configured, the system pushes one out-of-band notification
+  (ticket ID + the decision needed); without it, check the daily digest's
+  needs-attention section (under `~/dramas/.writing-loop/my-drama/reports/`).
+- **Waiting at the gate**: after the first-paywall gate the system stops and waits
+  for your decision — it never keeps producing on its own (see Step 4).
+- **Giving an agent feedback**: write a `<report-name>.review.md` **sibling file**
+  next to that agent's report (same `~/dramas/.writing-loop/my-drama/reports/`
+  directory). On its next run the agent distills your notes into its own lessons
+  section, changing its behavior durably.
+- **Evaluation reports**: under the script repo's `evaluation/`.
 
 ---
 
@@ -220,9 +245,10 @@ cp ~/Downloads/nanny-novel.txt ~/dramas/nanny-revenge/source/novel.txt
 # monetization=paid-app, format=ai-anime, totalEpisodes=40, card1=episode 10
 ```
 ```
-# 4. Drive the room (switch config to live once confirmed, then rotate)
+# 4. Drive the room (after the dry-run checks out, run add-script again answering live, then rotate)
 /writing-loop:showrunner-agent
 /writing-loop:story-designer-agent
+/writing-loop:market-watch-agent
 /writing-loop:evaluator-agent
 /writing-loop:episode-writer-agent
 /writing-loop:reviewer-agent
@@ -252,6 +278,6 @@ two tracks fork only before the outline and converge after.
 
 ---
 
-Want to see it in action? Give me a novel's text, or point me at one under
-`examples/`, and I can actually run `add-script` + the first cycle and produce real
-outputs (outline, first few episodes, evaluation report).
+Want to see it in action? Give me any novel text you have on hand, and I can
+actually run `add-script` + the first cycle and produce real outputs (outline,
+first few episodes, evaluation report).

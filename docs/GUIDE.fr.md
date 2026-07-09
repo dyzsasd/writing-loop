@@ -11,7 +11,8 @@
 
 ## Prérequis
 
-- **Claude Code** installé (ce projet est un plugin Claude Code).
+- **Claude Code ou Codex** CLI installé — les deux conviennent (commandes
+  d'installation dans le README ; ce guide prend Claude Code comme exemple).
 - `git` sur votre machine.
 - Le roman en **texte brut** (`.txt` / `.md` ; convertissez d'abord PDF/EPUB en texte).
 
@@ -115,9 +116,10 @@ Ensuite `add-script` automatiquement :
   tier=story-designer).
 - **VERIFY** : relit, valide et vous indique l'étape suivante.
 
-> Pour le premier passage, ajoutez « en mode dry-run » — elle imprime seulement ce
-> qu'elle *ferait*, sans rien écrire ni committer. Confirmez les conclusions de
-> l'entretien, puis passez en `live`.
+> L'entretien d'`add-script` demande le mode — répondez `dry-run` la première fois :
+> elle imprime seulement ce qu'elle *ferait*, sans rien écrire ni committer. Une fois
+> les conclusions de l'entretien confirmées, relancez `/writing-loop:add-script` et
+> répondez `live` pour l'accueil réel du projet.
 
 ---
 
@@ -131,8 +133,9 @@ transmettez jamais le travail à la main.
 **Premier cycle (l'ordre naturel pour l'adaptation) :**
 
 ```
-/writing-loop:showrunner-agent       # promeut le ticket de plan vers Todo ; puis dirige direction, portes, jalons
+/writing-loop:showrunner-agent       # dirige direction, portes, jalons et libérations ultérieures (le ticket de plan a été créé directement en Todo par add-script — exemption §5a — le story-designer peut le prendre directement)
 /writing-loop:story-designer-agent    # lit les fiches de décorticage → écrit outline.md + la bible ; puis les fiches de beats par arc
+/writing-loop:market-watch-agent      # évaluation datée de la fenêtre de genre — la couche marché de la porte de verrou du plan en dépend ; données manquantes = item inconclusive, et les cas ligne-rouge se garent en attendant que vous les fournissiez
 /writing-loop:evaluator-agent         # porte de verrou du plan (marché + pré-notation contenu + conformité)
 /writing-loop:episode-writer-agent    # écrit les épisodes dans l'ordre ; les épisodes pivots sont écrits par le Story-Designer
 /writing-loop:reviewer-agent          # révision indépendante par épisode (classification à trois voies + lecture adjacente + assertions citées) ; les échecs routent de trois façons
@@ -140,6 +143,12 @@ transmettez jamais le travail à la main.
 
 Ensuite c'est une **rotation** : `showrunner → story-designer → episode-writer →
 reviewer → evaluator → script-doctor`, à répéter jusqu'à un jalon.
+
+**Rappel palier keystone** : les épisodes keystone (3 premiers / épisodes de paywall
+/ finale) doivent être validés par un reviewer au palier maximal — lancez
+`/writing-loop:reviewer-agent` en `opus`/`max`, sinon l'épisode est sauté en attente
+d'un fire de palier supérieur et le pipeline se bloque (sweep le signale dans le
+digest de santé du tableau).
 
 Vous n'avez pas besoin de mémoriser l'ordre exact — **le tableau impose l'ordre
 réel** : l'épisode N ne peut s'écrire tant que `ep-(N-1)` n'est pas Done ; les
@@ -167,6 +176,25 @@ L'Evaluator produit des rapports aux points clés (dans `evaluation/`) :
 **Après la porte du premier-paywall vient le « point de décision opérateur »** — le
 système s'arrête et attend votre choix : sortir le pack pour tester avec des données
 réelles, ou continuer à produire. C'est votre principal levier de contrôle.
+
+---
+
+## Comment le système vous joint (la boucle humain-dans-la-boucle)
+
+- **Tickets garés (décision humaine)** : tout ce que vous seul pouvez décider
+  (changement de direction, veto, fix-exhausted, attente de données de diffusion)
+  apparaît comme un ticket garé. Avec `comms.provider` configuré, le système pousse
+  une notification hors-bande (ID du ticket + décision attendue) ; sinon, consultez
+  la section needs-attention du digest quotidien (sous
+  `~/dramas/.writing-loop/my-drama/reports/`).
+- **Attente à la porte** : après la porte du premier-paywall, le système s'arrête et
+  attend votre décision — il ne continue jamais à produire de lui-même (voir étape 4).
+- **Donner un retour à un agent** : écrivez un fichier **frère**
+  `<nom-du-rapport>.review.md` à côté du rapport de cet agent (même répertoire
+  `~/dramas/.writing-loop/my-drama/reports/`). Au passage suivant, l'agent distille
+  vos remarques dans sa propre section de lessons et change durablement de
+  comportement.
+- **Rapports d'évaluation** : sous `evaluation/` du repo de scénario.
 
 ---
 
@@ -225,9 +253,10 @@ cp ~/Downloads/roman-nounou.txt ~/dramas/nanny-revenge/source/novel.txt
 # monetization=paid-app, format=ai-anime, totalEpisodes=40, card1=épisode 10
 ```
 ```
-# 4. Piloter la room (passez le config en live une fois confirmé, puis faites tourner)
+# 4. Piloter la room (dry-run confirmé → relancez add-script en répondant live, puis faites tourner)
 /writing-loop:showrunner-agent
 /writing-loop:story-designer-agent
+/writing-loop:market-watch-agent
 /writing-loop:evaluator-agent
 /writing-loop:episode-writer-agent
 /writing-loop:reviewer-agent
@@ -259,6 +288,6 @@ et convergent ensuite.
 
 ---
 
-Envie de le voir à l'œuvre ? Donnez-moi le texte d'un roman, ou pointez-moi vers l'un
-de ceux sous `examples/`, et je peux réellement lancer `add-script` + le premier cycle
+Envie de le voir à l'œuvre ? Donnez-moi le texte de n'importe quel roman que vous
+avez sous la main, et je peux réellement lancer `add-script` + le premier cycle
 et produire de vraies sorties (plan, premiers épisodes, rapport d'évaluation).

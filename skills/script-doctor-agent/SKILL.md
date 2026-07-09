@@ -55,7 +55,11 @@ SHA；两者相等 ⇒ 谓词为空。全程**不读 conventions/craft-rules/les
 **单向安全（保守超集，宁假命中勿假退出）**：任一读取失败/不确定 ⇒ 当作命中走全 boot（多付一次
 boot，不漏审）。`lastAuditSha` 为 null（首跑）、`git`/`state` 读不到、config 定位不到项目均命中。并入
 逃逸口 **②孤儿**：`∃ In Progress`＋doctor tier＋assignee 陈旧（>60min，§7）⇒ 命中（探针只 glob 本
-项目板 `tickets/*.md` 解析 §18 稳定字段，仍不读 conventions）。`dry-run` 下照跑（只读）。
+项目板 `tickets/*.md` 解析 §18 稳定字段，仍不读 conventions）。并入逃逸口 **③报告结算**（§0 铁律）：
+`reports/` 有未分发的 `*.review.md`（一次 glob）或到期 weekly/monthly 汇总（state 时间戳）⇒ 即使
+`episodes/` SHA 未变也命中走全 boot——§22 义务不落板，纯 SHA 谓词看不见它。（逃逸口①对本角色为空：
+§4 needs-\* 闭集只有 showrunner/reviewer/designer，不存在 needs-doctor；④仅 showrunner。）
+`dry-run` 下照跑（只读）。
 
 **先读共享约定**（状态机 §3 / 标签 §4 / 安全边界 §2 / 观察型契约 §21 / 版本纪律与
 change-gate §19 / 配置 §11）——冲突时它覆盖本文件：
@@ -77,8 +81,8 @@ fire 重试。唯一跨 fire 携带的是数据目录 `state/` 下的 `doctor-st
 **标准 boot 序列（conventions §0 六步）**：① 读本文件 → ② 读 workspace 配置
 （`<workspace>/.writing-loop/config.json`，§11）定位项目条目，读不到 ⇒ 问操作者，**不猜路径** →
 ③ 确认 backend（v1 恒为 local 文件板 §18）与数据目录 → ④ 读 lessons（§14：`## Shared`
-＋ `## script-doctor` 分节，规则可预先改变本 fire 动作） → ⑤ 报告结算（§22：到期
-daily/weekly 汇总；分发未消化的 `*.review.md` 点评——被点评则蒸馏为自己 lessons 分节
+＋ `## script-doctor` 分节，规则可预先改变本 fire 动作） → ⑤ 报告结算（§22：到期的
+weekly/monthly 汇总从 daily 滚出；分发未消化的 `*.review.md` 点评——被点评则蒸馏为自己 lessons 分节
 一条，§22 例外条款） → ⑥ 一行开场：项目、mode（live/dry-run）、intake.mode、本 fire
 要审的**维度**。
 
@@ -190,10 +194,9 @@ grep/读相关正文与账本，收集**具体**发现，每条带**集号 + 正
   连续性缺陷按 §5 rank 定优先级（`continuity` = rank 3）。
 - **非缺陷打磨类（未踩硬规则的软趋势）**（声纹微漂、尚在阈值内的同构苗头、可增强的节奏
   机会）⇒ **Improvement**：`writing-loop` + `Improvement` + 子类型 + **owner=`showrunner`**
-  （reviewer 未 file 的 Improvement 归 showrunner，§4）。**tier**：conventions §4 只对
-  「创作票（Feature）」强制 tier；doctor 的打磨 Improvement 非创作票，§4/§5 未明确其拾取
-  tier（见文末 notes 记录的规范缺口）——本 fire 不自造 tier 规则，file 后挂 Backlog 交
-  showrunner 梳理时按板裁定归属。
+  （reviewer 未 file 的 Improvement 归 showrunner，§4）。**tier 可不带**（§4）：
+  Improvement 的 tier 由 showrunner 在 §5a 梳理放行前赋予（doctor 所 file 的 craft 打磨
+  默认 episode-writer）；无 tier 的 Improvement 停在 Backlog 等赋 tier + 放行，不算搁浅。
 
 **一律落 `Backlog`（§5a）**——只有 showrunner 放行到 Todo；doctor 不自放行。票体：精确
 出处（集号 + 场号/行号 + 正文引文或账本行）、症状、深层诊断、（可给）候选 fix 方向——
