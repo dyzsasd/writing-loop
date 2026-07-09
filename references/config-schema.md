@@ -75,9 +75,12 @@ state/                  # agent 小状态（showrunner 的 lens 轮换、doctor 
 ## 剧本 repo 内文档树（由 add-script scaffold；详见 conventions §19）
 
 ```
-bible/{north-star,characters,world}.md   outline.md   arcs/   ledgers/{foreshadow,story-state}.md
+bible/{north-star,characters,world}.md   outline.md   arcs/
+ledgers/{foreshadow,story-state,production}.md   ledgers/archive/（滚存目录）
 episodes/   evaluation/   source/（改编立项）
 ```
+
+（三个活跃账本 foreshadow/story-state/production + archive/ 滚存目录，§19 单一真相源。）
 
 ## 校验规则（add-script 写入前必须通过）
 - `repoPath` 存在且是 git repo；board 目录专用（空或 writing-loop 脚手架）。

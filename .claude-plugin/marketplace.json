@@ -1,7 +1,7 @@
 {
   "name": "writing-loop",
   "owner": { "name": "Shuai" },
-  "description": "Autonomous short-drama writers' room: Showrunner/Story-Designer/Episode-Writer/Reviewer plus Script-Doctor, Evaluator, Sweep and Reflect, coordinated through ticket state on a local board, with a story bible + beat-card + ledger document system built to keep 60-100 episode vertical micro-dramas coherent.",
+  "description": "Autonomous short-drama writers' room: Showrunner/Story-Designer/Episode-Writer/Reviewer plus Script-Doctor, Evaluator, Market-Watch, Reflect and Sweep — nine agents coordinated through ticket state on a local board, with a story bible + beat-card + ledger document system built to keep 60-100 episode vertical micro-dramas coherent.",
   "plugins": [
     {
       "name": "writing-loop",
