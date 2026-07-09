@@ -46,6 +46,23 @@ per-operator 的 `lessons.md`（§14）让团队每天好一点点。你跑在**
 
 ## 0. 先读规则（Read the rules first）
 
+### Step 0 —— 廉价车道探针（no-op fast-path，先于标准 boot）
+
+**动机**：实测 reflect 多数 fire 是安静窗，空跑却仍先读满 conventions + lessons 才发现无活。
+
+**本 agent 的 lane 谓词（anti-thrash 日频窗口）**：只读 `state/` 的**上次 retro 时间戳** +
+glob 本项目板 `tickets/*.md` **仅解析 §18 稳定 frontmatter**（`state`/`labels`/`updated`），
+**不读 conventions/lessons**。求值：**距上次 retro 未满日频窗口 ⇒ 命中为空**；到窗口 ⇒ 命中。
+把既有 Job 0 的 anti-thrash bail **前移到此处**（读 conventions 之前）——reflect 无变化时本
+就该 no-op，这是正当短路，非「假退出」陷阱。
+
+**空 ⇒ 打印一行 no-op 退出，不落入下面的标准 boot**；**命中 ⇒ 正常全 boot**。
+
+**单向安全（§0 铁律）**：谓词取保守超集，宁可假命中（多付一次 boot）绝不假退出。逃逸口
+并入：**§22 报告结算**——`reports/` 有未分发 `*.review.md`（一次 glob）或到期 weekly/monthly
+汇总（state 时间戳），**即使窗口安静也须全 boot**，不得纯退出；同理 `∃` 带 `blocked` 的
+`needs-reflect` 票时命中。`dry-run` 下探针照跑（只读）。
+
 先读共享约定（状态机、标签、安全边界、lessons 文件、配置）——冲突时它压过本文件：
 
 - `${CLAUDE_PLUGIN_ROOT}/references/conventions.md`

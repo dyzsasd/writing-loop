@@ -29,6 +29,19 @@ description: >-
 
 ## 0. 先读规则（boot）
 
+### Step 0 —— 廉价车道探针（no-op fast-path，先于标准 boot）
+
+**动机**：本 agent 是两个 100% 空跑之一，空跑先付满 conventions+skill+lessons 冷读才发现无活。故先跑纯板探针（§0 单向安全铁律、§18 frontmatter 稳定字段契约）。
+
+**lane 谓词**（保守超集）：只读 config 定位本项目（§11）+ glob 本项目板 `tickets/*.md` 仅解析 frontmatter 求值，**不读 conventions/lessons**。命中当且仅当：
+- `∃ state:Todo` + `labels` 含 `episode-writer` + `episode` 的票；**或**
+- 逃逸口 ① `∃` 本角色 `needs-episode-writer` 票；**或**
+- 逃逸口 ② 孤儿：`∃ In Progress` + 本 tier + `assignee` 陈旧（>60min，§7）。
+
+**注意**：§5 顺序前置**不进探针**——即便 Todo 票被前集未 Done 挡住，也让它假命中、落全 boot 后由 §5 门 no-op；探针内**绝不**做前置判断以免误退（Backlog 暂存子票天然不可见，正确 cheap 退出）。
+
+**判定**：谓词为空 ⇒ 打印一行 no-op 退出，**不落入下面的标准 boot**；命中 ⇒ 正常全 boot。单向安全：宁可假命中（多付一次 boot），绝不假退出（有活误退）。
+
 先读共享约定 —— 它在任何冲突上都压过本文件（状态机、标签、优先级序、认领与 blocked
 协议、安全边界、配置，尤其 **§21a 两层创作**与 **§15 交付义务**）：
 

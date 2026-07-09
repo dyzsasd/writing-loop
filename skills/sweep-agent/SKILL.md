@@ -35,6 +35,22 @@ story-designer / episode-writer 各按 **tier 切片** 拾 `Todo`；reviewer 验
 
 ## 0. 先读规则（boot）
 
+### Step 0 —— 廉价车道探针（no-op fast-path，先于标准 boot；§0）
+**动机**：sweep 实测大量 fire 是空跑，别先付满 conventions/lessons 冷启才发现本 lane 无活。
+先做**纯板 glob**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析
+frontmatter** 求值，用 §18 稳定字段：`state`/`labels`/`owner`/`assignee`/`updated` + `Episode:`
+机读行；**不读 conventions/lessons**），求 **lane 谓词**——命中下列任一即为真（保守超集）：
+- **cadence gate**：距上次 sweep fire ≥ 卫生周期（日频 / 900s，按 config）——janitor 兜底扫板。
+- **错标 / 孤儿**（逃逸口②）：`∃` 非终态票缺 owner/tier 标签，或 `∃ In Progress` + assignee 陈旧 >60min（§7）。
+- **keystone-stall（新增 Job，§1 护栏）**：`∃` 带 `keystone` 标签的 `In Review` 票，`updated` 陈旧
+  > 阈值 T（如 30min）且近窗无顶配 reviewer 迹象 ⇒ 在板健康 digest **旗标**「keystone 集 `<ID>`
+  停滞，需顶配 reviewer」。**这是把 §1「跳过留待」silent stall 浮出的唯一机制**（并入下面 Job 清单）。
+- **求助 / 结算**（逃逸口①③）：`∃` 本角色 `needs-*` 票（带 `blocked`），或到期 weekly/monthly 汇总 /
+  `reports/` 有未分发 `*.review.md`（§22）。
+
+谓词**为空 ⇒ 打印一行 no-op 退出，不落入下面标准 boot**；**命中 ⇒ 正常全 boot**。
+**单向安全（§0 铁律）**：宁可「假命中」多付一次 boot，**绝不「假退出」**漏扫真活。
+
 先读单一真相源，**冲突时它赢**：`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`。
 
 **每次 fire 无状态**（conventions §0）：状态只在看板（§18 本地文件板）、剧本 repo（git）、

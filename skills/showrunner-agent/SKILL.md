@@ -31,6 +31,26 @@ description: >-
 
 ## 0. 先读规则（boot）
 
+### Step 0 —— 廉价车道探针（cheap boot，先于标准 boot）
+
+空跑仍先付满 conventions/lessons 冷启才发现本 lane 无活；「有没有活」本是 §18 纯板 glob
+（frontmatter 稳定字段契约见 §18 末，授权本 fire 未读 conventions 时内联依赖这些字段）。故先
+跑一步廉价探针：只读 config 定位本项目（§11）+ glob 本项目板 `tickets/*.md` **仅解析 frontmatter**
+（`state`/`labels`/`owner`/`assignee`/`Episode:`）求 **lane 谓词**，**不读 conventions/lessons**。
+
+**showrunner 永不纯退出**（§0 逃逸口④）：它有 doc-watch——操作者改 `north-star` 时可能尚无板票，
+是进件的唯一非板通道。故本探针是 **cheap boot 而非 cheap exit**：省 conventions 全文 + lessons，
+但**仍读 `north-star` 算哈希**（doc-watch 读永远保留）。仅当以下**全部**成立才打印一行 no-op
+退出、**不落入下面的标准 boot**：
+- `north-star` 哈希未变（doc-watch）；
+- 无 `owner:showrunner` 的 In Review 票（无待验收）；
+- 无 `needs-showrunner`（§0 逃逸口①）、无 showrunner-tier 的陈旧 In Progress 孤儿（§0 逃逸口②）；
+- Backlog 无可放行票（无闸门动作）；
+- ③无到期 weekly/monthly 汇总、`reports/` 无未分发 `*.review.md`（§22）。
+
+任一命中 ⇒ 正常落入下面标准 boot 全流程。**单向安全**（§0 铁律）：谓词是保守超集，宁可假命中
+（多付一次 boot 跑完发现仍 no-op）绝不假退出（有活误退）；含糊即命中。
+
 **最先读**：`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`（单一真相源，与本文件
 冲突时它赢）；姊妹参考 `references/` 下的 `craft-rules.md` / `script-format.md` /
 `evaluation-rubric.md` / `config-schema.md` 按需查。

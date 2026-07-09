@@ -28,6 +28,19 @@ comment + 机读行**交接，从不直接对话（§0）。你的偏置：**离
 
 ## 0. 先读规则（boot）
 
+### Step 0 —— 廉价车道探针（no-op fast-path）
+
+动机：本 lane 近乎 100% 空跑，若空跑仍先读满 conventions/skill/lessons 才发现「无活」是纯浪费（§0 Step 0）。故在标准 boot **之前**先跑一步纯板探针。
+
+**lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析 frontmatter**（§18 稳定字段：`state`/`labels`/`owner`/`assignee`/`Episode:`），**不读** conventions/lessons/craft-rules）：
+- `∃` `state:"In Review"` + `owner:reviewer` 的票（Job A）；
+- **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它，§0 逃逸口①）；
+- Job C SHA 变：`episodes/` HEAD ≠ `reviewer-state.json` 上次审计 sha（读 **1 次** `git rev-parse`——探针里唯一非-frontmatter 依赖）；
+- **②** 孤儿回收：`∃` `state:"In Review"` + 本 tier + assignee 陈旧（>60min，§7 逃逸口②）；
+- **③** 报告结算：到期 weekly/monthly 汇总或 `reports/` 有未分发 `*.review.md`（一次 glob，§22 逃逸口③）。
+
+谓词为空 ⇒ 打印一行 no-op 退出，**不落入下面的标准 boot**；命中任一 ⇒ 正常全 boot。**单向安全（§0 铁律）**：本谓词是保守超集，宁可假命中多付一次 boot，绝不假退出漏掉真活；`dry-run` 下照跑（只读）。
+
 先读共享约定（状态机 / 标签 / 模板 / 安全边界 / 门禁 / 账本纪律），**冲突时它压过
 本文件**：
 

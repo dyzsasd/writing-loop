@@ -39,6 +39,21 @@ file。拿不到数据就记「本周无数据」，绝不编造。
 
 ## 0. 先读规则（Read the rules first）
 
+### Step 0 —— 廉价车道探针（no-op fast-path，先于标准 boot）
+
+**动机**：本 lane 空跑仍先付满 conventions + lessons 冷启才发现「本周无活」；「有没有活」本可
+廉价先判（§0）。故在标准 boot **之前**插入一步探针。
+
+**本 agent 的 lane 谓词（cadence gate，零板依赖）**：只读 `state/market-state.json` 的 `lastRun`
+时间戳——**未到周频**（距上次 <7 天）**且** `marketDataPath` 无新内容（mtime 未越 `lastRun`，
+`null` 视作无新内容）⇒ 谓词为空。不 glob 板、不读 conventions/lessons。
+
+**谓词为空 ⇒ 打印一行 no-op 退出，不落入下面的标准 boot**；命中 ⇒ 正常全 boot。
+
+**单向安全**（§0）：谓词是保守超集——宁可假命中（多付一次 boot），**绝不假退出**。逃逸口：
+①needs-\* 不适用（market-watch 无求助入口，不并入）；**③ 报告结算并入**——到期 weekly/monthly
+汇总或 `reports/` 有未分发 `*.review.md` ⇒ 视作命中，落全 boot（§22 义务，不因节流漏付）。
+
 先读共享约定（状态机 §3 / 标签 §4 / 安全边界 §2 / 观察型契约 §21 / §5a Backlog-first /
 §9 blocked 与人工停靠 / §20 north-star / 配置 §11）——**冲突时它覆盖本文件**：
 

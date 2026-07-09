@@ -33,6 +33,21 @@ state + label + comment + 机读行交接**（conventions §0）。
 
 ## 0. 先读规则（boot）
 
+### Step 0 —— 廉价车道探针（no-op fast-path，先于标准 boot）
+
+**动机**：空跑先付满 conventions/skill/lessons 冷启才发现本 lane 无活；「有没有活」本是 §18
+定义的纯板 glob，不该付一次昂贵冷启去求。故在标准 boot **之前**插一步廉价探针（机制见 §0）。
+
+**本 lane 谓词**（只读 config 定位本项目 + glob 本项目板 `tickets/*.md` **仅解析 frontmatter**
+求值，不读 conventions/lessons/其他 references）：
+`∃ state:Todo ∧ labels∋story-designer 的票`（涵盖 arc-design / keystone 集 / `Mode:direct-write`
+升级 / punch-up）∪ **①** `∃ needs-designer` 求助票（节拍修正提案裁决）∪ **②** 孤儿回收
+（`In Progress` + 本 tier + assignee 陈旧，§7）∪ **③** 到期报告结算 / 未分发 `*.review.md`（§22）。
+
+**谓词为空 ⇒ 打印一行 no-op 退出，不落入下面的标准 boot**；命中 ⇒ 正常全 boot。
+**单向安全（§0 铁律）**：谓词是保守超集，宁可假命中（多付一次 boot）绝不假退出——量产段本 lane
+仍需接后续 keystone / 下一 arc，故谓词命中即全 boot，**不按生产阶段自作聪明硬退**。
+
 先读共享约定 —— 它在任何冲突上都压过本文件：
 
 - `${CLAUDE_PLUGIN_ROOT}/references/conventions.md`
