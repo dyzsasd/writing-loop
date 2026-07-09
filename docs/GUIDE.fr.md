@@ -233,6 +233,38 @@ cp -r ~/dramas /nouvel/endroit/dramas   # scénarios + plans + registres + table
 
 ---
 
+## Mettre à niveau le plugin (avec un projet en cours)
+
+**La mise à niveau ne migre aucune donnée** — les formats tableau/registres/repo sont
+stables, et chaque fire d'agent est sans état et relit la spec la plus récente ; mettre
+à niveau = remplacer le plugin + redémarrer les boucles. Cinq étapes :
+
+1. **Arrêter les boucles au bon moment** : pour chaque fenêtre de boucle, attendez la
+   fin du fire en cours (no-op ou terminé), puis Ctrl-C ; si un agent est en plein
+   épisode, laissez-le committer. (Même un kill en plein fire est couvert par la
+   récupération d'orphelins de 60 minutes — vous perdez juste une demi-passe.)
+2. **Mettre à jour le plugin** : dans Claude Code, ouvrez le menu `/plugin` et mettez
+   à jour writing-loop (la source marketplace pointe sur GitHub et tire la nouvelle
+   version) ; sinon, désinstallez puis refaites `marketplace add dyzsasd/writing-loop`
+   + install.
+3. **Vérifier la version** : dans une session neuve, lancez un agent — les agents sans
+   travail doivent sortir en une ligne no-op (pas de long boot) ; ou vérifiez que le
+   cache du plugin montre le nouveau numéro de version.
+4. **Redémarrer les boucles** comme d'habitude. Le premier fire du showrunner fera un
+   boot complet (« premier instantané du tableau = changé ») — c'est normal.
+5. **Revérifier les paliers de modèle** : en phase keystone (3 premiers épisodes /
+   paywall / finale), le reviewer doit tourner au palier maximal (opus/max) — le sweep
+   mis à niveau signale les épisodes keystone bloqués dans son digest.
+
+(Optionnel) Pour adopter la disposition « copier un dossier = migrer » : **déplacez**
+(`mv`, pas copie — deux copies du même projet s'éclipseraient par proximité) l'ancien
+`~/.writing-loop/` dans votre dossier workspace et passez `repoPath` en nom de
+répertoire relatif ; mettez aussi à jour tout chemin codé en dur dans votre script de
+lancement. Ne pas migrer reste pleinement compatible — le nouveau résolveur remonte
+les répertoires et trouve l'ancien `.writing-loop/` dans votre home.
+
+---
+
 ## Un exemple minimal (ce que vous tapez réellement)
 
 ```

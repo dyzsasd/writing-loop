@@ -225,6 +225,37 @@ cp -r ~/dramas /new/place/dramas      # scripts + outlines + ledgers + in-flight
 
 ---
 
+## Upgrading the plugin (with a project in flight)
+
+**Upgrading migrates no data** — board/ledger/script-repo formats are stable, and every
+agent fire is stateless and re-reads the latest spec; upgrading = swap the plugin +
+restart the loops. Five steps:
+
+1. **Stop the loops at a safe moment**: for each agent's loop window, wait until the
+   current fire finishes printing (no-op or done), then Ctrl-C; if an agent is
+   mid-episode, let it commit first. (Even a mid-fire kill is covered by the 60-minute
+   orphan recovery — you just waste half a run.)
+2. **Update the plugin**: in Claude Code, open the `/plugin` menu and update
+   writing-loop (the marketplace source points at GitHub and pulls the new version);
+   failing that, uninstall then re-run `marketplace add dyzsasd/writing-loop` + install.
+3. **Verify the version**: in a fresh session, run any agent — idle agents should
+   exit with a one-line no-op (no long boot); or check that the plugin cache directory
+   shows the new version number.
+4. **Restart the loops** the same way you started them. The first showrunner fire will
+   do one full boot ("first board snapshot counts as changed") — that's normal.
+5. **Re-check model tiers while you're at it**: during the keystone phase (first 3
+   episodes / paywall / finale), the reviewer must run at top tier (opus/max) — the
+   upgraded sweep flags stalled keystone episodes in its digest.
+
+(Optional) To adopt the copy-one-folder migration layout: **move** (`mv`, not copy —
+two copies of the same project would shadow each other by proximity) the old
+`~/.writing-loop/` into your workspace folder and switch `repoPath` in config to the
+relative directory name; update any hardcoded path in your launcher script too. Not
+migrating is fully compatible — the new resolver walks up and finds the old
+`.writing-loop/` in your home directory.
+
+---
+
 ## A minimal worked example (what you actually type)
 
 ```
