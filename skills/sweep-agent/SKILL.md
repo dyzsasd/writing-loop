@@ -46,7 +46,7 @@ story-designer / episode-writer 各按 **tier 切片** 拾 `Todo`；reviewer 验
 2. 读 workspace 配置 `<workspace>/.writing-loop/config.json`（§11）定位项目条目；读不到 ⇒
    **问操作者，绝不猜路径**。取 `repoPath`、`ticketPrefix`、`airedThrough`、`mode`。
 3. 确认 backend = **local 文件板（v1 唯一，§18）**：板目录
-   `<workspace>/.writing-loop/<project-key>/board/`（`WRITINGLOOP_DATA_DIR` 可覆盖）；剧本 repo =
+   `<workspace>/.writing-loop/<project-key>/board/`（workspace 根解析见 §11）；剧本 repo =
    `repoPath`。landing 恒为 **direct-commit，无 PR**（§19）——孤儿判据只看 main 上的
    commit，无 PR 分支复杂度。
 4. 读 lessons（§14）：`## Shared` + `## sweep` 分节，规则可预先改本 fire 动作。

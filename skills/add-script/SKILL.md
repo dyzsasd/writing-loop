@@ -42,14 +42,14 @@ scaffold 出的 repo、和它 file 的第一张大纲票（§0）。任何「我
    `config-schema.md`、`script-format.md`（§3 format 参数表）、`craft-rules.md`（附录 A
    genre profile / 附录 B monetization 门表 / R11 拆书）、`evaluation-rubric.md`。
 2. **解析 / 确立 workspace 根**（§11，本 skill 是确立它的角色）：
-   - 按 §11 优先级找根：`WRITINGLOOP_WORKSPACE` → 从 CWD 向上找已存在的 `.writing-loop/`。
+   - 按 §11 找根（唯一规则，无环境变量）：从 CWD 向上逐级找已存在的 `.writing-loop/`。
    - **找到** ⇒ 沿用该 workspace（新剧将作为它的又一个子项目）。
    - **没找到**（本 workspace 首剧）⇒ 需确立根：默认取**新剧本 repo 的父目录**为
      workspace 根（即剧本 repo 作为 workspace 的子目录，`repoPath` 相对为剧本目录名）——
      向操作者**确认或改写**该根，再在其下创建 `.writing-loop/`。绝不在 home 目录乱建。
    定位其索引 `<workspace>/.writing-loop/config.json`——**反转**：不是定位既有项目条目，
    而是**确认目标 key 尚不存在**（key 全 workspace 唯一，config-schema 校验）；索引不存在
-   ⇒ 首剧，稍后创建。（`WRITINGLOOP_DATA_DIR` 可把 `.writing-loop/` 状态目录单独指到别处，罕用。）
+   ⇒ 首剧，稍后创建。
 3. 确认 backend 恒为 **local 文件板**（§18）；本 skill 稍后为新项目**创建**其板与数据目录。
 4. lessons（§14）：新项目尚无 `lessons.md`（REGISTER 里 scaffold 骨架）；若索引里已有他剧
    共享节可读 `## Shared` 参考，但本 skill 不写 lessons（只有 reflect 可写，§17）。

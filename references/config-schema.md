@@ -7,11 +7,10 @@
 
 ## Workspace 根解析（§11）
 
-`.writing-loop/` 所在的目录 = workspace 根。boot 时按优先级解析：
-1. `WRITINGLOOP_WORKSPACE` 环境变量；
-2. 否则从 CWD 向上逐级找已存在的 `.writing-loop/`（像 git 找 `.git`）；
-3. 都没有 ⇒ 未在 workspace 内，请先 `add-script` 立项（它确立 workspace）。
-低层覆盖 `WRITINGLOOP_DATA_DIR` 可把 `.writing-loop/` 状态目录单独指到别处（罕用）。
+`.writing-loop/` 所在的目录 = workspace 根。**解析只有一条规则,无环境变量、无配置**
+(用户非技术型,保持最简):从 CWD 向上逐级找已存在的 `.writing-loop/`(像 git 找
+`.git`),首个命中的父目录即根。找不到 ⇒ 未在 workspace 内,请先 `add-script` 立项
+(由它确立 workspace)。
 
 ## workspace 索引 — `<workspace>/.writing-loop/config.json`
 
