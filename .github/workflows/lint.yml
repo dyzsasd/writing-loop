@@ -1,0 +1,23 @@
+# writing-loop 执法基底（Phase 1）：lint + 每 fire 上下文账单 + 锁助手自检。
+# 账单打进 job summary，让上下文增长在每个 PR 上可见（dev-loop `metrics --context` 的文件板等价物）。
+name: lint
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: lint（§/R 引用解析 · 结构骨架 · frontmatter · 尺寸声明新鲜度 · 模板存在）
+        run: python3 scripts/lint.py --strict
+
+      - name: context bill → job summary（每 agent 每 fire 强制读取量 + BUDGETS）
+        run: |
+          python3 scripts/context-bill.py | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: board-lock 自检（acquire / contend / stale-reclaim / release / 多锁序）
+        run: bash scripts/board-lock.sh --self-test
