@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: lint（§/R 引用解析 · 结构骨架 · frontmatter · 尺寸声明新鲜度 · 模板存在）
-        run: python3 scripts/lint.py
+        run: python3 scripts/lint.py --strict
 
       - name: context bill → job summary（每 agent 每 fire 强制读取量 + BUDGETS）
         run: |

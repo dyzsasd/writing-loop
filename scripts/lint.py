@@ -19,6 +19,12 @@
   5. 结构（硬）：每 agent SKILL 具备四段骨架（## 0 boot / Step-0 探针 / Guardrails /
      收尾报告；add-script 无探针）；探针块 ≤12 行与 boot 节 ≤35 行为 WARN-only（--strict 升级）。
   6. 被引用的 templates/*.md 必须存在（硬）。
+  7. Sections 行（硬，Phase 4 节选择性 boot）：每 SKILL 的 boot 节恰好一条列 0 起始的
+     `Sections: §… §…` 机读行；锚点形 §N / §Na / §Na-流程名（无点号），全部解析到
+     conventions 锚点，唯一且按 conventions 文档序升序（数字升序、裸节先于字母子节、
+     流程子锚点随其父节）；§0/§0a/§2 恒读必列；与正文（去 fenced/行内 code、去
+     Sections 行自身）中 conventions 命名空间的 §-引用集 set-equality——多列少列皆错。
+     span 语义（§0a）：锚点标题起至下一同级或更浅标题前（scripts/context-bill.py 同口径）。
 
 退出码：有硬错误 ⇒ 1；--strict 下 WARN 也计为失败。
 """
@@ -326,6 +332,87 @@ def check_freshness(path, text):
 
 
 # ---------------------------------------------------------------------------
+# 检查 7：Sections 行（Phase 4 节选择性 boot）
+# ---------------------------------------------------------------------------
+
+SECTIONS_ANCHOR = re.compile(r"^§(\d{1,2})([a-z])?(-[a-z]+)?$")
+SECTIONS_MANDATORY = ("0", "0a", "2")   # §0a boot 第 1 步：恒读
+
+
+def conventions_citation_keys(text):
+    """正文中 conventions 命名空间的 §-引用键集（去 fenced/行内 code；
+    Sections: 行自身不算正文引用；文件限定的姊妹引用如「script-format §4」不算）。"""
+    keys = set()
+    for _lineno, ln in scan_lines(text):
+        if cb.SECTIONS_LINE.match(ln):
+            continue
+        for m in SEC_REF.finditer(ln):
+            num, letter, flow, _item = m.groups()
+            qual = QUALIFIER.search(ln[: m.start()])
+            if qual and qual.group(1) != "conventions":
+                continue
+            keys.add(num + (letter or "") + (("-" + flow) if flow else ""))
+    return keys
+
+
+def check_sections_line(path, text, body, conv):
+    def doc_order(k):
+        return conv.spans.get(k, (10 ** 9,))[0]
+
+    fm_off = text.count("\n") - body.count("\n")
+    lines = body.splitlines()
+    hits = [(i, ln) for i, ln in enumerate(lines) if cb.SECTIONS_LINE.match(ln)]
+    if not hits:
+        err(path, 1, "缺 Sections: 行（§0a 节选择性 boot 的机读声明，置于 boot 节末）")
+        return
+    if len(hits) > 1:
+        err(path, fm_off + hits[1][0] + 1,
+            "Sections: 行必须恰好一条（发现 %d 条）" % len(hits))
+        return
+    idx, ln = hits[0]
+    lineno = fm_off + idx + 1
+    boot_lines, boot_start = cb.boot_section(body)
+    if not boot_lines or not (boot_start <= idx < boot_start + len(boot_lines)):
+        err(path, lineno, "Sections: 行必须位于 boot 节（## 0 …）内")
+    keys, bad = [], False
+    for tok in ln.split()[1:]:
+        m = SECTIONS_ANCHOR.match(tok)
+        if not m:
+            err(path, lineno, "Sections: 非法锚点记号 %s（合法形 §N / §Na / §Na-流程名，"
+                "无点号——点号锚点声明其父节）" % tok)
+            bad = True
+            continue
+        k = tok.lstrip("§")
+        if k not in conv.spans:
+            err(path, lineno, "Sections: 锚点无法解析（conventions 无此锚点）：%s" % tok)
+            bad = True
+            continue
+        keys.append(k)
+    if len(set(keys)) != len(keys):
+        err(path, lineno, "Sections: 锚点必须唯一（有重复）")
+        bad = True
+    if keys != sorted(keys, key=doc_order):
+        err(path, lineno, "Sections: 锚点须按 conventions 文档序升序"
+            "（数字升序、裸节先于字母子节、流程子锚点随其父节）")
+    if bad:
+        return
+    declared = set(keys)
+    missing_must = [k for k in SECTIONS_MANDATORY if k not in declared]
+    if missing_must:
+        err(path, lineno, "Sections: 缺恒读锚点 %s（§0a 第 1 步：§0/§0a/§2 恒读）"
+            % " ".join("§" + k for k in missing_must))
+    cited = conventions_citation_keys(text)
+    missing = sorted(cited - declared, key=doc_order)
+    extra = sorted(declared - cited - set(SECTIONS_MANDATORY), key=doc_order)
+    if missing:
+        err(path, lineno, "Sections: 缺正文已引用的节（set-equality）：%s"
+            % " ".join("§" + k for k in missing))
+    if extra:
+        err(path, lineno, "Sections: 声明了正文未引用的节（set-equality）：%s"
+            % " ".join("§" + k for k in extra))
+
+
+# ---------------------------------------------------------------------------
 # 检查 6：templates 存在
 # ---------------------------------------------------------------------------
 
@@ -364,6 +451,7 @@ def main():
             name = os.path.basename(os.path.dirname(path))
             check_frontmatter(path, fm)
             check_budget_structure(path, name, body)
+            check_sections_line(path, text, body, conv)
 
     for e in errors:
         print("ERROR %s" % e)
