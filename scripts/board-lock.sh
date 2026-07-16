@@ -95,7 +95,9 @@ self_test() {
   [ -e "$tmp/ledgers/foreshadow.md.lock" ] && [ -e "$tmp/ledgers/story-state.md.lock" ] \
     && [ -e "$tmp/ledgers/production.md.lock" ]; check "三把账本锁在盘" 0 $?
   release_ledgers "$tmp/ledgers"
-  ls "$tmp/ledgers"/*.lock >/dev/null 2>&1; check "release-ledgers：无残锁" 1 $?
+  # 不用 ls 的退出码判「无匹配」——GNU ls 对无匹配 glob 退 2、BSD ls 退 1（平台耦合）。
+  leftover=0; for f in "$tmp/ledgers"/*.lock; do [ -e "$f" ] && leftover=1; done
+  check "release-ledgers：无残锁" 0 "$leftover"
 
   : > "$tmp/ledgers/story-state.md.lock"   # 竞争者预持中间那把
   acquire_ledgers "$tmp/ledgers"; check "多锁序：中间被占 ⇒ 整组失败" 1 $?
