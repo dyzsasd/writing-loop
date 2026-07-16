@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # writing-loop 板/账本锁助手 —— conventions §7/§15.5/§18 锁法术的可调用实现。
 #
-# 双轨权威声明：conventions 的散文（§15.5 账本锁纪律、§18 票锁与陈旧锁规则）仍是
-# 权威——无 shell 的运行环境按散文手工执行即可；本脚本只是同一语义的可审计单一实现
-# （O_EXCL 独占创建、mtime >60min 陈旧强清、固定多锁序 foreshadow → story-state →
-# production、拿不到下一把先释放已持有的全部锁）。两者语义一字不差；若有出入，
+# 双轨权威声明：conventions 的散文（§15.5 账本锁纪律、§15.6 repo 写锁、§18 票锁与
+# 陈旧锁规则）仍是权威——无 shell 的运行环境按散文手工执行即可；本脚本只是同一语义的
+# 可审计单一实现（O_EXCL 独占创建、mtime >60min 陈旧强清、固定多锁序 foreshadow →
+# story-state → production → repo、拿不到下一把先释放已持有的全部锁）。repo 写锁
+# （`<repoPath>/.git/repo.lock`，§15.6）走通用 acquire/release——固定序末位，最后拿、
+# 最先放（秒级 stage+commit，持有最短）。两者语义一字不差；若有出入，
 # 以散文为准并修本脚本。SKILL 只描述锁「什么」；「怎么锁」引 conventions §7 的指针。
 #
 # 用法：

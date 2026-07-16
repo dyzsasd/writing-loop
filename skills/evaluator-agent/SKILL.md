@@ -165,8 +165,12 @@ profile 的 X」而非写死数值）：
   投流 15s 片段 **≥3 条**，且其中 **≥1 条含金句** ⇒ 达标；**否则 ⇒ file punch-up
   票**（见 Job 5）。切片清单本身写入 `evaluation/`（§19 文档树：`evaluation/` = 评估
   报告 + 切片清单）。
+- **保鲜标记（§22 retention）**：同一道门重跑 ⇒ 给被取代的旧报告**头部**加一行
+  `superseded-by: <新报告文件名>`——`evaluation/` 是产品证据（门禁判决的依据链），
+  **永不删除**，只标记；标记与新报告同一 commit。
 - **写盘纪律**：报告与切片清单是**你自己的产物**（observe-and-file 允许写 evaluation/，
-  这不算「改正文/账本/大纲」）——**单 commit** 提交（commit message 带票号），
+  这不算「改正文/账本/大纲」）——**单 commit** 提交（commit message 带票号；stage+commit
+  包在 repo 写锁内 §15.6——评估报告与 writer/designer 共用同一个剧本 repo index），
   工单转态永远在 commit 之后。**绝不**在同一 fire 里编辑 episodes/ledgers/arcs/
   outline/bible 的任何一字。
 

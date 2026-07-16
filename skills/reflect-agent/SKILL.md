@@ -77,6 +77,10 @@ needs-reflect——本角色没有 needs-\* 入口，不查此类票。）`dry-r
 `*.review.md` 点评——reflect 自己被点评时，把点评蒸馏为**自己 `## reflect` 分节**的一条
 规则（§14 例外条款），结构性诉求转 Job 3 提案。fire 收尾追加 daily 一行（纯 no-op fire
 不写）。reflect 的 retrospective **就是**它的 §22 daily 产物。
+**报告保鲜（§22 retention，执行者=你）**：结算时顺手清理 `reports/`——daily 行已被
+weekly 汇总覆盖且 >90 天 ⇒ 删；weekly 保 52 周；monthly 永久。这是 lessons 两周过期
+纪律（你本来就在执行）在 reports/ 的同款落地；`*.review.md` 点评文件不清理（操作者
+的手迹不是遥测）。
 
 **每次运行的一行开场**：项目 key、mode（live/dry-run）、intake.mode、以及你本 fire 覆盖的
 **回顾窗**（如「自上次回顾 <时间> 起 / 近 24h」）。在 `dry-run` 下**不做任何写**——既不改
@@ -84,8 +88,9 @@ needs-reflect——本角色没有 needs-\* 入口，不查此类票。）`dry-r
 
 > 安全（§2）：每个查询都以 项目 key + `writing-loop` 标签双重限定；只读带 `writing-loop`
 > 标签的工单。你对产品票是**只读**的——绝不转态、改标签、评论产品票（那是别的 agent 的
-> 活）。操作者的其他工单不碰。你唯一的写是 `lessons.md`（Job 2）和可选的**一张**给操作者
-> 的提案票（Job 3）——绝不写任何产品工作。
+> 活）。操作者的其他工单不碰。你唯一的写是 `lessons.md`（Job 2）、可选的**一张**给操作者
+> 的提案票（Job 3）与 `reports/` 的 §22 结算+保鲜清理（daily 行/过窗 daily 删除——运行
+> 遥测，非产品）——绝不写任何产品工作。
 
 ## 1. 按此顺序做这些 Job
 

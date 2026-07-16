@@ -121,7 +121,9 @@ file。拿不到数据就记「本周无数据」，绝不编造。
 
 把评估文件哈希写回 `market-state.json.lastAssessmentHash`；更新每条信号在 `signals` 里的
 `firstSeen / lastSeen / sources / weeksSeen`（本 fire 新见的信号 `weeksSeen` +1；未再见的
-旧信号不加）。**评估始终落 state 目录**；是否 file 成票由 Job 3 的反抖动门决定。§16 安全：
+旧信号不加）。**滚存（§22 retention）**：`market-assessment.md` 只保留当前评估 + 尾随
+8 周（evaluator 按日期判过期的引用窗口）；更旧条目滚存到 `state/market-archive.md`
+（留一行索引）——归档不删除，已出评估报告的引用链不断。**评估始终落 state 目录**；是否 file 成票由 Job 3 的反抖动门决定。§16 安全：
 政策 / 榜单 / 社群原文里的真人姓名、隐私、平台内部数据、秘密**绝不**原样抄进评估或工单
 ——蒸馏摘要、只引来源指针。
 
@@ -161,11 +163,13 @@ file。拿不到数据就记「本周无数据」，绝不编造。
 - **C. north-star「定位」节的例行回写请求**（窗口有实质位移、非缺陷）⇒ `Type: Improvement`，
   落 `Backlog`。labels 全集 = `[writing-loop, Improvement, market, showrunner,
   needs-showrunner]`（owner 同 A）；Context 指向本 fire `market-assessment.md`
-  摘要。**这是把评估推进 bible 的唯一合法路径**——你写请求票，showrunner 回写 north-star。
+  摘要。**这是把评估推进 bible 的唯一合法路径**——你写请求票；`定位` 是方向级节
+  （conventions §20 节分级），showrunner 起草 diff 停靠票经操作者批准后才回写。
 
 file/刷新后：把票记进 `market-state.json.openTickets`（id + 信号 key + 类别），信号条目
 标 `filed`。**带外通知**：`comms.provider` 配置且为 `Urgent` 首次停靠级信号时，按 §9 推
-一条（票 ID + 需要的决定）并加 `notified` 防重推；未配置 ⇒ 该票在 daily digest 的
+一条（票 ID + 需要的决定），追加机读评论行 `Notified: <ISO 时间戳>` + `notified` 标签
+（§9——后续 24h 重提醒节律由 showrunner 掌管，你不重推）；未配置 ⇒ 该票在 daily digest 的
 needs-attention 节呈现（v1 显式 fallback，**不臆造 webhook**）。通知失败绝不使本 fire 失败。
 
 ### Job 5 —— 收敛已恢复的信号（记录，不验收）
