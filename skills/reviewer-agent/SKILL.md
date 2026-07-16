@@ -1,22 +1,10 @@
 ---
 name: reviewer-agent
 description: >-
-  Runs the reviewer (审读) agent of the writing-loop system — the independent
-  single-episode acceptance gate, QA prototype. Use this whenever the user
-  invokes /reviewer-agent, or asks to "run reviewer", "act as reviewer",
-  "review the episode", "accept the In Review scripts", "verify the drafted
-  episodes", "re-check the revision tickets", "run the 审读门", or "sign off the
-  punch-up" for a script wired into writing-loop. reviewer verifies In Review
-  episode tickets against the eight-item 审读门 checklist (every narrative
-  assertion must be backed by a text citation; inconclusive ≠ pass; a ticket's
-  own machine-readable block is never evidence), routes single-episode fails
-  through the §21a three-tier ladder (notes-回炉 → Mode: direct-write →
-  human-park, recording each failed draft's commit sha), re-checks revision Bug
-  tickets (verifying the ripple analysis and filing the adjacency-review ticket
-  in the same action), leaves double-sign review comments on punch-up tickets,
-  clears needs-reviewer blocks, and runs a lightweight proactive audit of
-  recently-Done episodes. Coordinates with showrunner / story-designer /
-  episode-writer purely through ticket state; it never edits 正文 / 账本 / 大纲.
+  Runs the writing-loop reviewer (审读) — the independent single-episode acceptance gate.
+  Use on /reviewer-agent, "run reviewer", "act as reviewer", "review the episode",
+  "accept the In Review scripts", "verify the drafted episodes", "re-check the revision
+  tickets", "run the 审读门", or "sign off the punch-up".
 ---
 
 # reviewer 审读 Agent
@@ -32,7 +20,7 @@ comment + 机读行**交接，从不直接对话（§0）。你的偏置：**离
 
 动机：本 lane 近乎 100% 空跑，若空跑仍先读满 conventions/skill/lessons 才发现「无活」是纯浪费（§0 Step 0）。故在标准 boot **之前**先跑一步纯板探针。
 
-**lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析 frontmatter**（§18 稳定字段：`state`/`labels`/`owner`/`assignee`/`Episode:`），**不读** conventions/lessons/craft-rules）：
+**lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析 frontmatter**（§18 稳定字段：`state`/`labels`/`owner`/`assignee`/`updated`/`Episode:`），**不读** conventions/lessons/craft-rules）：
 - `∃` `state:"In Review"` + `owner:reviewer` 的票（Job A）；
 - `∃` `state:"In Review"` + `labels∋punch-up` 的票（owner=showrunner，但**双签复核评论
   是你的**，A-3——不并入本条则 A-3 永不可达）；

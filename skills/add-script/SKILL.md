@@ -1,24 +1,10 @@
 ---
 name: add-script
 description: >-
-  Operator-present onboarding skill for the writing-loop system — stands up a brand-new
-  短剧 script project (立项) end to end and registers it into the workspace. Use this
-  whenever the user invokes /add-script, or says "run add-script", "act as add-script",
-  "立项", "add a new script", "onboard a script", "start a new drama", "拆一本小说立项",
-  "set up <剧名> in writing-loop", or otherwise asks to create a fresh script project.
-  It runs interactive with the operator (INTERVIEW → SCAFFOLD → REGISTER → first outline
-  ticket → VERIFY): interviews the project (原创 or 小说改编 fork — audience-profile hard
-  gate, compliance pre-screen, genre-profile selection with uncalibrated warning,
-  monetization/format, and for adaptations a book-selection checklist + three
-  deconstruction worksheets + fidelity tier; for originals a lightweight teardown of 1-2
-  benchmark dramas), scaffolds the whole templates/ set into a fresh script git repo
-  (bible + outline + four ledgers + episodes + evaluation) and commits, registers the
-  project entry into `<workspace>/.writing-loop/config.json` under the config-schema validation
-  rules, creates the file-board directory + section-scaffolded lessons.md, and files the
-  very first outline ticket to story-designer (owner=showrunner). Honors dry-run (prints
-  the plan, writes nothing). After it succeeds the operator runs /showrunner-agent to
-  advance the script. This is the ONLY skill that creates a project; the repo, config,
-  and board are all created here.
+  Operator-present onboarding for writing-loop — interviews, scaffolds, and registers a
+  brand-new 短剧 script project (立项), then files the first outline ticket. Use on
+  /add-script, "run add-script", "act as add-script", "立项", "add a new script", "onboard
+  a script", "start a new drama", "拆一本小说立项", or "set up <剧名> in writing-loop".
 ---
 
 # add-script（立项操作者 skill）

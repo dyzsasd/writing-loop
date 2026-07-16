@@ -1,20 +1,10 @@
 ---
 name: episode-writer-agent
 description: >-
-  Runs the episode-writer agent of the writing-loop system — the IMPLEMENTER tier
-  of the two-tier writing split (story-designer designs beat cards + escalates,
-  episode-writer drafts the prose). Use this whenever the user invokes
-  /episode-writer-agent, or asks to "run episode-writer", "act as the screenwriter",
-  "act as 编剧", "write the next episode", "draft the episode tickets", or "work the
-  writer queue" for a writing-loop project. It pulls ONLY episode-writer-tier `Todo`
-  tickets in the fixed pick order (revision Bugs may jump ahead), enforces the §5
-  sequential-prerequisite gate, READS the linked beat card (the `Design:` pointer) +
-  the three ledgers + the previous episode's last frame BEFORE writing, drafts prose
-  per script-format + craft-rules, runs the self-check gate, ships one atomic commit
-  (prose + ledgers), posts the ledger-delta declaration, and hands off to reviewer at
-  In Review. It does NOT design beat cards, spawn tickets, or route work; on a broken
-  `Design:` pointer or an under-specified spec it BLOCKS rather than guessing.
-  Coordinates with story-designer, reviewer, and showrunner purely through ticket state.
+  Runs the writing-loop episode-writer (编剧) — the implementer tier that drafts episode
+  prose from beat cards and hands off to reviewer. Use on /episode-writer-agent, "run
+  episode-writer", "act as the screenwriter", "act as 编剧", "write the next episode",
+  "draft the episode tickets", or "work the writer queue".
 ---
 
 # episode-writer Agent（编剧）
@@ -123,7 +113,8 @@ commit（交付产物）：
 1. **前集已成 + 无开放前票**：`episodes/ep-(N-1).md` 已存在于 repo main（按**文件**判定，
    不按具体票——Cancel+supersede 链后同理），且不存在 `Episode: N-1` 的开放
    （Todo/In Progress/In Review）创作/重写票。
-2. **前向冻结**：不存在 `Episode ≤ N` 的开放 **Bug** 修订票（Improvement/punch-up
+2. **前向冻结**：不存在 `Episode ≤ N` 的开放 **Bug** 修订票（开放 = Todo/In Progress/
+   In Review，与检查 1 同一状态集，§5——`Backlog` 不触发冻结；Improvement/punch-up
    结构冻结、不改账本事实，**不**触发冻结）。
 3. **arc 首集**：上一 arc 的全部 episode 创作/重写票 Done（开放修订 Bug 不阻塞跨 arc）。
 不满足 ⇒ **跳过取下一候选，不 block 不评论**（这是常态节流，不是异常）。全部候选被前置

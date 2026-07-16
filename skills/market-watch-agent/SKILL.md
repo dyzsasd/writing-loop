@@ -1,23 +1,11 @@
 ---
 name: market-watch-agent
 description: >-
-  Runs the market-watch agent of the writing-loop system — the OUTWARD market
-  scout of a self-directed short-drama (短剧) writing team that collaborates only
-  through ticket state (Ops prototype). Use this whenever the user invokes
-  /market-watch-agent, or asks to "run market-watch", "act as the market scout",
+  Runs the writing-loop market-watch agent — the weekly outward market scout: genre
+  windows, platform hot lists, policy changes, dated assessments routed to showrunner by
+  ticket. Use on /market-watch-agent, "run market-watch", "act as the market scout",
   "扫榜看什么火", "watch the genre window", "看题材窗口", "check policy / platform-regulation
-  changes", or "看政策/平台监管" for a script wired into writing-loop. On a WEEKLY
-  cadence it reads the operator-fed marketDataPath FIRST, then WebSearch (platform
-  hot lists / policy announcements / screenwriter communities — load WebSearch via
-  ToolSearch first, it is a deferred tool), and produces a DATED genre-window
-  assessment. Observe-and-file only (conventions §21): it writes the assessment to
-  its own state dir and routes any material change to the showrunner via a Backlog
-  ticket (§5a) — it never touches north-star / bible / outline / ledgers / 正文.
-  Anti-flap is load-bearing: a one-off signal is never filed — only two independent
-  sources OR a signal seen two consecutive weeks. Genre entering a crackdown /
-  red-ocean window ⇒ a `market` Bug; a policy change touching the show ⇒
-  needs-showrunner (Urgent by severity). No data ⇒ it records "本周无数据" and
-  fabricates nothing. Coordinates with the showrunner purely through ticket state.
+  changes", or "看政策/平台监管".
 ---
 
 # market-watch 市场监察
@@ -165,11 +153,14 @@ file。拿不到数据就记「本周无数据」，绝不编造。
   `Urgent(1)`；转红海 / 热度显著下滑但仍可投 = `High(2)`。Context 写：窗口态 + 判据
   （来源 + 日期，§16 蒸馏不抄原文）+ 反抖动依据（两来源 / 两周）。AC 写 showrunner 可判定
   的战略动作（如「north-star 定位 / Non-goals 已按新窗口修订；若需转轨已 file 后续票」）。
-- **B. 政策 / 监管新规触及本剧** ⇒ 落 `Backlog` + `market` + `needs-showrunner`；触及内容
-  红线 / 合规时 `Type: Bug`（合规缺陷），否则 `Type: Improvement`（定位调整）；`priority`
+- **B. 政策 / 监管新规触及本剧** ⇒ 落 `Backlog`；触及内容红线 / 合规时 `Type: Bug`
+  （合规缺陷），否则 `Type: Improvement`（定位调整）。labels 全集 =
+  `[writing-loop, Bug|Improvement, market, showrunner, needs-showrunner]`（owner 同 A
+  ——`market` 票恒归 showrunner 验收；漏传 owner 的票会搁浅 In Review，§4）。`priority`
   视严重度（明令违规 / 需立即整改 = `Urgent`）。Context 附政策来源指针 + 命中本剧的具体点。
-- **C. north-star「定位」节的例行回写请求**（窗口有实质位移、非缺陷）⇒ `Type: Improvement`
-  + `market` + `needs-showrunner`，落 `Backlog`；Context 指向本 fire `market-assessment.md`
+- **C. north-star「定位」节的例行回写请求**（窗口有实质位移、非缺陷）⇒ `Type: Improvement`，
+  落 `Backlog`。labels 全集 = `[writing-loop, Improvement, market, showrunner,
+  needs-showrunner]`（owner 同 A）；Context 指向本 fire `market-assessment.md`
   摘要。**这是把评估推进 bible 的唯一合法路径**——你写请求票，showrunner 回写 north-star。
 
 file/刷新后：把票记进 `market-state.json.openTickets`（id + 信号 key + 类别），信号条目

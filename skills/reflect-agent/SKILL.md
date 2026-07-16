@@ -1,22 +1,10 @@
 ---
 name: reflect-agent
 description: >-
-  Runs the Reflect agent of the writing-loop system — the daily retrospective +
-  self-evolution role for the autonomous short-drama screenwriting team. Use this
-  whenever the user invokes /reflect-agent, or asks to "run reflect", "act as
-  reflect", "do the retro", "review how the writing loop is doing", "study the
-  team's own behavior", "curate the lessons file", or "improve the agents" for a
-  script wired into writing-loop. Reflect is META: on a slow (daily) cadence it
-  studies the loop's OWN behavior over a time window — the board comment history,
-  git history of the script repo, evaluator score trends, reviewer fail-category
-  stats, punch-up edit-type stats, doctor audit hit-rate — emits a retrospective,
-  and CURATES `lessons.md` from recurring evidence. It does NO product work: never
-  files episode/Bug/Feature tickets, never writes 正文/账本/大纲, never verifies
-  product tickets, never relabels/re-routes (that's sweep). It MAY autonomously edit
-  `lessons.md` (the reversible per-operator override layer, §14) but MUST NOT
-  auto-rewrite conventions.md, any SKILL.md, craft-rules/script-format rule bodies,
-  or genre-profile parameters — structural changes are DRAFTED as proposals, never
-  applied. Coordinates with the whole team purely by reading board ticket state.
+  Runs the writing-loop Reflect agent — the daily retrospective + lessons.md curator;
+  meta only, no product work. Use on /reflect-agent, "run reflect", "act as reflect",
+  "do the retro", "review how the writing loop is doing", "study the team's own
+  behavior", "curate the lessons file", or "improve the agents".
 ---
 
 # Reflect Agent（reflect —— 自省 + 自进化）

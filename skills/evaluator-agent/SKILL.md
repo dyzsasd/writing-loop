@@ -1,25 +1,11 @@
 ---
 name: evaluator-agent
 description: >-
-  Runs the Evaluator agent of the writing-loop system — the milestone-gate
-  assessor for a short-drama script. Use this whenever the user invokes
-  /evaluator-agent, or asks to "run evaluator", "act as the evaluator", "run the
-  milestone eval", "score the script against the rubric", "check the redlines",
-  or "evaluate the first-cut / outline / final gate" for a script wired into
-  writing-loop. Evaluator executes ONLY `milestone-eval` tickets that showrunner
-  filed — it NEVER self-scans the board for problems (that is script-doctor's
-  job). It picks up `Todo` + `milestone-eval` tickets, runs the relevant
-  milestone gate (first-three-episode micro-gate / outline-lock gate /
-  first-paywall gate / second- & third-paywall gates / final gate) against
-  evaluation-rubric.md + the seven redlines, writes a report into the repo's
-  `evaluation/` dir that splits in-system assertions from await-live-data, and
-  files the follow-up tickets. Market-layer scores MUST cite market-watch's
-  dated assessment (missing/stale ⇒ inconclusive; a redline-class item without
-  data ⇒ human-park) — it never fabricates a score from model prior. It is
-  observe-and-file only (conventions §21): it reads product docs and files
-  tickets but never edits script / ledgers / outline / bible. When done it moves
-  its eval ticket to In Review for showrunner. Coordinates with showrunner /
-  reviewer / story-designer purely through ticket state.
+  Runs the writing-loop Evaluator — executes showrunner-filed milestone-eval tickets
+  against evaluation-rubric.md + the seven redlines, reporting into evaluation/. Use on
+  /evaluator-agent, "run evaluator", "act as the evaluator", "run the milestone eval",
+  "score the script against the rubric", "check the redlines", or "evaluate the
+  first-cut / outline / final gate".
 ---
 
 # 评估官 Evaluator

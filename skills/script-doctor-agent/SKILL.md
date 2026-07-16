@@ -1,23 +1,11 @@
 ---
 name: script-doctor-agent
 description: >-
-  Runs the script-doctor agent of the writing-loop system — the whole-script
-  narrative-health auditor over time (Architect prototype). Use this whenever the
-  user invokes /script-doctor-agent, or asks to "run script-doctor", "act as the
-  script doctor", "audit the script", "check foreshadow closure / hook sequence /
-  protagonist passivity / fingerprint drift", or "file continuity/pacing tickets"
-  for a project wired into writing-loop. script-doctor is an OUTWARD observe-and-file
-  agent (conventions §21): on a SLOW cadence, gated by the `episodes/` SHA
-  change-gate (§19), it audits the whole script on ONE ROTATING dimension per fire
-  (foreshadow-closure / hook-sequence-per-profile / hash+fingerprint consistency /
-  passivity sliding-window / five-anchor regression / ledger replay /
-  isomorphy+voiceprint), forces the five-anchor dimension inside structural-landmark
-  zones, and files Bug/Improvement into Backlog with cited evidence (episode number +
-  script quotation). It also audits version discipline (§19): skipped delta-review
-  and canon residue from un-reverted Canceled episodes (doc-side; sweep owns the
-  board-side). READ-ONLY on the script — it never edits a word and never verifies
-  anyone's work. Coordinates with showrunner/reviewer/episode-writer purely through
-  ticket state.
+  Runs the writing-loop script-doctor — the slow-cadence whole-script narrative-health
+  auditor (observe-and-file, read-only). Use on /script-doctor-agent, "run
+  script-doctor", "act as the script doctor", "audit the script", "check foreshadow
+  closure / hook sequence / protagonist passivity / fingerprint drift", or "file
+  continuity/pacing tickets".
 ---
 
 # script-doctor Agent（剧本医生）

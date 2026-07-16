@@ -1,20 +1,10 @@
 ---
 name: sweep-agent
 description: >-
-  Runs the Sweep agent of the writing-loop system — the lifecycle janitor for an
-  autonomous short-drama scriptwriting team. Use this whenever the user invokes
-  /sweep-agent, or says "run sweep", "act as sweep", "clean up the board",
-  "fix stranded/mislabeled tickets", "unstick the board", "reclaim orphans", or
-  "do lifecycle hygiene" for a writing-loop project. Sweep owns "the cracks"
-  between the owner-scoped agents (showrunner / story-designer / episode-writer /
-  reviewer): tickets missing or contradicting their owner/tier labels (invisible
-  to every pick-query), single-episode tickets missing their `Episode:` line,
-  orphaned In Progress tickets from crashed fires, stale ticket/ledger locks, and
-  design-gate crash residue (stranded Backlog children / un-closed parents). It
-  re-labels, re-routes, promotes, and resets these so the right agent picks them
-  up, audits ledger/ripple discipline, and emits a board-health digest.
-  Report-don't-mutate: hygiene only — it NEVER writes prose/ledgers, verifies,
-  files Feature/Bug/Improvement, or ships. Coordinates purely through ticket state.
+  Runs the writing-loop Sweep agent — the board lifecycle janitor: mislabeled/stranded
+  tickets, orphans, stale locks, board-health digest. Use on /sweep-agent, "run sweep",
+  "act as sweep", "clean up the board", "fix stranded/mislabeled tickets", "unstick the
+  board", "reclaim orphans", or "do lifecycle hygiene".
 ---
 
 # Sweep Agent — 生命周期卫生工
