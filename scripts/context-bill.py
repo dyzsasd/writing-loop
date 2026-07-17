@@ -42,26 +42,28 @@ CONVENTIONS = os.path.join(REFS_DIR, "conventions.md")
 # 行 + 字符双约束，先触先算超。字符按 len()（CJK 校准：≈1 token/字）。
 # ---------------------------------------------------------------------------
 BUDGETS = {
-    # showrunner（PM 原型）
-    "showrunner-agent": {"lines": 300, "chars": 9500},
+    # showrunner（PM 原型）——9500→10100：WL-44 第五逃逸口（操作者批准）+ D5 决策点
+    # 重验/R6.2 邻卡 cite 为强制载荷，不可削（D6）。
+    "showrunner-agent": {"lines": 300, "chars": 10100},
     # writer 层
     "story-designer-agent": {"lines": 240, "chars": 7800},
     "episode-writer-agent": {"lines": 240, "chars": 7800},
     # reviewer：携带审读门全流程走查，+10% 豁免（同 dev-agent 携带 Step 0-7 先例）
     "reviewer-agent": {"lines": 260, "chars": 8500},
-    # observer 层
-    "evaluator-agent": {"lines": 210, "chars": 6800},
+    # observer 层（evaluator/sweep 6800→7100：D5 完备性断言/时钟纪律 cite 强制载荷，D6）
+    "evaluator-agent": {"lines": 210, "chars": 7100},
     "script-doctor-agent": {"lines": 210, "chars": 6800},
     "market-watch-agent": {"lines": 210, "chars": 6800},
     "reflect-agent": {"lines": 210, "chars": 6800},
-    "sweep-agent": {"lines": 210, "chars": 6800},
+    "sweep-agent": {"lines": 210, "chars": 7100},
     # 立项 skill
     "add-script": {"lines": 270, "chars": 8800},
 }
 
 # 结构预算（D2）：frontmatter description、Step-0 探针谓词块、boot 节。
 FRONTMATTER_DESC_MAX_CHARS = 400   # 硬（Phase 0 已落地）
-PROBE_MAX_LINES = 12               # Phase 5 前 WARN-only
+PROBE_MAX_LINES = 19               # Phase 5 前 WARN-only；12→19：WL-44 第五逃逸口
+                                   # （墙钟谓词）按语义只能落探针块内（D6）
 BOOT_MAX_LINES = 35                # Phase 5 前 WARN-only
 
 # §14 lessons 上限的账单估算常数（≤150 行 ≈ 6KB）。

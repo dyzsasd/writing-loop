@@ -29,8 +29,15 @@ eval/设计/punch-up 票、回写 north-star。你与其他 agent 只经工单 s
 **autonomous 下 no-op 判定 = 板快照哈希**：对 glob 到的全部票按 ID 排序、拼
 `id+state+labels+assignee+updated+mtime` 后求哈希（`updated` 承载评论交接 §18；`mtime`
 承载人类操作员手写留言 §0——缺一即假退出），与 state 目录上次快照比对。仅当 板哈希未变
-∧ `north-star` 哈希未变 ∧ 无到期 weekly/monthly、无未分发 `*.review.md`（§22）⇒ 一行
+∧ `north-star` 哈希未变 ∧ 无到期 weekly/monthly、无未分发 `*.review.md`（§22）
+∧ **无到期的 §9 停靠重提醒（patch WL-44 · 2026-07-17 操作者批准）**⇒ 一行
 no-op 退出。首跑无快照 = 已变；板快照只在**全 boot fire 收尾**更新。
+**【patch WL-44】第五逃逸口（墙钟谓词，治「autonomous 严格弱于 passive」）**：∃
+`blocked`+`needs-showrunner` 停靠票，其最新 `Notified:` 已 >24h 且此后无操作者动作 ⇒ **板哈希即便未变
+也须落全 boot**（执行 Job B1 的 §9 每日至多一条重提醒）。理由：板快照是变化检测器，§9 24h 重提醒是墙钟
+义务——板冻结时哈希恒等会让廉价退出把该时钟永不求值；passive 子句因含「无 `needs-showrunner`」恒落 boot
+而无此漏，autonomous 不补则在此谓词上反弱于 passive。
+打印 no-op 前重 glob 重算一次（§0 决策点重验——快照对拍完后才发生的写入恒盲）。
 **passive 下改用条件清单**（Job C 整个跳过，清单可求值），全部成立才 no-op 退出：
 north-star 哈希未变；无 In Review `owner:showrunner`；无 `needs-showrunner`、无本 tier
 陈旧孤儿（§7）；无 `Backlog` 票（「可放行」不可在 frontmatter 内求值 ⇒ 存在即有活）；
@@ -85,7 +92,8 @@ fire 已判 pass、崩于放行途中 ⇒ **不重判**，直接补完「promote
   集）；**子票版本锚**：全部子票带 `Design-hash:` 且 == 节拍单当前内容哈希
   （§21a-design.3——spawn 后被改未重 stamp = fail：门与子票必须见同一字节）。
 - **判断项**（每条断言引节拍单原文）：狠点子跨 arc 新鲜度、不可逆事件删除测试、R3.4
-  升级轴、R4 五锚点落位、剧级回看、**「合规但平庸」否决位**——机器项全绿仍可否决换案
+  升级轴、R4 五锚点落位、R6.2 邻卡调度同构比对（中段引擎/动作序列与任一相邻集同构
+  ⇒ 旗标换案）、剧级回看、**「合规但平庸」否决位**——机器项全绿仍可否决换案
   （引用弃案理由）。
 任一项 fail = fail。**pass ⇒ 崩溃安全序（§21a-design.5 写死）**：①父票评论记
 `Approved-hash: <sha256-12>`（验收所读 arc 文件内容哈希——版本绑定锚，先于任何放行）；

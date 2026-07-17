@@ -76,6 +76,8 @@ Sections: §0 §0a §1 §2 §4 §5 §7 §8 §9 §10 §11 §12 §14 §15 §17 §1
 - **`episode` 票缺 `Episode:` 机读行**（§5 顺序前置无法评估，对拾取序不可见）：
   标题含无歧义 `ep-NNN` ⇒ 转写补入（转写而非猜）；歧义/无号 ⇒ 旗标不猜。
 - **缺 Type 标签**：无歧义 ⇒ 补；歧义 ⇒ 旗标不猜。
+- **未来时间戳**（frontmatter/评论戳晚于当前时钟——§18 时钟纪律）：clamp 到 now +
+  digest 旗标（未来戳会把 §7/§1 的 stale 时钟推入未来、永不到期）。
 
 ### Job 2 — 孤儿 In Progress 回收（§7 反向检查）
 实现者第 0 步只回收 assignee 是**自己**的票；你捡剩下的。查 `In Progress`，同时
@@ -135,7 +137,9 @@ commit（§19）；③认领超时——
 ### Job 6.5 — keystone-stall 护栏（§1 固定 Job；只旗标，零变更）
 把「跳过留待」silent stall 浮出的唯一机制，每 fire 必查（判据同探针 keystone-stall
 条，机械可判）⇒ digest 旗标 `keystone 集 <ID> 停滞 >T，需顶配 reviewer`。是否真有
-顶配 fire 在排由操作者/launcher 判断——你不判档位、不改状态、不催 agent。
+顶配 fire 在排由操作者/launcher 判断——你不判档位、不改状态、不催 agent（wl-run
+驱动的部署下本旗标常态不触发——触发即说明调度器未跑或 reviewer 被停，旗标措辞可
+径直建议操作者查 wl-run）。
 
 ### Job 7 — 板健康 digest（§22）
 一屏健康快照——纯信号：最老 `In Review`/`In Progress` 票龄；blocked 数按

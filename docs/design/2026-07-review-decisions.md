@@ -37,15 +37,17 @@ writing-loop 的 SKILL 密度 ~81B/行（UTF-8 CJK 3B/字），dev-loop ~73B/行
 
 | SKILL | 行 | 字符 |
 |---|---|---|
-| showrunner | 300 | 9,500 |
+| showrunner（9,500→10,100：WL-44 第五逃逸口 + D5 cite 强制载荷，D6） | 300 | 10,100 |
 | writer 层（story-designer / episode-writer） | 240 | 7,800 |
 | reviewer（携带审读门全流程走查，+10% 豁免——同 dev-agent 携带 Step 0-7 的先例） | 260 | 8,500 |
-| observer 层（evaluator / script-doctor / market-watch / reflect / sweep） | 210 | 6,800 |
+| observer 层（script-doctor / market-watch / reflect） | 210 | 6,800 |
+| observer 层例外：evaluator / sweep（6,800→7,100：D5 完备性断言/时钟纪律 cite 强制载荷，D6） | 210 | 7,100 |
 | add-script | 270 | 8,800 |
 
 结构预算：frontmatter description **≤400 字符**（一句角色 + 触发短语，协议
 mini-spec 一律移入正文/conventions——已于 Phase 0 落地：10 份共 12,812→3,399 字符）；
-Step-0 探针谓词块 **≤12 行**（lane 谓词本体；动机/单向安全/判定语义引 §0 不复述）；
+Step-0 探针谓词块 **≤19 行**（lane 谓词本体；动机/单向安全/判定语义引 §0 不复述；
+12→19 见 D6——WL-44 墙钟逃逸口按语义只能落探针块内）；
 boot 节 **≤35 行**。
 
 **机器权威 = `scripts/context-bill.py` 的 BUDGETS 表**（Phase 1 落地），本表为其
@@ -102,3 +104,74 @@ boot 节 **≤35 行**。
 评审的横切义务：每个 bug 修复命名其回归检查（本 repo 无测试基建时 = Phase 1 lint
 的对应断言）；conventions 自述性数字一律非字面化（如「整份 conventions」），
 消除 ~51KB 类漂移；README zh/fr 随机制变化同步。
+
+## D4 — 现场治理补丁上游化（2026-07-17；来源 = 首个生产部署 queens-gambit 板）
+
+操作者在生产板批准的 5 条 §17 提案（WL-30/34/37/38/44），此前只打在插件缓存上
+（升级即丢失，靠 `governance-patches.md` 人工重放）——**逐字上游进插件本体**，
+`【patch WL-NN · 2026-07-17】` 标记保留（重放脚本 grep 即见「已在位」，幂等）：
+
+1. **WL-30**（§21a-fail.1）：轮次计数加状态前置——只有**从 In Review 转入**的 Cancel
+   计入（大纲门 fail 的连坐 Cancel 停在 Backlog/Todo，天然不计；防提前 fix-exhausted
+   卡死整剧）。回归断言：queens-gambit ep-1 轮次机械求值 = 1。
+2. **WL-34**（§4 + script-doctor SKILL）：第三条 owner 例外——无 `Episode:` 行的设计层
+   Bug ⇒ owner=showrunner（判别符 = §6 修订票强制的 `Episode: N` 行）；sweep 合法组合
+   2→3；doctor SKILL owner 按 `Episode:` 行分流（消除 SKILL 字面与实践相反）。
+3. **WL-37**（§21a-design.5）：哈希纪律两处收口——①末节 new-hash 不写入文件（自指不可
+   满足），权威 = 当前文件实测哈希；②重 stamp scope 覆盖机读行 + AC 正文内联哈希副本。
+4. **WL-38**（§7）：接管（takeover）第二分支——In Progress ∧ assignee 陈旧 ∧ 有引用
+   票号的 commit ⇒ 不回收不重排，记 `Landed: <sha>` 后接管续完；stale 时钟只认
+   assignee 本人评论（§1 keystone-stall 护栏同规）；sweep digest 兜底旗标。
+5. **WL-44**（showrunner SKILL Step 0）：autonomous 探针第五逃逸口（墙钟谓词）——
+   停靠票最新 `Notified:` >24h 且无操作者动作 ⇒ 板哈希未变也落全 boot（§9 重提醒是
+   墙钟义务，变化检测器表达不了它）。
+
+## D5 — 四类系统性失效的机制化（2026-07-17；来源 = 操作者现场报告）
+
+每条 = conventions 具名锚点 + 各承重 SKILL 一句 cite（共享机制只写一次）：
+
+1. **账本不得自证**（§15 具名规则；§19.6、§21a-gate.4、writer/reviewer cite）：
+   「与 canon 无冲突」判断必须对正文核实，绝不只对账本求值；delta 声明按列断言真值
+   附正文行号；reviewer 只认正文引句不认账本回声；lessons 记有虚假断言史的列 = 热列，
+   每触必重读正文。实证：3 张 keystone 首稿折在记账、同列虚假断言复发 4 次。
+2. **完备性断言纪律**（§21a-gate 具名块；reviewer/evaluator cite）：零值/缺席断言必须
+   写明方法+覆盖面；截断/切片读永不支撑完备性结论（写 inconclusive）；永久存储
+   （evaluation/、§22 报告）的历史性断言必须引工单/commit。实证：line[1:150] 切片读
+   产出「零漏项 PASS」假阴性入永久证据。
+3. **时钟纪律**（§18 具名块；§7 交叉引；sweep 未来戳护卫 = clamp+旗标）：一切时间戳
+   来自当次执行的 `date -u`，绝不凭模型记忆拼写；未来戳 = 立即 stale-可疑。实证：
+   拼出的未来戳把 §7 冻结 ~10h，复发。
+4. **决策点重验**（§0 具名规则，§20「回写前必重验」的一般化；showrunner 探针/审读门/
+   evaluator 门 cite）：no-op 退出、门 verdict、带宽/度量判定在落判当刻重读承重输入
+   （廉价读）。实证：2h 窗口内三角色撞 stale boot 读，showrunner 距违规假退出 3 分钟。
+
+## D6 — craft 机制化（WL-51/WL-52）+ 预算表调整
+
+- **WL-51**（craft-rules R6.2 + §23 + showrunner A1）：邻卡调度同构检查入大纲门——
+  节拍卡中段引擎/动作序列与任一相邻集同构 ⇒ 旗标换案（同构成立于卡面时修正文治不了类）。
+- **WL-52**（characters 模板 + arc-beat-card 模板 + §21a-episode.2 + §21a-gate.5）：
+  声纹卡 = voice 的 durable 载体（语域/禁忌语/样句/表演提示锚，可证否）；节拍卡
+  「声纹锚」字段引用；writer 必读链含在场角色声纹卡；审读门第 5 项对卡验。治
+  designer→writer tier 边界上的声纹断层（stage-warm 1/1/2→0/0、OS 2→0→7 摆荡）。
+- **预算调整（一句理由）**：showrunner 9,500→10,100 字符、evaluator/sweep
+  6,800→7,100 字符、探针块 12→19 行——D4/D5 的操作者强制载荷（WL-44 逃逸口按语义
+  只能落探针块）不可静默削减，故上调预算而非裁承重内容。机器权威 =
+  `scripts/context-bill.py` BUDGETS，本节与 D2 表同步回改。
+
+## D7 — 内建调度器 wl-run：tmux launcher 退役 + WL-55 结构性裁决
+
+单进程调度器 `scripts/wl-run.py`（stdlib，零依赖）取代外部 tmux/cron launcher 与
+宿主 CLI 的 /loop。裁决实质（WL-55）：§15.6「同一时刻至多一个 fire 在写 repo」的
+前提不再靠部署纪律，由调度器**以构造保证**——写 repo 四角色（showrunner /
+story-designer / episode-writer / evaluator，§15.6 逐字列举的 stage+commit 主体）
+全局单飞；板上五角色（reviewer / sweep / script-doctor / market-watch / reflect，
+从不 commit repo）可与写者并发、彼此 ≤2。共享 checkout + repo.lock 默认轨道因此
+恒为合规；worktree 仍留作操作者显式安排重叠开火时的备用轨道（§15.6 原文不动）。
+keystone-stall 护栏的 launcher 分支同步落地：起 reviewer 前 glob 板 frontmatter，
+∃ In Review+keystone ⇒ 该 fire 自动用 scheduler.keystoneReviewer 档（advisory
+选档，floor 判定仍归 reviewer 本体）。遥测 fires.jsonl 的时间戳一律取调度器自己的
+UTC 时钟——墙钟谓词（§7 陈旧、§9 24h 重提醒）的可信时间源。默认参数 = 实战
+launcher SPECS 表逐格搬入；schema 见 config-schema「内建调度器」节；回归 =
+scripts/test-wl-run.py（CI 常跑）。D3 保留清单第 1 条的正交互补关系不动：wl-run
+决定「何时 spawn」，§0 探针决定「spawn 后能否廉价退出」——当年「若将来有
+launcher」的那一半如今成真。

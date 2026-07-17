@@ -118,9 +118,10 @@ Sections: §0 §0a §2 §3 §4 §5 §5a §6 §7 §8 §10 §11 §12 §14 §15 §1
 
 分类（判据 =「有没有踩 R 硬规则」，不是维度序号）：
 - **缺陷类** ⇒ **Bug**：`writing-loop` + `Bug` + 子类型（`foreshadow`/`hook`/
-  `continuity`/`pacing`）+ owner=`reviewer`（§4）+ tier=`episode-writer`（§6/§21a），
-  单集类必带 `Episode: <N>`（§5 顺序前置判定依据）；优先级按 §5 rank
-  （`continuity` = rank 3）。
+  `continuity`/`pacing`）+ tier=`episode-writer`（§6/§21a）。**owner 按有无 `Episode:` 行分流
+  （§4，patch WL-34 · 2026-07-17）：单集正文缺陷（带 `Episode: <N>`）⇒ owner=`reviewer`；
+  无 `Episode:` 行的设计层缺陷（季级账本/大纲，命中 outline/arc）⇒ owner=`showrunner`。**
+  单集类必带 `Episode: <N>`（§5 顺序前置判定依据）；优先级按 §5 rank（`continuity` = rank 3）。
 - **非缺陷打磨类**（未踩硬规则的软趋势）⇒ **Improvement**：owner=`showrunner`
   （§4）；tier 可不带——由 showrunner 在 §5a 放行前赋予，停在 Backlog 不算搁浅。
 
