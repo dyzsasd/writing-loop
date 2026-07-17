@@ -105,11 +105,23 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 
 之后就是**循环推进**：`showrunner → story-designer → episode-writer → reviewer → evaluator → script-doctor`，反复轮转，直到里程碑。
 
-**keystone 档位提醒**：keystone 集（前 3 集 / 卡点集 / 终局）的验收需要顶配档 reviewer——用 `opus`/`max` 跑 `/writing-loop:reviewer-agent`，否则该集会被跳过留待更高档 fire 并卡住流水线（sweep 会在板健康 digest 旗标提醒你）。
+**keystone 档位提醒**：keystone 集（前 3 集 / 卡点集 / 终局）的验收需要顶配档 reviewer——用 `opus`/`max` 跑 `/writing-loop:reviewer-agent`，否则该集会被跳过留待更高档 fire 并卡住流水线（sweep 会在板健康 digest 旗标提醒你）。下文的内建调度器 `wl-run` 会自动做这件事：板上有 In Review 的 keystone 集时，它起的 reviewer fire 自动升到顶配档。
 
 你不用记精确顺序——**看板会强制真实次序**：前一集没 Done 就写不了下一集；大纲没过门子票不放行；里程碑门用 `Blocked-by` 挡住越界生产。任何 agent 跑一次没事做，就报告“无活”并退出，你接着跑下一个即可。
 
-**想自动化**（不想手动一条条敲）：用 `/loop` 让它按间隔轮转，或用系统 `cron` 定时点这些命令。因为每个 fire 无状态，随时开停都安全。
+**想自动化**（不想手动一条条敲）：用随插件发行的内建调度器——在 workspace 目录下运行：
+
+```bash
+python3 <插件目录>/scripts/wl-run.py --dry-run   # 先打印每条将起命令的完整解析
+python3 <插件目录>/scripts/wl-run.py             # 单进程驱动全部 9 个 agent 循环，Ctrl-C 停
+```
+
+（`<插件目录>` 即插件安装位置，如 `~/.claude/plugins/cache/writing-loop/writing-loop/<版本>`。）
+它按各自节律驱动每个 agent，并保证手动轮转和 cron 给不了的三件事：写 repo 的四个角色
+（showrunner / story-designer / episode-writer / evaluator）**按构造**同一时刻只跑一个
+（commit 绝不交错）；keystone 集自动换顶配 reviewer fire；每 fire 有墙钟上限并逐条记入
+`.writing-loop/<key>/fires.jsonl` 遥测账本。`--once` 单轮；节律/档位在 config.json 的
+`scheduler` 块（见 references/config-schema.md）。因为每个 fire 无状态，随时开停都安全。
 
 ---
 

@@ -148,7 +148,9 @@ reviewer → evaluator → script-doctor`, à répéter jusqu'à un jalon.
 / finale) doivent être validés par un reviewer au palier maximal — lancez
 `/writing-loop:reviewer-agent` en `opus`/`max`, sinon l'épisode est sauté en attente
 d'un fire de palier supérieur et le pipeline se bloque (sweep le signale dans le
-digest de santé du tableau).
+digest de santé du tableau). L'ordonnanceur intégré `wl-run` (ci-dessous) le fait
+automatiquement : dès qu'un épisode keystone est In Review, le fire reviewer qu'il
+lance est escaladé au palier maximal.
 
 Vous n'avez pas besoin de mémoriser l'ordre exact — **le tableau impose l'ordre
 réel** : l'épisode N ne peut s'écrire tant que `ep-(N-1)` n'est pas Done ; les
@@ -156,9 +158,25 @@ tickets-enfants ne sont pas libérés tant que le plan n'a pas passé sa porte ;
 portes de jalon utilisent `Blocked-by` pour bloquer la surproduction. Tout agent qui
 ne trouve rien à faire rapporte « rien à faire » et sort — lancez simplement le suivant.
 
-**Pour automatiser** (au lieu de les taper un par un) : utilisez `/loop` pour les
-faire tourner à intervalle, ou pointez le `cron` système sur ces commandes. Comme
-chaque fire est sans état, démarrer et arrêter est toujours sûr.
+**Pour automatiser** (au lieu de les taper un par un) : utilisez l'ordonnanceur
+intégré — depuis le dossier workspace :
+
+```bash
+python3 <dossier-plugin>/scripts/wl-run.py --dry-run   # imprime d'abord chaque commande résolue
+python3 <dossier-plugin>/scripts/wl-run.py             # un seul processus pilote les 9 boucles d'agents, Ctrl-C pour arrêter
+```
+
+(`<dossier-plugin>` est l'emplacement d'installation du plugin, p. ex.
+`~/.claude/plugins/cache/writing-loop/writing-loop/<version>`.) Un seul processus
+lance chaque agent à sa propre cadence et garantit ce que la rotation manuelle et
+cron ne peuvent pas : les quatre rôles qui écrivent le repo (showrunner /
+story-designer / episode-writer / evaluator) tournent un seul à la fois **par
+construction** (aucun commit entrelacé) ; les épisodes keystone reçoivent
+automatiquement un fire reviewer au palier maximal ; chaque fire a un plafond
+horloge-murale et est journalisé dans `.writing-loop/<clé>/fires.jsonl`. `--once`
+fait une seule passe ; cadences et paliers vivent dans le bloc `scheduler` de
+config.json (voir references/config-schema.md). Comme chaque fire est sans état,
+démarrer et arrêter est toujours sûr.
 
 ---
 

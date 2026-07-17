@@ -21,3 +21,6 @@ jobs:
 
       - name: board-lock 自检（acquire / contend / stale-reclaim / release / 多锁序）
         run: bash scripts/board-lock.sh --self-test
+
+      - name: wl-run 自检（间隔触发 · 写者单飞 · cap 超时杀 · keystone 升档 · fires.jsonl · dry-run 零 spawn · 锁防重跑）
+        run: python3 scripts/test-wl-run.py

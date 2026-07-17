@@ -86,6 +86,75 @@
 定位规则见 conventions §11（CWD 在某 repoPath 内 ⇒ 该项目；否则恰一个 enabled ⇒
 该项目；否则问操作者，绝不猜、绝不遍历）。
 
+## 内建调度器 — `scheduler` 块（`scripts/wl-run.py`）
+
+`wl-run` 是随插件发行的单进程调度器（stdlib python3，零依赖）：一条命令驱动一个项目的
+全部 agent 循环，取代外部 tmux/cron launcher 与宿主 CLI 的 /loop。它按构造恢复 §15.6
+「同一时刻至多一个 fire 在写 repo」的前提——**写 repo 四角色（showrunner /
+story-designer / episode-writer / evaluator，§15.6 逐字列举的 stage+commit 主体）全局
+单飞**；板上角色（reviewer / sweep / script-doctor / market-watch / reflect，从不向剧本
+repo 落 commit）可与写者并发、彼此至多 2 路。故 wl-run 驱动下共享 checkout + repo.lock
+的默认轨道恒为合规，不必 worktree。§0 探针语义不变：wl-run 只决定「何时 spawn」，
+探针仍在 spawn 后决定「能否廉价退出」。
+
+配置在 config.json **顶层** `scheduler` 块（workspace 级），`projects.<key>.scheduler`
+同形覆盖。全部字段可缺省——内建默认即实战 launcher 的 SPECS 参数表：
+
+```jsonc
+{
+  "version": 1,
+  "scheduler": {                          // workspace 级；projects.<key>.scheduler 同形覆盖
+    "cli": "claude",                      // "claude" | "codex" —— fire 命令模板：
+                                          //   claude: claude -p "/writing-loop:<agent>-agent" --model M
+                                          //           [--effort E] --dangerously-skip-permissions
+                                          //           --add-dir <workspace>/.writing-loop   （cwd=repoPath）
+                                          //   codex : codex exec -C <repoPath> --dangerously-bypass-approvals-and-sandbox
+                                          //           --skip-git-repo-check --model M -c model_reasoning_effort="E"
+                                          //           "/writing-loop:<agent>-agent"（档位名自动按拓扑一览映射表换算）
+    "graceSeconds": 30,                   // Ctrl-C / --for 到点后等 in-flight 收尾的宽限；超时 TERM→KILL
+    "keystoneReviewer": {                 // keystone 升档档位（拓扑一览 keystone-stall 护栏的 launcher 分支）：
+      "model": "opus", "effort": "max"    //   起 reviewer 前 glob 板 frontmatter，∃ In Review+keystone 票
+    },                                    //   ⇒ 该 fire 用此档。advisory 选档——floor 判定仍归 reviewer 本体
+    "agents": {                           // 每 agent 一块；全部字段可缺省。默认 = SPECS 参数表：
+                                          //   showrunner     opus/max    180s  cap 3600  stagger 0
+                                          //   story-designer opus/max    240s  cap 3600  stagger 10
+                                          //   episode-writer sonnet/high 300s  cap 2400  stagger 20
+                                          //   reviewer       opus/max    240s  cap 2400  stagger 30
+                                          //   evaluator      opus/xhigh  240s  cap 2400  stagger 40
+                                          //   sweep          sonnet/high 600s  cap 1200  stagger 50
+                                          //   script-doctor  opus/xhigh  1800s cap 2400  stagger 60
+                                          //   market-watch   sonnet/high 3600s cap 1200  stagger 70
+                                          //   reflect        opus/xhigh  3600s cap 2400  stagger 80
+      "episode-writer": {
+        "model": "sonnet",                // 档位取值优先序（低→高）：SPECS 默认 < workspace scheduler
+        "effort": "high",                 //   < 项目 models/efforts 映射 < 项目 scheduler
+        "intervalSeconds": 300,           // 上一 fire 结束 → 下一 fire 开始的间隔（非固定频率）
+        "capSeconds": 2400,               // 每 fire 墙钟上限；超时 TERM→KILL 并记 timedOut
+        "enabled": true,                  // false ⇒ wl-run 不驱动该 agent（探针语义不受影响）
+        "staggerSeconds": 20              // 首 fire 错峰延迟（对齐 SPECS；--once 下忽略）
+        // "command": ["…", "{model}"]    // 高级/测试接缝：整条命令覆盖（数组 argv；
+        //                                //   可用占位 {skill} {model} {effort} {repo} {data} {agent}）
+      }
+    }
+  },
+  "projects": { /* … 见上节 … */ }
+}
+```
+
+CLI 面：`wl-run [--project K] [--once] [--dry-run] [--plan N] [--agents a,b] [--for S]
+[--self-test]`。`--dry-run` 打印每条将起命令的完整解析（model/effort/cwd/env），零
+spawn、零写、不拿锁；`--plan N` 模拟打印未来 N 个 fire 的排程；`--once` 每 agent 恰好
+一 fire；`--for S` 跑 S 秒后优雅停止；Ctrl-C = 优雅停（宽限收尾，再按立即杀）。
+
+运行时产物（都在项目数据目录）：**遥测账本 `fires.jsonl`**——每 fire 追加一行
+`{agent, model, effort, startedAt, endedAt, durationSeconds, exitCode, timedOut, noop,
+keystoneEscalated}`；`noop` 从 fire 输出的尾行「no-op」标记检出（§0 廉价探针的一行
+收尾）；时间戳一律取 wl-run 自己的时钟（UTC）——agent 的自述时间不可信，墙钟谓词
+（§7 陈旧判据、§9 24h 重提醒类）以此账本与文件 mtime 为可信时间源。fire 全量输出落
+`logs/`。**防重跑锁 `wl-run.lock`**：`scripts/board-lock.sh` choreography（O_EXCL 独占
+创建、>60min 陈旧强清，§18）；另一 wl-run 在位 ⇒ 拒绝启动；运行中每 30s touch 心跳，
+活进程永不因陈旧被抢，崩溃残锁 60min 后自动回收。
+
 ## 数据目录布局 — `<workspace>/.writing-loop/<project-key>/`
 
 ```
@@ -98,6 +167,9 @@
     lessons.md            # §14 分节 lessons（per-operator）
     reports/              # §22 daily/weekly/monthly + *.review.md 操作者点评
     state/                # agent 小状态（showrunner 的 lens 轮换、doctor 的 SHA 指纹等）
+    fires.jsonl           # wl-run 遥测账本（每 fire 一行 JSON；上节）
+    logs/                 # wl-run 每 fire 全量输出（<UTC时间戳>-<agent>.log）
+    wl-run.lock           # wl-run 防重跑锁（运行中在位；退出释放）
 ```
 
 整个 `.writing-loop/` 是 untracked 运行时状态，是各剧本 repo 的**兄弟**目录，不进
