@@ -146,8 +146,8 @@ commit（§19）；③认领超时——
 `Bail-shape`（§9）分组（`external-prereq` 堆积 = 在等操作者；`fix-exhausted` 堆积 =
 人工停靠积压）；needs-\* 各计数；**停靠超时**——`external-prereq`/`fix-exhausted`
 停靠票中最新 `Notified:` 行已 >24h 无操作者动作的清单（§9 重提醒轨道——showrunner
-发提醒，你只浮出）；**账本超编/滚存欠账**（§19 ≤15KB 纪律的稽核方）——
-任一 `ledgers/*.md` 实测 >15KB 或上一 arc 完结而 `ledgers/archive/` 无滚存条目 ⇒
+发提醒，你只浮出）；**账本超编/滚存欠账**（§19 ≤25KB 纪律的稽核方；`## changelog` 节不计入，patch WL-66）——
+任一 `ledgers/*.md`（剔除 `## changelog` 节后）实测 >25KB 或上一 arc 完结而 `ledgers/archive/` 无滚存条目 ⇒
 旗标路由 story-designer（你只 stat 大小，不读不改）；本 fire 修了什么（Job 1-4）+
 旗标了什么（Job 5-6.5 及一切「不猜」项）。
 

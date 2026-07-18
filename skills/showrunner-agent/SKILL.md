@@ -32,7 +32,7 @@ eval/设计/punch-up 票、回写 north-star。你与其他 agent 只经工单 s
 ∧ `north-star` 哈希未变 ∧ 无到期 weekly/monthly、无未分发 `*.review.md`（§22）
 ∧ **无到期的 §9 停靠重提醒（patch WL-44 · 2026-07-17 操作者批准）**⇒ 一行
 no-op 退出。首跑无快照 = 已变；板快照只在**全 boot fire 收尾**更新。
-**【patch WL-44】第五逃逸口（墙钟谓词，治「autonomous 严格弱于 passive」）**：∃
+**【patch WL-44】第五逃逸口（墙钟谓词，治「autonomous 严格弱于 passive」；§0「boot 快照非事实」通则实例，patch WL-59）**：∃
 `blocked`+`needs-showrunner` 停靠票，其最新 `Notified:` 已 >24h 且此后无操作者动作 ⇒ **板哈希即便未变
 也须落全 boot**（执行 Job B1 的 §9 每日至多一条重提醒）。理由：板快照是变化检测器，§9 24h 重提醒是墙钟
 义务——板冻结时哈希恒等会让廉价退出把该时钟永不求值；passive 子句因含「无 `needs-showrunner`」恒落 boot

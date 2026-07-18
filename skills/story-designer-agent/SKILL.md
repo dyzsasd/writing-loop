@@ -64,7 +64,7 @@ Sections: §0 §0a §2 §4 §5 §6 §7 §8 §9 §10 §11 §12 §12a §14 §15 §
 **B. arc 账本滚存核对（§19 rollup；只核对，执行在下一 arc 设计票 Step 4 内）**：有已完成
 arc 明细未归档 ⇒ 记入本 fire 待办（正拾设计票 ⇒ Step 4 一并做；无载体 ⇒ file 一张
 `needs-designer` 自留票）。滚存本体：story-state 该 arc 逐集末态 + foreshadow 已 paid
-条目滚入 `ledgers/archive/arc-NN.md`（留滚存索引），活跃账本 ≤15KB（sweep 稽核，§22）；
+条目滚入 `ledgers/archive/arc-NN.md`（留滚存索引），活跃账本 ≤25KB、`## changelog` 节不计入（patch WL-66；sweep 稽核，§22）；
 账本写走 §15.5 固定序锁（`scripts/board-lock.sh`）。
 
 ### Step 0 — 孤儿回收（§7）
