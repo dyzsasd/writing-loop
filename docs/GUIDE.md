@@ -143,7 +143,7 @@ reviewer → evaluator → script-doctor`, repeat, until a milestone.
 must be reviewed by a top-tier reviewer — run `/writing-loop:reviewer-agent` on
 `opus`/`max`, otherwise the episode is skipped for a higher-tier fire and the
 pipeline stalls (sweep flags it in the board-health digest). The built-in scheduler
-`wl-run` (below) does this automatically: whenever a keystone episode is In Review,
+(`writing-loop run`, below) does this automatically: whenever a keystone episode is In Review,
 the reviewer fire it launches is escalated to the top tier.
 
 You don't need to memorize the exact order — **the board enforces the real
@@ -152,16 +152,18 @@ aren't released until the outline passes its gate; milestone gates use `Blocked-
 to block over-production. Any agent that finds nothing to do reports "no work" and
 exits — just run the next one.
 
-**To automate** (instead of typing them one by one): use the built-in scheduler —
-from the workspace folder run:
+**To automate** (instead of typing them one by one): the preferred route is the npm
+CLI — install once globally, then run from the workspace folder:
 
 ```bash
-python3 <plugin-dir>/scripts/wl-run.py --dry-run   # print every resolved fire command first
-python3 <plugin-dir>/scripts/wl-run.py             # one process drives all 9 agent loops, Ctrl-C to stop
+npm i -g @dyzsasd/writing-loop     # once
+writing-loop run --dry-run         # print every resolved fire command first
+writing-loop run                   # one process drives all 9 agent loops, Ctrl-C to stop
 ```
 
-(`<plugin-dir>` is where the plugin is installed, e.g.
-`~/.claude/plugins/cache/writing-loop/writing-loop/<version>`.) One process fires
+(Prefer no global install? `npx @dyzsasd/writing-loop run` works the same. The
+scheduler is implemented natively inside the npm package — no Python required.)
+One process fires
 every agent on its own cadence and guarantees what hand-run rotations and cron
 can't: the four repo-writing roles (showrunner / story-designer / episode-writer /
 evaluator) run one-at-a-time **by construction** (no interleaved commits); keystone
@@ -170,6 +172,18 @@ and is logged to `.writing-loop/<key>/fires.jsonl`. `--once` does a single pass;
 per-agent cadence/model/effort live in the `scheduler` block of config.json (see
 references/config-schema.md). Because every fire is stateless, starting and stopping
 is always safe.
+
+**Switching engines**: by default the scheduler fires through Claude Code; you can
+move the whole room to Codex or opencode:
+
+```bash
+writing-loop run --cli opencode
+```
+
+opencode has no built-in default model — first set a `provider/model`-shaped tier in
+config.json, e.g. `scheduler.agents.episode-writer.model = "openrouter/anthropic/claude-sonnet-4.5"`,
+and run `opencode auth login` once beforehand. (`--cli codex` switches to Codex the
+same way; tier names are converted automatically.)
 
 ---
 

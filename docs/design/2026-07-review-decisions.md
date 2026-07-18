@@ -160,7 +160,8 @@ boot 节 **≤35 行**。
 
 ## D7 — 内建调度器 wl-run：tmux launcher 退役 + WL-55 结构性裁决
 
-单进程调度器 `scripts/wl-run.py`（stdlib，零依赖）取代外部 tmux/cron launcher 与
+单进程调度器 `hub/src/scheduler.ts`（`writing-loop run` 内建，零运行时依赖；裁决时为
+`scripts/wl-run.py`，后按纯 TS 架构裁决整体移植入 npm 包）取代外部 tmux/cron launcher 与
 宿主 CLI 的 /loop。裁决实质（WL-55）：§15.6「同一时刻至多一个 fire 在写 repo」的
 前提不再靠部署纪律，由调度器**以构造保证**——写 repo 四角色（showrunner /
 story-designer / episode-writer / evaluator，§15.6 逐字列举的 stage+commit 主体）
@@ -172,6 +173,6 @@ keystone-stall 护栏的 launcher 分支同步落地：起 reviewer 前 glob 板
 选档，floor 判定仍归 reviewer 本体）。遥测 fires.jsonl 的时间戳一律取调度器自己的
 UTC 时钟——墙钟谓词（§7 陈旧、§9 24h 重提醒）的可信时间源。默认参数 = 实战
 launcher SPECS 表逐格搬入；schema 见 config-schema「内建调度器」节；回归 =
-scripts/test-wl-run.py（CI 常跑）。D3 保留清单第 1 条的正交互补关系不动：wl-run
+hub/test/scheduler*.ts（`npm test` 常跑）。D3 保留清单第 1 条的正交互补关系不动：wl-run
 决定「何时 spawn」，§0 探针决定「spawn 后能否廉价退出」——当年「若将来有
 launcher」的那一半如今成真。

@@ -1,0 +1,16 @@
+{
+  "//": "发布构建：node 拒绝 type-strip node_modules 下的 .ts，故发布包只带编译出的 JS（dist/）。与 node 自身的 strip-only 行为对齐——noCheck（不做类型检查，同零构建源码直跑）+ rewriteRelativeImportExtensions（./x.ts import 说明符 → 产物里的 ./x.js）。仓库内开发仍直接跑 src/ 的 .ts（node >=23.6）；只有 npm 产物走这份构建（prepack 触发）。",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "es2023",
+    "lib": ["es2023"],
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noCheck": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src/**/*.ts"]
+}

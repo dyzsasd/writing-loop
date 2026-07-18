@@ -1,0 +1,4 @@
+{
+  "//": "编辑器/默认配置——与 typecheck 门同一份 strict 视图。构建显式用 tsconfig.build.json；运行时执行是 node 的 type-stripping，从不读 tsconfig。",
+  "extends": "./tsconfig.check.json"
+}

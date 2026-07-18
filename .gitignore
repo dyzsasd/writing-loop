@@ -13,3 +13,13 @@ node_modules/
 
 # python lint tooling
 __pycache__/
+
+# npm 发布构建产物（prepack 时生成，绝不入库）
+hub/dist/
+# 插件负载在 npm prepack 时从仓库根拷进 hub/，让 Claude Code 的 npm 插件源在包根
+# 找到 .claude-plugin/plugin.json —— 仓库里只保留根级单份
+hub/.claude-plugin/
+hub/skills/
+hub/references/
+hub/scripts/
+hub/templates/

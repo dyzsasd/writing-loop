@@ -61,6 +61,15 @@ Codex 还可作为可选的**加速器**（按项目 `codex` 配置 opt-in）：
 视觉 token 变成人物/场景概念图；以及给审读/剧本医生的**异构第二引擎审查**。未装或关闭 ⇒
 一切行为完全不变。
 
+可选安装 **`writing-loop` npm CLI**——内建调度器与板工具的薄前端：
+
+```bash
+npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
+```
+
+编剧团队可跑在**三个引擎**任一之上——Claude Code（默认）/ Codex / opencode
+（`writing-loop run --cli opencode`；见 conventions §25）。
+
 **2. 立项**——在一个空的项目文件夹里运行立项 skill。它会做 interview（题材、
 受众画像、monetization、合规预筛；改编项目另加原著文本 + 拆书），脚手架出 bible /
 outline / ledgers / episodes 目录树，注册项目，并 file 第一张票（大纲票）：
@@ -84,9 +93,9 @@ outline / ledgers / episodes 目录树，注册项目，并 file 第一张票（
 /writing-loop:sweep-agent               # 板生命周期卫生：错标修复、孤儿回收
 ```
 
-**没有单独的 CLI、也没有服务端**——板就是 `<workspace>/.writing-loop/<project-key>/board/`
-下的一堆纯文件，调度要么手动 slash，要么你自己的 `cron`。拷走文件夹即完成
-迁机。
+**没有服务端**——板就是 `<workspace>/.writing-loop/<project-key>/board/`
+下的一堆纯文件，调度要么手动 slash、要么 `writing-loop` CLI（`writing-loop run`）、
+要么你自己的 `cron`。拷走文件夹即完成迁机。
 
 总编剧把队列压浅（Backlog-first，只有它能放行到 Todo），单集票在一道顺序前置后
 严格按集序流转，任何 fail 都走三级路由（notes 回炉 → `Mode: direct-write` →

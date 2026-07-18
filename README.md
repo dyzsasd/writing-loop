@@ -75,6 +75,16 @@ config): **image generation** — turn the bible's visual tokens into character 
 scene concept art — and an **independent second-engine review** for the Reviewer /
 Script-Doctor. Absent or disabled ⇒ everything behaves exactly the same.
 
+Optionally install the **`writing-loop` npm CLI** — a thin front-end for the
+built-in scheduler and board tooling:
+
+```bash
+npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
+```
+
+The room runs on any of **three engines** — Claude Code (default), Codex, or
+opencode (`writing-loop run --cli opencode`; see conventions §25).
+
 **2. Start a project** — run the intake skill from an empty project folder. It
 interviews you (genre, audience profile, monetization, compliance pre-screen;
 for adaptations, the source text + book-teardown), scaffolds the bible /
@@ -101,9 +111,10 @@ order, or point external `cron` at them:
 /writing-loop:sweep-agent              # board hygiene, mislabel repair, orphan recovery
 ```
 
-There is **no separate CLI and no server** — the board is plain files under
-`<workspace>/.writing-loop/<project-key>/board/`, and scheduling is either a manual slash
-call or your own `cron`. Copy the folder and you've migrated machines.
+There is **no server** — the board is plain files under
+`<workspace>/.writing-loop/<project-key>/board/`, and scheduling is a manual slash
+call, the `writing-loop` CLI (`writing-loop run`), or your own `cron`. Copy the
+folder and you've migrated machines.
 
 The Showrunner keeps the queue shallow (Backlog-first; only it promotes to
 Todo), episode tickets flow strictly in episode order behind a sequential

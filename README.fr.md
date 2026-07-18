@@ -81,6 +81,16 @@ bible en concept art de personnages / décors — et une **revue indépendante p
 second moteur** pour le Reviewer / Script-Doctor. Absent ou désactivé ⇒ tout se
 comporte exactement pareil.
 
+En option, installez le **CLI npm `writing-loop`** — une façade mince pour
+l'ordonnanceur intégré et l'outillage du tableau :
+
+```bash
+npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
+```
+
+La room tourne sur l'un des **trois moteurs** — Claude Code (par défaut), Codex ou
+opencode (`writing-loop run --cli opencode` ; voir conventions §25).
+
 **2. Démarrer un projet** — lancez la skill d'accueil depuis un dossier de projet
 vide. Elle vous interroge (genre, profil d'audience, monétisation, pré-filtrage
 conformité ; pour les adaptations, le texte source + le décorticage du livre),
@@ -107,9 +117,10 @@ Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 /writing-loop:sweep-agent              # hygiène du tableau, réparation d'étiquetage, récupération des orphelins
 ```
 
-Il n'y a **ni CLI séparé ni serveur** — le tableau est de simples fichiers sous
-`<workspace>/.writing-loop/<clé-projet>/board/`, et l'ordonnancement est soit un appel slash
-manuel, soit votre propre `cron`. Copiez le dossier et vous avez migré de machine.
+Il n'y a **pas de serveur** — le tableau est de simples fichiers sous
+`<workspace>/.writing-loop/<clé-projet>/board/`, et l'ordonnancement est un appel slash
+manuel, le CLI `writing-loop` (`writing-loop run`), ou votre propre `cron`. Copiez
+le dossier et vous avez migré de machine.
 
 Le Showrunner garde la file peu profonde (Backlog-first ; lui seul promeut vers
 Todo), les tickets d'épisode s'écoulent strictement dans l'ordre des épisodes

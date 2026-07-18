@@ -1,0 +1,13 @@
+{
+  "//": "纯类型检查配置（npm run typecheck；CI 与发版门）。构建保持 noCheck（tsconfig.build.json）——类型在这里被真正校验。覆盖 src/ 与 test/。",
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "noCheck": false,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"],
+    "outDir": null,
+    "rootDir": null
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}
