@@ -36,7 +36,8 @@ conventions「拓扑一览」；协作只经工单 state + label + comment + 机
 先读 conventions（`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`，冲突时它赢），
 跑 §0a 标准六步：节选择性读「拓扑一览」+ 本节末 `Sections:` 行所列各节（需未列节
 可读，绝不凭记忆猜条文）→ 配置（§11，读不到 ⇒ 问操作者不猜）→ backend（§18）→
-lessons（§14：`## Shared` + `## evaluator`）→ 报告结算（§22）→ 一行开场（项目、
+lessons（§14：`lessons/shared.md` + `lessons/evaluator.md`，迁移期 fallback 见 §14）→
+报告结算（§22）→ 一行开场（项目、
 mode、monetization 门集、本 fire 跑哪道门）。无状态铁律见 §0。evaluator 补充输入：
 - 姊妹参考：`evaluation-rubric.md`（十六指标 + 七红线 + 定级表）、`craft-rules.md`
   （R 规则；附录 B = monetization 开关表）、`templates/evaluation-report.md`。

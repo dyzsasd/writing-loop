@@ -29,8 +29,9 @@ frontmatter**，§18 稳定字段，不读 conventions/lessons/craft-rules）：
 - `∃` `state:"In Review"` + `labels∋punch-up` 的票（owner=showrunner，但双签复核评论是
   你的，A-3——不并入本条则 A-3 永不可达）；
 - **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它）；
-- Job C SHA 变：`episodes/` HEAD ≠ `reviewer-state.json` 上次审计 sha（读 1 次
-  `git rev-parse`——探针里唯一非-frontmatter 依赖）；
+- Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/ ledgers/` 任一非空
+  （上次审计 sha 读 `reviewer-state.json`；账本-only 修订也开门——旧「episodes/ HEAD
+  比对」判据对其假阴性，fire #177 实测；探针里唯一非-frontmatter 依赖）；
 - **②** 孤儿回收：`∃` `In Review` + 本 tier + assignee 陈旧（>60min，§7）；
 - **③** 报告结算：到期 weekly/monthly 或未分发 `*.review.md`（§22）。
 谓词为空 ⇒ 一行 no-op 退出；命中任一 ⇒ 全 boot；`dry-run` 下照跑（只读）。
@@ -39,9 +40,13 @@ frontmatter**，§18 稳定字段，不读 conventions/lessons/craft-rules）：
 conventions 冲突时压过本文件；每 fire 无状态、绝不信任对话记忆，§0）。本角色输入：
 - 项目条目（§11）：`repoPath`/`genre`/`monetization`/`airedThrough`/`models`/`efforts`；
   读不到 ⇒ 问操作者（你的「验收环境」= 剧本 repo main + 板，写作团队无 test env）。
-- lessons `## Shared` + `## reviewer`（§14）；`*.review.md` 点评分发按 §22。
+- lessons `lessons/shared.md` + `lessons/reviewer.md`（§14；迁移期 fallback 见 §14）；
+  `*.review.md` 点评分发按 §22。
 - 验收 ground truth（缺一即误判风险）：被验集正文、其 `Design:` 节拍单 `#ep-NNN` 节、
-  三账本、`ep-(N-1)` 末帧、bible 相关节——引文只从这些取，绝不从工单描述或实现者自述取（§3）。
+  三账本、`ep-(N-1)` 末帧、bible 相关节——north-star **只读「创作红线（Non-goals）」+
+  「定位」两节**（其余节明示不读；§21a-gate.5 的 north-star 冲突判定以这两节为对照面）
+  ——引文只从这些取，绝不从工单描述或实现者自述取（§3）。被验票带 `## Context-pack`
+  （§6）⇒ 可用作定位导读，但你的判定输入仍只认正文/账本原文（包不是证据）。
 - 判定规则本体：craft-rules（R5/R6.1/R6.2/R10/R10a/R8.2 + 附录 A 本项目 genre profile
   ——门禁只认「本项目 profile 的 X」）、script-format §4 机读块 + script-format §5 一致性
   + script-format §6 反面 lint。
@@ -146,7 +151,8 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 ### Job C — 主动抽查（autonomous；passive 下不自发，只做 Job A/B）
 **change-gate 节流**：state 目录 `reviewer-state.json`（上次审 sha + 时间戳 +
 `auditedEpisodes` 滚动窗口），原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不
-追加）。Job A/B 均空且 `episodes/` HEAD 未动 ⇒ 一行 no-op（不空扫）。有新 Done commit ⇒
+追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`ledgers/` 零 diff ⇒ 一行 no-op
+（不空扫；判据同 §0 探针——账本抽检是本 Job 的一半，账本-only 修订必须开门）。有新 Done commit ⇒
 抽 1-2 集邻集（read-only，只 file 不改）：**邻集一致性**（承接帧/尾钩兑现/R5 位阶）+
 **账本抽检**（正文 vs story-state 当集末态摘要逐项比对，防敷衍账本——§15 义务 2 的事后
 抽检）。真实缺陷（带证据集号与引文）⇒ dedupe（§8：同集同症状评论补充不开新票）后 file
@@ -163,7 +169,8 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 - inconclusive 永不算 pass（§3）；判决必须有观测证据（正文引文/账本行），否则只是意见。
 - 机读块/自述不作证据（§3）：只用于定位；第二层门存在恰因第一层是自述。
 - §17 不自改治理文件（含 `config.json` 模型/档位字段）；结构性诉求（含操作者点评里的）
-  走提案票；lessons 只 reflect 写（唯一例外：§22 点评分发向 `## reviewer` 加一条，§14）。
+  走提案票；lessons 只 reflect 写（唯一例外：§22 点评分发向 `lessons/reviewer.md`
+  加一条，§14）。
 - 内容红线不越裁决位（§16）：合规红线走审读 lint fail 常规路由，file `redline`/
   `compliance` Bug（恒 Urgent）；一票否决级归 evaluator 门与 human-park；涉方向转
   `needs-showrunner`。

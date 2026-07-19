@@ -80,7 +80,7 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 跑完后，`add-script` 自动：
 
 - **SCAFFOLD**：生成 `bible/`（north-star / characters / world）、`outline.md`、`ledgers/`（foreshadow / story-state / production + archive/）、`episodes/`、`evaluation/`；`git commit`。
-- **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons.md` 骨架。
+- **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons/` 目录骨架（全队共享一份 + 每角色一份）。
 - **首张大纲票**：file 一张 outline 工单（owner=showrunner，tier=story-designer）。
 - **VERIFY**：回读校验并告诉你下一步。
 
@@ -122,7 +122,10 @@ writing-loop run                   # 单进程驱动全部 9 个 agent 循环，
 它按各自节律驱动每个 agent，并保证手动轮转和 cron 给不了的三件事：写 repo 的四个角色
 （showrunner / story-designer / episode-writer / evaluator）**按构造**同一时刻只跑一个
 （commit 绝不交错）；keystone 集自动换顶配 reviewer fire；每 fire 有墙钟上限并逐条记入
-`.writing-loop/<key>/fires.jsonl` 遥测账本。`--once` 单轮；节律/档位在 config.json 的
+`.writing-loop/<key>/fires.jsonl` 遥测账本。调度器还**有活才起**（work-gated dispatch）：
+起 fire 前先廉价探一眼板（只解析工单 frontmatter），该 agent 无活就干脆不 spawn 会话——
+空转不再付整套 boot 上下文（conventions/lessons 等）的 token 税。审读（reviewer）默认
+档位为 opus/high，仅 keystone 集的验收升到顶配。`--once` 单轮；节律/档位在 config.json 的
 `scheduler` 块（见 references/config-schema.md）。因为每个 fire 无状态，随时开停都安全。
 
 **切换引擎**：调度器默认经 Claude Code 起 fire，也能整队换到 Codex 或 opencode：
@@ -156,7 +159,7 @@ opencode 没有内建默认模型——先在 config.json 里给出 `provider/mo
 
 - **人工停靠票**：真正需要你决策的事（方向变更、一票否决、fix-exhausted、等投放数据）会以停靠票形式出现。配置了 `comms.provider` 时，系统会向带外通道推送一条通知（票 ID + 需要的决定）；未配置则每天看 daily digest 的 needs-attention 节（在 `~/dramas/.writing-loop/my-drama/reports/`）。
 - **门后等待**：一卡门后系统停下等你决策，不会自行续产（见第 4 步）。
-- **给某个 agent 反馈**：对它的某份报告写一个 `<报告名>.review.md` **兄弟文件**（与被点评的报告同在 `~/dramas/.writing-loop/my-drama/reports/` 目录）。该 agent 下次运行会把你的点评蒸馏进自己的 lessons 分节，长期改变行为。
+- **给某个 agent 反馈**：对它的某份报告写一个 `<报告名>.review.md` **兄弟文件**（与被点评的报告同在 `~/dramas/.writing-loop/my-drama/reports/` 目录）。该 agent 下次运行会把你的点评蒸馏进自己的 lessons 角色文件（`lessons/<角色>.md`），长期改变行为。
 - **评估报告**：在剧本 repo 的 `evaluation/` 里。
 
 ---

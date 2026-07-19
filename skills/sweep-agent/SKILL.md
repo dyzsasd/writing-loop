@@ -41,7 +41,8 @@ owner-scoped agent 各看自己的切片；**掉出所有切片**的票（缺 ow
 先读 conventions（`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`，冲突时它赢），
 跑 §0a 标准六步：节选择性读「拓扑一览」+ 本节末 `Sections:` 行所列各节（需未列节
 可读，绝不凭记忆猜条文）→ 配置（§11，读不到 ⇒ 问操作者不猜）→ backend（§18）→
-lessons（§14：`## Shared` + `## sweep`）→ 报告结算（§22）→ 一行开场（项目、mode、
+lessons（§14：`lessons/shared.md` + `lessons/sweep.md`，迁移期 fallback 见 §14）→
+报告结算（§22）→ 一行开场（项目、mode、
 本 fire 打算扫什么）。无状态铁律见 §0。sweep 补充输入：
 - 项目条目字段：`repoPath`、`ticketPrefix`、`airedThrough`、`mode`。
 - 板目录规范见 §18；剧本 repo = `repoPath`；landing 恒 direct-commit 无 PR（§19）
@@ -157,8 +158,8 @@ commit（§19）；③认领超时——
 - §2 安全边界：项目 + `writing-loop` 双限定；只 glob 本项目板；一次一票绝不批量；
   板目录外零写（剧本 repo 只读作判据）。
 - §17 不自改治理文件：结构性诉求起草提案票（`blocked` + `needs-showrunner` +
-  `external-prereq`，出生即停靠）；唯一可写治理层 = 自己 `## sweep` lessons 分节的
-  点评蒸馏条（§14 例外）。
+  `external-prereq`，出生即停靠）；唯一可写治理层 = 自己角色 lessons 文件
+  （`lessons/sweep.md`）的点评蒸馏条（§14 例外）。
 - 保守优先绝不猜（§8）：修复不明显 ⇒ 留言旗标交操作者。错标重路由比旗标更坏。
 - dry-run（§12）：不写板、不删锁——只打印本会修/回收/清/旗标什么。
 - run slow：清洁工不是工人；30min 级长间隔正确。

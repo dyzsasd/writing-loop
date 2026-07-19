@@ -107,7 +107,8 @@ Then `add-script` automatically:
   `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
   `evaluation/`; `git commit`.
 - **REGISTER**: registers the project in `~/dramas/.writing-loop/config.json`, creates the
-  board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds `lessons.md`.
+  board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds the `lessons/` dir
+  (one shared file + one per role).
 - **First outline ticket**: files one outline ticket (owner=showrunner,
   tier=story-designer).
 - **VERIFY**: re-reads, validates, and tells you the next step.
@@ -168,7 +169,12 @@ every agent on its own cadence and guarantees what hand-run rotations and cron
 can't: the four repo-writing roles (showrunner / story-designer / episode-writer /
 evaluator) run one-at-a-time **by construction** (no interleaved commits); keystone
 episodes automatically get a top-tier reviewer fire; every fire has a wall-clock cap
-and is logged to `.writing-loop/<key>/fires.jsonl`. `--once` does a single pass;
+and is logged to `.writing-loop/<key>/fires.jsonl`. The scheduler is also
+**work-gated**: before each fire it takes a cheap look at the board
+(frontmatter-only parse) and simply doesn't spawn a session when that agent has
+nothing to do — idle turns no longer pay the token tax of a full boot (conventions,
+lessons, …). The reviewer's default tier is opus/high; only keystone acceptance is
+escalated to the top tier. `--once` does a single pass;
 per-agent cadence/model/effort live in the `scheduler` block of config.json (see
 references/config-schema.md). Because every fire is stateless, starting and stopping
 is always safe.
@@ -216,7 +222,7 @@ producing. This is your main control lever.
 - **Giving an agent feedback**: write a `<report-name>.review.md` **sibling file**
   next to that agent's report (same `~/dramas/.writing-loop/my-drama/reports/`
   directory). On its next run the agent distills your notes into its own lessons
-  section, changing its behavior durably.
+  role file (`lessons/<role>.md`), changing its behavior durably.
 - **Evaluation reports**: under the script repo's `evaluation/`.
 
 ---

@@ -111,7 +111,8 @@ Ensuite `add-script` automatiquement :
   `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
   `evaluation/` ; `git commit`.
 - **REGISTER** : enregistre le projet dans `~/dramas/.writing-loop/config.json`, crée le
-  répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude `lessons.md`.
+  répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude le
+  répertoire `lessons/` (un fichier partagé + un par rôle).
 - **Premier ticket de plan** : crée un ticket outline (owner=showrunner,
   tier=story-designer).
 - **VERIFY** : relit, valide et vous indique l'étape suivante.
@@ -175,7 +176,13 @@ cron ne peuvent pas : les quatre rôles qui écrivent le repo (showrunner /
 story-designer / episode-writer / evaluator) tournent un seul à la fois **par
 construction** (aucun commit entrelacé) ; les épisodes keystone reçoivent
 automatiquement un fire reviewer au palier maximal ; chaque fire a un plafond
-horloge-murale et est journalisé dans `.writing-loop/<clé>/fires.jsonl`. `--once`
+horloge-murale et est journalisé dans `.writing-loop/<clé>/fires.jsonl`.
+L'ordonnanceur est aussi **conditionné au travail** (work-gated) : avant chaque fire
+il jette un coup d'œil bon marché au tableau (analyse du seul frontmatter) et ne
+démarre aucune session quand l'agent n'a rien à faire — les tours à vide ne paient
+plus la taxe de tokens d'un boot complet (conventions, lessons, …). Le palier par
+défaut du reviewer est opus/high ; seule la validation keystone est escaladée au
+palier maximal. `--once`
 fait une seule passe ; cadences et paliers vivent dans le bloc `scheduler` de
 config.json (voir references/config-schema.md). Comme chaque fire est sans état,
 démarrer et arrêter est toujours sûr.
@@ -225,8 +232,8 @@ réelles, ou continuer à produire. C'est votre principal levier de contrôle.
 - **Donner un retour à un agent** : écrivez un fichier **frère**
   `<nom-du-rapport>.review.md` à côté du rapport de cet agent (même répertoire
   `~/dramas/.writing-loop/my-drama/reports/`). Au passage suivant, l'agent distille
-  vos remarques dans sa propre section de lessons et change durablement de
-  comportement.
+  vos remarques dans son propre fichier de lessons (`lessons/<rôle>.md`) et change
+  durablement de comportement.
 - **Rapports d'évaluation** : sous `evaluation/` du repo de scénario.
 
 ---

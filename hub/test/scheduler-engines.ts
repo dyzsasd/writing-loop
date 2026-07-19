@@ -8,6 +8,9 @@
 //   4. inline promptMode：frontmatter 剥离、${CLAUDE_PLUGIN_ROOT} 替换为绝对路径、
 //      上下文头含项目 key；claude 在 promptMode=inline 下 -p 收内联全文
 //   5. --cli flag 覆盖 config（含 --cli opencode 全车道切换）
+//   6. 0.6.0 SPECS 默认表（操作者 T1/T3 裁定的档位/间隔；cap/stagger 逐格不变）
+//   7. fire 减肥（trimFirePlugins）：清单动态读取、writing-loop 保真其余置 false、
+//      三级降级链、fireArgv 尾注 --settings、--dry-run trim 行 E2E
 // 渲染层断言直接 import src/scheduler.ts（比 python 版的 importlib 手动装干净）；
 // E2E 断言过 src/run.ts 全链路。
 import { spawnSync } from "node:child_process";
@@ -15,7 +18,10 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, unlinkSync,
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildInlinePrompt, buildSched, fireArgv, OPENCODE_PERMISSION_DEFAULT } from "../src/scheduler.ts";
+import {
+  AGENT_SPECS, buildInlinePrompt, buildSched, buildTrimSettingsJson, fireArgv,
+  OPENCODE_PERMISSION_DEFAULT, readEnabledPlugins, resolveTrimPlugins,
+} from "../src/scheduler.ts";
 import { pluginRoot } from "../src/paths.ts";
 
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -133,7 +139,9 @@ function testOpencodeDryRun(): void {
 // 3. OPENCODE_PERMISSION 注入 spawn env（真 spawn，command 覆盖接缝取回 env）
 // ---------------------------------------------------------------------------
 function testOpencodePermissionEnv(): void {
-  const ws = makeWs({}, { cli: "opencode" });
+  // laneGating:false —— 本用例连跑两次 --once sweep 断言 env 注入；0.6.0 门控下第二次
+  // 会被 sweep 兜底节拍正确拦下（距上次干净 fire <30min），那是 lane-gating.ts 的被测面。
+  const ws = makeWs({}, { cli: "opencode", laneGating: false });
   const probe = join(ws, "env_probe.mjs");
   const outPath = join(ws, "perm.txt");
   writeFileSync(probe, `import { writeFileSync } from "node:fs";
@@ -219,12 +227,115 @@ function testCliFlagOverride(): void {
 }
 
 // ---------------------------------------------------------------------------
+// 6. 0.6.0 SPECS 默认表（操作者 T1/T3 裁定逐格锁死——改默认必须连这里一起改）
+// ---------------------------------------------------------------------------
+function testSpecs060Defaults(): void {
+  const want: Record<string, [string, string, number, number, number]> = {
+    //                model     effort  interval  cap  stagger
+    "showrunner":     ["opus",   "max",     600, 3600,  0],
+    "story-designer": ["opus",   "max",     300, 3600, 10],
+    "episode-writer": ["sonnet", "high",    180, 2400, 20],
+    "reviewer":       ["opus",   "high",    300, 2400, 30], // 默认档回落——顶配归 keystone 升档
+    "evaluator":      ["opus",   "xhigh",   600, 2400, 40],
+    "sweep":          ["sonnet", "high",   1800, 1200, 50],
+    "script-doctor":  ["opus",   "xhigh",  7200, 2400, 60],
+    "market-watch":   ["sonnet", "high",  14400, 1200, 70],
+    "reflect":        ["opus",   "xhigh", 14400, 2400, 80],
+  };
+  const got: typeof want = {};
+  for (const [a, m, e, i, c, s] of AGENT_SPECS) got[a] = [m, e, i, c, s];
+  check("SPECS 0.6.0：九 agent 档位/间隔/cap/stagger 逐格与操作者裁定一致",
+    JSON.stringify(got) === JSON.stringify(want), `got=${JSON.stringify(got)}`);
+  const project = { repoPath: "t1" };
+  const sched = buildSched({ projects: { t1: project } }, "t1", project);
+  check("SPECS 0.6.0：keystoneReviewer 默认 opus/max 不变（升档机制承担顶配）",
+    sched.keystoneReviewer.model === "opus" && sched.keystoneReviewer.effort === "max");
+  check("SPECS 0.6.0：trimFirePlugins 默认 true 且未解析前不注入（trimSettingsJson=null）",
+    sched.trimFirePlugins === true && sched.trimSettingsJson === null && sched.trimNote === null);
+}
+
+// ---------------------------------------------------------------------------
+// 7. fire 减肥（trimFirePlugins）：清单动态读取 + 降级链 + argv 尾注 + dry-run E2E
+// ---------------------------------------------------------------------------
+function testTrimFirePlugins(): void {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "wl-trim-test.")));
+  const settingsPath = join(dir, "settings.json");
+  writeFileSync(settingsPath, JSON.stringify({
+    enabledPlugins: {
+      "dev-loop@dev-loop": true, "codex@openai-codex": true,
+      "webnovel-writer@market": false, "writing-loop@writing-loop": true,
+    },
+  }));
+
+  // 清单动态读取（绝不写死）
+  const plugins = readEnabledPlugins(settingsPath);
+  check("trim：readEnabledPlugins 动态读出清单（含原 false 项）",
+    plugins !== null && Object.keys(plugins).length === 4 && plugins["webnovel-writer@market"] === false,
+    `plugins=${JSON.stringify(plugins)}`);
+  check("trim：读不到文件 ⇒ null（无清单可裁）", readEnabledPlugins(join(dir, "nope.json")) === null);
+
+  // writing-loop@*（任意 marketplace 后缀）保真，其余全 false
+  const built = buildTrimSettingsJson(plugins!);
+  const ep = (JSON.parse(built.json) as { enabledPlugins: Record<string, boolean> }).enabledPlugins;
+  check("trim：注入串仅 writing-loop true、其余全 false、disabledCount 正确",
+    ep["writing-loop@writing-loop"] === true && built.disabledCount === 3
+    && Object.entries(ep).every(([k, v]) => v === (k.split("@")[0] === "writing-loop")),
+    `json=${built.json}`);
+  const noWl = buildTrimSettingsJson({ "a@x": true });
+  check("trim：清单缺 writing-loop ⇒ 补规范键 writing-loop@writing-loop:true",
+    (JSON.parse(noWl.json) as { enabledPlugins: Record<string, boolean> }).enabledPlugins["writing-loop@writing-loop"] === true);
+
+  // 降级链：config 关闭 → 清单读不到 → claude 无 --settings → 全通过
+  const project = { repoPath: "t1" };
+  const mk = (): ReturnType<typeof buildSched> => buildSched({ projects: { t1: project } }, "t1", project);
+  let sched = mk();
+  sched.cli = "codex";
+  resolveTrimPlugins(sched, { settingsPath, supportsFlag: () => true });
+  check("trim 降级：cli!=claude ⇒ 不注入、无 trim 行", sched.trimSettingsJson === null && sched.trimNote === null);
+  sched = mk();
+  sched.trimFirePlugins = false;
+  resolveTrimPlugins(sched, { settingsPath, supportsFlag: () => true });
+  check("trim 降级：trimFirePlugins=false ⇒ 不注入且注明 config 关闭",
+    sched.trimSettingsJson === null && (sched.trimNote ?? "").includes("trimFirePlugins=false"));
+  sched = mk();
+  resolveTrimPlugins(sched, { settingsPath: join(dir, "nope.json"), supportsFlag: () => true });
+  check("trim 降级：enabledPlugins 读不到 ⇒ 不注入且注明", sched.trimSettingsJson === null && (sched.trimNote ?? "").includes("读不到"));
+  sched = mk();
+  resolveTrimPlugins(sched, { settingsPath, supportsFlag: () => false });
+  check("trim 降级：本机 claude 不支持 --settings ⇒ 优雅降级不加 flag 且注明",
+    sched.trimSettingsJson === null && (sched.trimNote ?? "").includes("不支持 --settings"));
+  sched = mk();
+  resolveTrimPlugins(sched, { settingsPath, supportsFlag: () => true });
+  check("trim 全通过：注入串就位且摘要注明置 false 个数",
+    sched.trimSettingsJson === built.json && (sched.trimNote ?? "").includes("3 个插件"));
+
+  // fireArgv：注入串追加在尾部（前缀 token 序 0.4.0 奇偶不变——case 1 已锁前缀）
+  const r = fireArgv(sched, "showrunner", "opus", "max", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
+  check("trim：claude argv 尾部追加 --settings <json>",
+    r.argv.slice(-2).join(" ") === `--settings ${built.json}`
+    && r.argv.slice(0, -2).join(" ").endsWith("--add-dir /abs/ws/.writing-loop"),
+    `argv=${JSON.stringify(r.argv)}`);
+
+  // E2E（机器无关的确定形）：config 关闭 ⇒ dry-run 打 trim 行且命令无 --settings
+  const ws = makeWs({ showrunner: { enabled: true } }, { trimFirePlugins: false });
+  const dry = runWl(ws, "--project", "t1", "--dry-run");
+  const sr = dryCmds(dry.stdout)["showrunner"] ?? "";
+  check("trim E2E：trimFirePlugins=false ⇒ --dry-run trim 行注明关闭且命令无 --settings",
+    dry.code === 0 && dry.stdout.includes("trim: trimFirePlugins=false")
+    && !sr.includes("--settings"), `stdout=${dry.stdout.slice(0, 300)}`);
+  rmSync(ws, { recursive: true, force: true });
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
 for (const [name, fn] of [
   ["testArgvParity040", testArgvParity040],
   ["testOpencodeDryRun", testOpencodeDryRun],
   ["testOpencodePermissionEnv", testOpencodePermissionEnv],
   ["testInlinePrompt", testInlinePrompt],
   ["testCliFlagOverride", testCliFlagOverride],
+  ["testSpecs060Defaults", testSpecs060Defaults],
+  ["testTrimFirePlugins", testTrimFirePlugins],
 ] as Array<[string, () => void]>) {
   try { fn(); }
   catch (e) { nfail++; console.log(`FAIL ${name} 异常：${e instanceof Error ? e.stack ?? e.message : String(e)}`); }

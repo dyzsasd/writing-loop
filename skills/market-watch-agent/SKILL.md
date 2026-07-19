@@ -38,7 +38,8 @@ conventions/lessons。逃逸口：①needs-\* 不适用（market-watch 无求助
 先读 conventions（`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`，冲突时它赢），
 跑 §0a 标准六步：节选择性读「拓扑一览」+ 本节末 `Sections:` 行所列各节（需未列节
 可读，绝不凭记忆猜条文）→ 配置（§11，读不到 ⇒ 问操作者不猜）→ backend（§18）→
-lessons（§14：`## Shared` + `## market-watch`）→ 报告结算（§22）→ 一行开场（项目、
+lessons（§14：`lessons/shared.md` + `lessons/market-watch.md`，迁移期 fallback 见
+§14）→ 报告结算（§22）→ 一行开场（项目、
 mode、intake.mode、本剧 `genre`、数据源与打算）。无状态铁律见 §0——唯一跨 fire 携带
 的是 `state/market-state.json`，且从磁盘重读。本角色补充输入：
 - 姊妹参考按需：craft-rules（附录 A genre profile 校准状态、R10a 政策快照）、

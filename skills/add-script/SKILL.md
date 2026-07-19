@@ -38,8 +38,8 @@ repo、第一张大纲票（§0）。
    `<workspace>/.writing-loop/config.json`——**反转**：确认目标 key **尚不存在**
    （key 全 workspace 唯一）；索引不存在 ⇒ 首剧，稍后创建。
 3. backend 恒为 local 文件板（§18）；本 skill 稍后为新项目**创建**板与数据目录。
-4. lessons（§14）：新项目尚无 `lessons.md`（REGISTER 里 scaffold 骨架）；他剧
-   `## Shared` 可读作参考，但本 skill 不写 lessons（只有 reflect 可写，§17）。
+4. lessons（§14）：新项目尚无 `lessons/` 目录（REGISTER 里 scaffold 骨架）；他剧
+   `lessons/shared.md` 可读作参考，但本 skill 不写 lessons（只有 reflect 可写，§17）。
 5. 报告结算（§22）：收尾只写自己这趟的 daily 一行，不替他剧结算。
 6. 一行开场：立项 key / 立项式（原创|改编）/ mode（live|dry-run）/ 本趟打算做什么。
 
@@ -47,7 +47,7 @@ repo、第一张大纲票（§0）。
 config 或 `repoPath` 已被脚手架过 ⇒ **find-or-reuse**（幂等跳过已存在文件）；冲突
 或权限缺失 ⇒ 列候选让操作者选，绝不猜、绝不覆盖既有内容。
 
-Sections: §0 §0a §1 §2 §5a §10 §11 §12 §12a §13 §14 §15 §16 §17 §18 §19 §20 §21 §21a §22
+Sections: §0 §0a §1 §2 §5a §6 §10 §11 §12 §12a §13 §14 §15 §16 §17 §18 §19 §20 §21 §21a §22
 
 ## 1. 按序执行（INTERVIEW → SCAFFOLD → REGISTER → 首票 → VERIFY）
 
@@ -131,14 +131,18 @@ Non-goals / Decisions，不混入其他 IP 可识别元素，§16）。
    （`{ "prefix": "<ticketPrefix>", "next": 1 }`——起始提示，非真相源）+ 空
    `board/tickets/`。板目录必须专用，绝不共享/网络盘/commit。
 4. 数据目录其余：`reports/`、`state/`。
-5. **lessons.md 分节脚手架**（§14）：建全部十个分节标题（空）；lessons 只有 reflect
-   可写（§17），本 skill 只建骨架。
+5. **lessons/ 目录脚手架**（§14）：建 `lessons/shared.md` + 九个角色文件（空骨架）；
+   lessons 只有 reflect 可写（§17），本 skill 只建骨架。
 
 ### Job 4 — 首张大纲票（恒 file 给 story-designer，owner=showrunner）
 file 立项的**第一张也是唯一一张**票——大纲票（§13 step 4）：
 - labels 全集（§18 REPLACE）：`[writing-loop, Feature, outline, showrunner,
   story-designer]`。
 - 正文：`## Context`（north-star 已建，第一步 = 写 `outline.md` + 补 bible 冻结层）；
+  **`## Context-pack`（§6 三类创作票必备节，你是建票方）**：需读 ≤8 指针（north-star
+  全八节——大纲票是唯一需要整份北极星的创作票——+ `source/` 拆解产物 + 相关模板）、
+  关键事实 3-5 条带出处（INTERVIEW 落盘结论：genre/monetization/paywall/合规预筛）、
+  禁读提示（如 `source/` 原著全文不读、只读拆书三清单）；
   `## Acceptance criteria`（outline 全表完整：分段大纲/单元表/五锚点/卡点规划 per
   `paywall`/主线伏笔登记表含必备四件套/名场面规划/续季钩规划；bible characters/
   world 增补；改编另加名场面-卡点对齐表对照 `source/highlights.md`）；

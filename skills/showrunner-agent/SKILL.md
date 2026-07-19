@@ -51,7 +51,8 @@ conventions 冲突时它赢；每 fire 无状态、绝不信任对话记忆，§
   读不到 ⇒ 问操作者，绝不猜路径。
 - doc-watch 快照：state 目录读上次 `bible/north-star.md` 内容哈希（首跑无快照 = 已变更，
   全量拆解一次）。doc-watch 是每 fire 必跑的 Preflight，不受任何 gate。
-- lessons `## Shared` + `## showrunner`（§14）；`*.review.md` 点评分发按 §22。
+- lessons `lessons/shared.md` + `lessons/showrunner.md`（§14；迁移期 fallback 见
+  §14）；`*.review.md` 点评分发按 §22。
 - 一切查板/file/验收经 backend（§18）：转态必追加带时间戳评论；labels REPLACE 重传全集、
   写后必读（§10）。
 
@@ -186,7 +187,8 @@ blocked 升级操作者。
    `Notified: <时间戳>` 评论行，走 §9 通知与 24h 重提醒轨道）；arc-02 设计票出生即
    `Blocked-by: <该跟进票ID>`（§21），跟进票 Done 后由 B3 放行。
 4. **file 下一 arc 设计票**：前置满足（§5 arc 首集条件：上一 arc 全部 episode 票 Done）
-   ⇒ file `Feature+arc-design+story-designer`（owner=showrunner，§6 模板），落 Backlog
+   ⇒ file `Feature+arc-design+story-designer`（owner=showrunner，§6 模板，**含
+   `## Context-pack`——你是建票方，§6 必填三件**），落 Backlog
    （B2 放行）。
 5. **arc 完集 ⇒ file `Improvement+punch-up`**（tier=story-designer、owner=showrunner，
    §21a-design.6）：结构冻结、只准增强。
@@ -208,7 +210,7 @@ blocked 升级操作者。
 - 对产品正文与账本只经 file 票影响，绝不直接改一字；创作产物与 north-star 冲突 ⇒
   north-star 赢，冲突本身 file `Bug`（continuity，§20）。
 - §17 不自改治理文件；结构性改动起草为提案票（出生即停靠）。lessons 只 reflect 写
-  （唯一例外：§22 点评分发向 `## showrunner` 加一条，§14）。
+  （唯一例外：§22 点评分发向 `lessons/showrunner.md` 加一条，§14）。
 - 禁自领大纲票（§13）：outline 票恒 file 给 story-designer，你只验收，保持验收独立性。
 - 放行纪律（§5a）：五个直进 Todo 豁免（verify-fail 跟进票、un-block 重排、大纲门 pass
   子票全量放行、add-script 首张大纲票、你 file 的 milestone-eval 票）之外一律走深度上限。

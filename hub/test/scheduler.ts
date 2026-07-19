@@ -143,10 +143,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 function testIntervalNoopLedger(): void {
   const ws = makeWs({});
+  // laneGating:false —— 本用例断言 0.5.0 的裸间隔触发节律（空板下 0.6.0 门控会正确拦下
+  // showrunner 的重复 fire，那是 lane-gating.ts 的被测行为，不是这里的）。
   rewriteAgents(ws, {
     showrunner: { enabled: true, intervalSeconds: 1, capSeconds: 30, staggerSeconds: 0, command: fakeCmd(ws, 0.2, "working") },
     sweep: { enabled: true, intervalSeconds: 1, capSeconds: 30, staggerSeconds: 0, command: fakeCmd(ws, 0, "本 lane 无活 —— no-op") },
-  });
+  }, { laneGating: false });
   const r = runWl(ws, "--project", "t1", "--for", "4");
   const rows = ledger(ws);
   const sr = rows.filter((x) => x.agent === "showrunner");
@@ -170,7 +172,8 @@ function testSingleFlight(): void {
     "reviewer", "sweep", "market-watch"]) {                            // 板上 3 名（争 2 槽）
     overrides[a] = { enabled: true, intervalSeconds: 1, capSeconds: 30, staggerSeconds: 0, command: fakeCmd(ws, 0.7) };
   }
-  rewriteAgents(ws, overrides);
+  // laneGating:false —— 空板下门控会拦掉多数 lane（正确行为），本用例只测并发闸。
+  rewriteAgents(ws, overrides, { laneGating: false });
   const r = runWl(ws, "--project", "t1", "--for", "6");
   const sp = spans(markers(ws));
   const wSp = sp.filter((x) => WRITERS.has(x.agent));
