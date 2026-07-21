@@ -23,7 +23,9 @@
   提及 references/*.md 或 templates/*.md（含裸名如「craft-rules」）即计；所在段落含
   「按需」或「可选」字样 ⇒ 不计入强制账单。
 - ~tokens 估算（趋势用，不作计费）：CJK 字符 ≈ 1 token/字；其余按 UTF-8 ≈ 4 字节/token。
-- lessons：§14 上限 ≤150 行 ≈ 6 KB ⇒ 常数估入（bytes=6144, chars≈2048, tokens≈2048）。
+- lessons：§14 预算按文件计（`shared.md` ≤40 行 + 每角色文件 ≤30 行），每 fire 只读
+  shared + 本角色文件 ⇒ 读取上限 ≤70 行 ≈ 2.8 KB（≈40 字节/行，CJK ≈3 字节/字）
+  ⇒ 常数估入（bytes=2800, chars≈933, tokens≈933）。
 
 用法：python3 scripts/context-bill.py   （输出 markdown，可直接 >> $GITHUB_STEP_SUMMARY）
 """
@@ -66,8 +68,10 @@ PROBE_MAX_LINES = 19               # Phase 5 前 WARN-only；12→19：WL-44 第
                                    # （墙钟谓词）按语义只能落探针块内（D6）
 BOOT_MAX_LINES = 35                # Phase 5 前 WARN-only
 
-# §14 lessons 上限的账单估算常数（≤150 行 ≈ 6KB）。
-LESSONS_CAP = {"lines": 150, "bytes": 6144, "chars": 2048, "tokens": 2048}
+# §14 lessons 的账单估算常数——**每 fire 读取口径**（B3 落笔的按文件预算）：
+# shared.md ≤40 行 + 本角色文件 ≤30 行 = ≤70 行；≈40 字节/行 ⇒ 2800 字节，
+# CJK ≈3 字节/字 ⇒ ≈933 字符 ≈933 tokens。
+LESSONS_CAP = {"lines": 70, "bytes": 2800, "chars": 933, "tokens": 933}
 
 # 无探针的 operator skill（结构检查与账单解析都按此区分）。
 OPERATOR_SKILLS = {"add-script"}
@@ -314,8 +318,9 @@ def main():
             format(r["total_chars"], ","), format(r["total_bytes"], ","),
             format(r["total_tokens"], ","),
         ))
-    print("\n估算口径：CJK ≈1 token/字，其余 ≈4 UTF-8 字节/token；lessons 按 §14 上限"
-          "（≤150 行 ≈ 6KB）估入每行账单。conventions 列「整份」= Phase 4 前的现实；"
+    print("\n估算口径：CJK ≈1 token/字，其余 ≈4 UTF-8 字节/token；lessons 按 §14 每 fire"
+          "读取上限（shared ≤40 行 + 角色 ≤30 行 = ≤70 行 ≈ 2.8KB）估入每行账单。"
+          "conventions 列「整份」= Phase 4 前的现实；"
           "SKILL 出现 `Sections:` 行后自动只计 always-read + 所引节 span。\n")
     print("## BUDGETS（散文预算，机器权威；Phase 5 前 lint 仅 WARN）\n")
     print("| SKILL | 行上限 | 字符上限 | 现值（行/字符） | 状态 |")
