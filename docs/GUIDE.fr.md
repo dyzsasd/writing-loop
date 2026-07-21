@@ -200,6 +200,12 @@ forme `provider/model` dans config.json, p. ex.
 et exécutez une fois `opencode auth login` au préalable. (`--cli codex` bascule sur
 Codex de la même façon ; les noms de palier sont convertis automatiquement.)
 
+Pour router vers votre propre point de terminaison compatible OpenAI, déclarez-le dans
+un bloc `providers` de premier niveau dans config.json (id, baseUrl, authTokenEnv,
+models — voir references/config-schema.md), lancez `writing-loop sync-opencode` pour le
+synchroniser dans `opencode.json`, puis `writing-loop doctor` pour vérifier que la
+variable d'environnement d'authentification se résout.
+
 ---
 
 ## Étape 4 — Surveiller les jalons ; le premier livrable est le 一卡包

@@ -191,6 +191,11 @@ config.json, e.g. `scheduler.agents.episode-writer.model = "openrouter/anthropic
 and run `opencode auth login` once beforehand. (`--cli codex` switches to Codex the
 same way; tier names are converted automatically.)
 
+To route through your own OpenAI-compatible endpoint instead, register it under a
+top-level `providers` block in config.json (id, baseUrl, authTokenEnv, models — see
+references/config-schema.md), then run `writing-loop sync-opencode` to push it into
+`opencode.json` and `writing-loop doctor` to confirm the auth env var resolves.
+
 ---
 
 ## Step 4 — Watch the milestones; the first deliverable is the 一卡包

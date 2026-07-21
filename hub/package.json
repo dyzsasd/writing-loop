@@ -1,6 +1,6 @@
 {
   "name": "@dyzsasd/writing-loop",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "description": "An autonomous short-drama (vertical micro-drama) writers' room in a folder — nine agents (Showrunner, Story-Designer, Episode-Writer, Reviewer, Script-Doctor, Evaluator, Market-Watch, Reflect, Sweep) plan, outline, write, review, score, and market-watch scripts through ticket state on a local file board. A north-star story bible + master outline + per-arc beat cards + foreshadow/story-state/production ledgers keep 60-100 episode serials coherent; a 4-dimension/16-indicator rubric gates milestones (outline, first-paywall pack, finale). This package ships the `writing-loop` CLI (init / run / status / doctor / fires / install-claude-plugin) with a built-in zero-dependency TypeScript scheduler (wl-run: single-flight repo writers, keystone escalation, fires.jsonl telemetry) plus the full plugin payload (skills, references, templates). Fires agents on Claude Code, Codex, or opencode.",
   "keywords": [
@@ -46,7 +46,7 @@
     "build": "rm -rf dist skills references scripts templates .claude-plugin && tsc -p tsconfig.build.json && chmod +x dist/cli.js && cp -R ../skills ../references ../scripts ../templates ../.claude-plugin ./ && rm -rf scripts/__pycache__",
     "prepack": "npm run build",
     "typecheck": "tsc -p tsconfig.check.json",
-    "test": "node test/paths.ts && node test/workspace.ts && node test/status.ts && node test/run.ts && node test/scheduler.ts && node test/scheduler-engines.ts && node test/lane-gating.ts && node test/version-sync.ts && node test/build-artifact.ts"
+    "test": "node test/paths.ts && node test/workspace.ts && node test/status.ts && node test/run.ts && node test/scheduler.ts && node test/scheduler-engines.ts && node test/lane-gating.ts && node test/provider-routing.ts && node test/version-sync.ts && node test/build-artifact.ts"
   },
   "engines": {
     "node": ">=20.11"

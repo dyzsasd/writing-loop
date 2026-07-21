@@ -22,6 +22,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   run:                     ["run"],                   // 起内建调度器 wl-run（原生 TS，src/scheduler.ts）
   status:                  ["status"],                // 只读板摘要（state 计数 / 停靠票 / 写作前沿 / 陈旧锁 / 末 5 fire）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
+  "sync-opencode":         ["sync-opencode"],          // providers 注册表 → opencode.json（create-or-merge）
   fires:                   ["fires"],                 // fires.jsonl 遥测尾巴 + 按 agent 聚合成功率
   "install-claude-plugin": ["install-claude-plugin"], // 注册本地 npm-source marketplace 给 Claude Code
 };
@@ -50,6 +51,8 @@ const usage = (): void => {
                               陈旧锁扫描、fires.jsonl 末 5 行
   doctor                      只读体检：node/workspace/config/各项目/调度 CLI 引擎；
                               暖警告不失败、结构性问题才 FAIL；末行 DOCTOR_OK/FAILED + NEXT:
+  sync-opencode [--dir D]     把 config.json 顶层 providers 注册表同步进 opencode.json
+                              （create-or-merge；providers 为空则 no-op；绝不碰全局配置）
   fires [--project K] [--last N] [--json]
                               fires.jsonl 遥测尾巴（默认末 20 行）+ 按 agent 聚合成功率
   install-claude-plugin [--version V] [--dry-run]

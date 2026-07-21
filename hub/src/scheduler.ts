@@ -248,6 +248,78 @@ export function buildSched(cfg: WlConfig, key: string, project: WlProject): Sche
 }
 
 // ---------------------------------------------------------------------------
+// provider 注册表（workspace 顶层 config.json 的 `providers` 键）—— 这个 workspace 里一切
+// 剧本项目共享的 OpenAI-compatible 端点基础设施；projects 只**选择**某注册端点的 model
+// （"<id>/<model>" 形），不在项目层定义端点。校验规则逐字对照 dev-loop team-config.ts:
+// 150-151, 286-320 迁移（那边挂在 team.providers 下——team 是它的多项目共享设施包装；
+// writing-loop 是单 workspace/多剧本项目模型，无 team 概念，故去掉包装直接挂 workspace
+// 顶层）。渲染/同步进 opencode.json 见 opencode-sync.ts；pre-spawn 认证 guard 与成本归因
+// 见下文「命令构建」节的 opencodeProviderPrefix / providerOf / providerAuthGap。
+// ---------------------------------------------------------------------------
+export type ProviderEntry = {
+  kind: "openai-compatible";             // 目前唯一合法值（"anthropic" 是 dev-loop 未实装的预留，不迁）
+  baseUrl: string;                       // 必须匹配 /^https?:\/\//
+  authTokenEnv: string;                  // 环境变量【名字】，绝不是密钥值——config 里永远不放密钥值
+  models: string[];                      // 非空数组，每个元素非空字符串
+  extraOptions?: Record<string, unknown>;
+  effortMode?: "passthrough" | "strip";  // 缺省 = "passthrough"
+};
+
+const PROVIDER_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,31}$/;   // 小写——同时是 opencode provider key 与 agents{}.model 前缀
+const PROVIDER_ENV_RE = /^[A-Z][A-Z0-9_]*$/;
+const PROVIDER_ENTRY_FIELDS: ReadonlySet<string> =
+  new Set(["kind", "baseUrl", "authTokenEnv", "models", "extraOptions", "effortMode"]);
+
+function checkProviderEntry(id: string, v: unknown): ProviderEntry {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) die(`providers.${id} 必须是对象`);
+  const e = v as Record<string, unknown>;
+  for (const k of Object.keys(e)) {
+    if (!PROVIDER_ENTRY_FIELDS.has(k)) die(`providers.${id} 含未知字段 '${k}'`);
+  }
+  if (e.kind !== "openai-compatible") {
+    die(`providers.${id}.kind 必须是 "openai-compatible"（得到 ${JSON.stringify(e.kind)}）`);
+  }
+  if (typeof e.baseUrl !== "string" || !/^https?:\/\//.test(e.baseUrl)) {
+    die(`providers.${id}.baseUrl 必须匹配 /^https?:\\/\\//（得到 ${JSON.stringify(e.baseUrl)}）`);
+  }
+  if (typeof e.authTokenEnv !== "string") {
+    die(`providers.${id}.authTokenEnv 必须是字符串（得到 ${JSON.stringify(e.authTokenEnv)}）`);
+  }
+  if (e.authTokenEnv.includes("://")) {
+    die(`providers.${id}.authTokenEnv 不能包含 '://'（这里应填环境变量【名字】，不是 URL/密钥值；得到 ${JSON.stringify(e.authTokenEnv)}）`);
+  }
+  if (!PROVIDER_ENV_RE.test(e.authTokenEnv)) {
+    die(`providers.${id}.authTokenEnv 必须匹配 /^[A-Z][A-Z0-9_]*$/（大写，得到 ${JSON.stringify(e.authTokenEnv)}）`);
+  }
+  if (!Array.isArray(e.models) || e.models.length === 0
+      || !e.models.every((m) => typeof m === "string" && m.trim() !== "")) {
+    die(`providers.${id}.models 必须是非空字符串数组（每个元素非空，得到 ${JSON.stringify(e.models)}）`);
+  }
+  if (e.extraOptions !== undefined
+      && (e.extraOptions === null || typeof e.extraOptions !== "object" || Array.isArray(e.extraOptions))) {
+    die(`providers.${id}.extraOptions 若存在必须是对象`);
+  }
+  if (e.effortMode !== undefined && e.effortMode !== "passthrough" && e.effortMode !== "strip") {
+    die(`providers.${id}.effortMode 若存在必须是 "passthrough" | "strip"（得到 ${JSON.stringify(e.effortMode)}）`);
+  }
+  return e as ProviderEntry;
+}
+
+// workspace 顶层 providers 键 ⇒ 校验后的注册表（id → ProviderEntry）。缺省 = {}（no-op，
+// 一切下游——guard/sync/doctor——按空注册表优雅退化，不视为错误）。
+export function parseProviders(cfg: WlConfig): Record<string, ProviderEntry> {
+  const raw = cfg.providers;
+  if (raw === undefined) return {};
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) die("providers 必须是对象（id → ProviderEntry）");
+  const out: Record<string, ProviderEntry> = {};
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!PROVIDER_KEY_RE.test(id)) die(`providers 的 id '${id}' 不合法（须匹配 /^[a-z0-9][a-z0-9._-]{0,31}$/，小写）`);
+    out[id] = checkProviderEntry(id, v);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // keystone 升档谓词：板 frontmatter 纯 glob（不读票体判断，仅解析 §18 稳定字段）。
 // 0.6.0 起与车道门控共用同一个 frontmatter 解析核（parseLaneTicket/readBoardTickets）——
 // 0.5.0 的 head-regex 解析被原语义扩展（额外容错引号/block 式 labels，方向只会多升档，安全）。
@@ -1067,6 +1139,46 @@ export function effectiveOpencodePermission(sched: Sched): Record<string, unknow
 }
 
 // ---------------------------------------------------------------------------
+// provider 归因 + pre-spawn 认证 guard（dev-loop run-agents.ts:222-227, 245-253, 883-936
+// 逐条迁移）。opencodeProviderPrefix 只做字符串解析，不查注册表——未命中注册表的前缀是
+// opencode 内建 provider（openai/anthropic/openrouter…自带认证），认证是 opencode 自己的
+// 责任，不是 writing-loop 的事。providerAuthGap 才做注册表查找 + 环境变量可解析性判定，
+// 供 dryRun()（只 note、不拦截）与 launch()（真拦截、不 spawn）共用同一判据。
+// ---------------------------------------------------------------------------
+
+// model 的 provider 前缀（"provider/model" 形的斜杠前段）；不含 "/" ⇒ null（Claude 档位名
+// 或 opencode 自身默认模型，两者都不在本注册表的管辖范围内）。
+export function opencodeProviderPrefix(model: string | undefined): string | null {
+  return model && model.includes("/") ? model.split("/")[0] : null;
+}
+
+// fires.jsonl 的成本归因维度（dev-loop providerOf 逐字迁移）：claude 车道恒 "anthropic"、
+// codex 车道恒 "openai"；opencode 车道取 model 的 provider 前缀（Claude 档位名/opencode
+// 自身默认模型 ⇒ null，不虚构归因）。
+export function providerOf(cli: Sched["cli"], model: string | undefined): string | null {
+  if (cli === "opencode") return opencodeProviderPrefix(model);
+  return cli === "claude" ? "anthropic" : "openai";
+}
+
+// pre-spawn 认证 guard：只在 cli=opencode 且 model 的 provider 前缀命中注册表条目时才可能
+// 拦截——未命中（内建 provider）⇒ 一律放行，不做任何校验。命中且 authTokenEnv 环境变量
+// 不可解析 ⇒ 返回 {prefix, authTokenEnv}；其余一切情况（非 opencode 车道 / 无前缀 / 未命中
+// 注册表 / 认证可解析）⇒ null，一律放行——这不是「默认拒绝」的安全边界，只是给操作者一个
+// 尽早的失败信号（真出问题时 opencode 自己也会在 fire 内部报认证错误，这里只是提前拦截，
+// 省一次白跑的 boot）。
+export function providerAuthGap(
+  providers: Record<string, ProviderEntry>, cli: Sched["cli"], model: string | undefined,
+): { prefix: string; authTokenEnv: string } | null {
+  if (cli !== "opencode") return null;
+  const prefix = opencodeProviderPrefix(model);
+  if (prefix === null) return null;
+  const entry = providers[prefix];
+  if (!entry) return null;
+  if (process.env[entry.authTokenEnv] !== undefined) return null;
+  return { prefix, authTokenEnv: entry.authTokenEnv };
+}
+
+// ---------------------------------------------------------------------------
 // 项目锁（board-lock.sh choreography；缺 bash 时 inline 同语义）
 // ---------------------------------------------------------------------------
 function lockHelper(): string | null {
@@ -1293,6 +1405,7 @@ export class Scheduler {
   readonly sched: Sched;
   readonly root: string | null;      // 插件根（inline prompt / board-lock.sh）；解析不到留 null
   readonly marketDataPath: string | null;  // 项目条目 marketDataPath（market-watch 门控输入，§11）
+  readonly providers: Record<string, ProviderEntry>;  // workspace 顶层 provider 注册表（pre-spawn 认证 guard 输入）
 
   // —— 车道门控运行时状态（laneGating）——
   // gatedCount：每 agent 被门控跳过的次数，该 agent 下一条 fires.jsonl 记录以
@@ -1307,9 +1420,11 @@ export class Scheduler {
   private showrunnerBaseline: { board: string; northStar: string } | null = null;
 
   constructor(args: Args, wsRoot: string, dataRootPath: string, key: string,
-    repo: string, sched: Sched, root: string | null, project: WlProject | null = null) {
+    repo: string, sched: Sched, root: string | null, project: WlProject | null = null,
+    providers: Record<string, ProviderEntry> = {}) {
     this.args = args; this.wsRoot = wsRoot; this.dataRootPath = dataRootPath;
     this.key = key; this.repo = repo; this.sched = sched; this.root = root;
+    this.providers = providers;
     this.projData = join(dataRootPath, key);
     this.boardDir = join(this.projData, "board", "tickets");
     this.logsDir = join(this.projData, "logs");
@@ -1385,6 +1500,21 @@ export class Scheduler {
   // ---- 起 fire ----
   launch(agent: string, gate: GateEval | null = null): void {
     const { model, effort, escalated } = resolveTier(this.sched, agent, this.boardDir);
+    // pre-spawn 认证 guard（dev-loop run-agents.ts:883-936 移植）：cli=opencode 且 model 的
+    // provider 前缀命中注册表条目、但 authTokenEnv 环境变量不可解析 ⇒ 不 spawn，仍记账
+    // （同现有 spawnError 分支的「不 spawn 但仍记账」模式），不进 inflight。
+    const gap = providerAuthGap(this.providers, this.sched.cli, model);
+    if (gap) {
+      console.log(`[${utcIso()}] FAIL ${agent}：provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析 —— 请 export 该变量后重试（doctor 会体检此项）`);
+      const nowIso = utcIso();
+      this.ledgerAppend({
+        agent, model, effort, startedAt: nowIso, endedAt: nowIso, durationSeconds: 0,
+        exitCode: null, timedOut: false, noop: false, keystoneEscalated: escalated,
+        provider: providerOf(this.sched.cli, model), providerAuthMissing: gap.authTokenEnv,
+      });
+      this.firedOnce.add(agent);
+      return;
+    }
     const { argv } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root);
     mkdirSync(this.logsDir, { recursive: true });
     this.logSeq++;
@@ -1405,7 +1535,8 @@ export class Scheduler {
       const nowIso = utcIso();
       this.ledgerAppend({
         agent, model, effort, startedAt: nowIso, endedAt: nowIso, durationSeconds: 0,
-        exitCode: null, timedOut: false, noop: false, keystoneEscalated: escalated, spawnError: msg,
+        exitCode: null, timedOut: false, noop: false, keystoneEscalated: escalated,
+        provider: providerOf(this.sched.cli, model), spawnError: msg,
       });
       this.firedOnce.add(agent);
       return;
@@ -1444,6 +1575,7 @@ export class Scheduler {
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: ended, durationSeconds: dur,
       exitCode: rc, timedOut: fire.timedOut, noop, keystoneEscalated: fire.escalated,
+      provider: providerOf(this.sched.cli, fire.model),
     });
     const flags: string[] = [];
     if (fire.timedOut) flags.push(`TIMEOUT>${fire.cap}s`);
@@ -1463,7 +1595,7 @@ export class Scheduler {
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: nowIso, durationSeconds: 0,
       exitCode: null, timedOut: false, noop: false, keystoneEscalated: fire.escalated,
-      spawnError: fire.spawnError,
+      provider: providerOf(this.sched.cli, fire.model), spawnError: fire.spawnError,
     });
   }
 
@@ -1607,6 +1739,10 @@ export class Scheduler {
       console.log(`  env : PATH=~/.local/bin:$PATH（继承其余环境）`);
       if (this.sched.cli === "opencode") {
         console.log(`  perm: OPENCODE_PERMISSION=${JSON.stringify(effectiveOpencodePermission(this.sched))}`);
+        const gap = providerAuthGap(this.providers, this.sched.cli, model);
+        if (gap) {
+          console.log(`  note: provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析 —— 真实 fire 会预检失败（doctor 会体检此项）`);
+        }
       }
       if (this.sched.laneGating) {
         // 门控照算并逐 agent 打印谓词求值结果（可观测性承诺；求值零写副作用）
@@ -1659,11 +1795,14 @@ export async function schedulerMain(argv: string[]): Promise<number> {
     // fire 减肥解析恰在 --cli 覆盖之后（车道已定）；--plan 是纯排程模拟（不渲染命令），
     // 不必为它探 claude --help。
     if (args.plan === null) resolveTrimPlugins(sched);
+    // provider 注册表：workspace 顶层，与 --cli 覆盖无关（哪条车道都可能引用它），故不
+    // 挂在 --plan 门槛后——纯内存校验零 I/O，即使 --plan 也值得早早校验暴露配置错误。
+    const providers = parseProviders(ws.config);
 
     let root: string | null = null;
     try { root = pluginRoot(); } catch { root = null; } // slash 模式用不到；inline/锁助手缺根时各自兜底
 
-    const s = new Scheduler(args, wsRoot, dataRootOf(wsRoot), key, repoPath, sched, root, project);
+    const s = new Scheduler(args, wsRoot, dataRootOf(wsRoot), key, repoPath, sched, root, project, providers);
     if (!s.selected.length) die("无入选 agent（全部 enabled:false？）");
     if (args.plan !== null) return s.plan(args.plan);
     if (args.dryRun) return s.dryRun();

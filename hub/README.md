@@ -45,6 +45,7 @@ writing-loop fires --last 20         # per-fire telemetry tail + per-agent succe
 | `status [--project K] [--json]` | read-only board summary |
 | `doctor` | read-only health check; warnings never fail, structural problems do |
 | `fires [--project K] [--last N] [--json]` | fires.jsonl tail + per-agent aggregation |
+| `sync-opencode [--dir D]` | render the workspace `providers{}` registry into `<workspace>/opencode.json` (create-or-merge, never touches `~/.config/opencode/`) |
 | `install-claude-plugin [--version V] [--dry-run]` | register a local npm-source marketplace for Claude Code |
 | `version` / `help` | you know these |
 

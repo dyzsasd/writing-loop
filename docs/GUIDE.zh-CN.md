@@ -138,6 +138,11 @@ opencode 没有内建默认模型——先在 config.json 里给出 `provider/mo
 `scheduler.agents.episode-writer.model = "openrouter/anthropic/claude-sonnet-4.5"`；且需先跑
 一次 `opencode auth login` 完成认证。（`--cli codex` 同理换 Codex，档位名自动换算。）
 
+想接自己的 OpenAI-compatible 端点，就在 config.json 顶层加一个 `providers` 块（id、
+baseUrl、authTokenEnv、models——见 references/config-schema.md），跑一次
+`writing-loop sync-opencode` 把它同步进 `opencode.json`，再用 `writing-loop doctor`
+确认认证环境变量可解析。
+
 ---
 
 ## 第 4 步：盯里程碑，第一批交付是「一卡包」

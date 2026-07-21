@@ -1,6 +1,6 @@
 {
   "name": "writing-loop",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "An autonomous short-drama (竖屏短剧) writers' room in a folder. Nine agents plan, outline, write, review, score, and market-watch vertical micro-drama scripts through ticket state on a local board; a story bible + beat cards + ledgers keep 60-100 episode serials coherent; a 4-dimension/16-indicator rubric gates milestones. Runs on Claude Code or Codex.",
   "author": {
     "name": "Shuai"

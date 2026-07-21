@@ -23,6 +23,9 @@ export type WlProject = {
 };
 export type WlConfig = {
   version?: number;
+  providers?: Record<string, unknown>;   // 端点注册表（OpenAI-compatible，opencode 专用）；
+                                          //   真正的校验/类型在 scheduler.ts 的 parseProviders
+                                          //   （与 scheduler 字段同一模式：这里只做宽松镜像）
   scheduler?: Record<string, unknown>;
   projects?: Record<string, WlProject>;
   [k: string]: unknown;

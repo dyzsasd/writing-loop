@@ -88,6 +88,63 @@
 定位规则见 conventions §11（CWD 在某 repoPath 内 ⇒ 该项目；否则恰一个 enabled ⇒
 该项目；否则问操作者，绝不猜、绝不遍历）。
 
+## providers — 自定义 OpenAI-compatible 端点注册表（opencode 专用）
+
+`config.json` **顶层** `providers` 块（与 `scheduler`/`projects` 同级）是这个 workspace 里
+一切剧本项目共享的**端点基础设施**——`projects.*` 只**选择**某个已注册端点的某个 model
+（`scheduler.agents.<agent>.model` 写成 `"<provider-id>/<model>"` 形），不在项目层再定义
+端点。只有 `scheduler.cli:"opencode"` 车道会用到它（claude/codex 车道无 provider/model
+启动串机制，本块对它们无效）。缺省 = 无此键（等价空注册表，一切下游优雅退化为 no-op）。
+
+```jsonc
+{
+  "version": 1,
+  "providers": {
+    "synthetic": {                          // provider id：同时是 opencode provider key
+                                            //   与 agents{}.model 的 "<id>/<model>" 前缀
+      "kind": "openai-compatible",          // 目前唯一合法值
+      "baseUrl": "https://api.synthetic.new/v1",   // 必须匹配 /^https?:\/\//
+      "authTokenEnv": "SYNTHETIC_API_KEY",  // 环境变量【名字】——config 里永远不放密钥值；
+                                            //   doctor W09 只查该变量是否可解析，绝不打印其值
+      "models": ["hf:deepseek-ai/DeepSeek-V3.2", "hf:moonshotai/Kimi-K2-Instruct"],
+      "effortMode": "strip",                // "passthrough"（默认）| "strip"
+      "extraOptions": {}                    // 可选，透传进渲染出的 opencode provider options
+    }
+  },
+  "projects": {
+    "shen-shou-park": {
+      "scheduler": {
+        "cli": "opencode",
+        "agents": {
+          "episode-writer": { "model": "synthetic/hf:deepseek-ai/DeepSeek-V3.2" }
+        }
+      }
+      /* … 其余项目字段见上节 … */
+    }
+  }
+}
+```
+
+字段（`providers.<id>`）：
+- `id`（key）：`/^[a-z0-9][a-z0-9._-]{0,31}$/`，小写。
+- `kind`：`"openai-compatible"`（唯一合法值）。
+- `baseUrl`：`/^https?:\/\//`。
+- `authTokenEnv`：`/^[A-Z][A-Z0-9_]*$/`——环境变量**名字**，不能含 `://`（防止把 URL/
+  密钥值误当名字填进去）；实际密钥只从 `process.env[authTokenEnv]` 读，config.json 本身
+  绝不出现密钥值。
+- `models`：非空字符串数组（每个元素非空）。
+- `extraOptions`（可选）：对象，透传进渲染出的 opencode provider `options`。
+- `effortMode`（可选）：`"passthrough"`（默认）| `"strip"`。
+- 未知字段一律拒绝；`providers` 若存在必须是对象（非数组）。
+
+`writing-loop sync-opencode` 把这个注册表渲染进 `<workspace-root>/opencode.json`
+（create-or-merge：新建/合并/原地更新，注册表之外的手写 provider 与其余顶层键绝不
+触碰；绝不碰 `~/.config/opencode/opencode.json` 全局配置）。改了 `providers` 块后手动
+跑一次该命令，再 `writing-loop doctor` 复核——doctor 对 providers 的体检不带独立编号
+体系，warn 文案本身自解释：某条目的 `authTokenEnv` 环境变量不可解析（其 opencode fire
+会预检失败）、或 `opencode.json` 与本注册表有漂移（缺失/未同步/过期，提示运行
+`sync-opencode`）。两者都只读，不会自动帮你改文件。
+
 ## 内建调度器 — `scheduler` 块（`writing-loop run`）
 
 `writing-loop run` 是随 npm 包 `@dyzsasd/writing-loop` 分发的单进程调度器（原生

@@ -5,19 +5,28 @@
 //   W02 repoPath 不存在 / 不是 git repo
 //   W03 创作规格违规（paywall.card1 ⊄ [8..12] / audience 空——config-schema 校验规则）
 //   W04 scheduler.cli 对应二进制不在 PATH（claude/codex/opencode）
-//   W05 cli=opencode 且版本 < 1.2.24（dev-loop PORTABILITY 认证下限）
+//   W05 opencode 版本 < 1.2.24（dev-loop PORTABILITY 认证下限）——cli=opencode 时查；
+//       providers 注册表非空时即便本项目 cli 不是 opencode 也查（迟早会被某 agent 的
+//       model 覆盖用到）
 //   W06 cli=claude 且 promptMode!=inline 但 Claude Code 未装 writing-loop 插件（斜杠命令无从解析）
 //   W07 wl-run.lock 陈旧（mtime>60min——多半是崩溃残锁，wl-run 下次启动会自动回收）
 //   W08 cli=claude 且 trimFirePlugins 生效但本机不满足前提（~/.claude/settings.json 的
 //       enabledPlugins 读不到 / claude 无 --settings flag）——wl-run 会优雅降级不注入，仅提示
-// FAIL（结构性）：workspace 不可解析、config.json 不可解析/非对象、板目录不可写。
+//   W09 provider 注册表某条目的 authTokenEnv 环境变量不可解析（其 opencode fire 会预检失败）
+//   W10 opencode.json 与 providers 注册表有漂移（缺失/未同步/过期——运行 sync-opencode 修复）
+// FAIL（结构性）：workspace 不可解析、config.json 不可解析/非对象、providers 注册表非法
+//       （阻断 writing-loop run 整体起 fire）、板目录不可写。
 import { execFileSync } from "node:child_process";
 import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { opencodeSyncDrift } from "./opencode-sync.ts";
 import { findOnPath } from "./paths.ts";
-import { buildTrimSettingsJson, claudeSupportsSettingsFlag, readEnabledPlugins } from "./scheduler.ts";
+import {
+  buildTrimSettingsJson, claudeSupportsSettingsFlag, parseProviders, readEnabledPlugins,
+  type ProviderEntry,
+} from "./scheduler.ts";
 import {
   dataRoot, findWorkspaceRoot, loadConfig, projectDataDir, resolveRepoPath,
   WsError, type WlConfig, type WlProject, type Workspace,
@@ -149,6 +158,18 @@ export function doctorMain(argv = process.argv.slice(2)): number {
     ok(`config.json 可解析（项目 ${projects.length} 个，enabled ${enabled.length} 个）`);
     if (!projects.length) next ??= "在 Claude Code 里跑 /writing-loop:add-script 立项 interview";
 
+    // provider 注册表校验（workspace 顶层 providers；先解析好，供下面 per-project 的 W05
+    // 扩展条件、与循环结束后的 W09/W10 workspace 级检查共用）。非法 ⇒ FAIL（阻断
+    // writing-loop run 整体起 fire，严重度同 config.json 不可解析）；providers 留空注册表，
+    // 后续检查按空处理，不再重复报错。
+    let providers: Record<string, ProviderEntry> = {};
+    try {
+      providers = parseProviders(ws.config);
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e), "修复 .writing-loop/config.json 的 providers 块");
+    }
+    const providerIds = Object.keys(providers);
+
     for (const [key, p] of enabled) {
       console.log(`\n—— 项目 ${key} ——`);
       const repo = resolveRepoPath(ws.root, p);
@@ -190,11 +211,21 @@ export function doctorMain(argv = process.argv.slice(2)): number {
         warn("W04", `scheduler.cli=${cli} 不在 PATH —— wl-run 起 fire 会失败`, `安装 ${cli}（或改 config 的 scheduler.cli）`);
       } else {
         ok(`scheduler.cli=${cli} 在 PATH: ${bin}（promptMode=${promptMode}）`);
-        if (cli === "opencode") {
-          const v = opencodeVersionOf(bin);
+      }
+      // opencode 版本检查（W05）：cli=opencode 本身要查；providers 注册表非空时即便本项目
+      // cli 不是 opencode 也查——迟早会被某 agent 的 model 覆盖成 provider/model 形用到
+      // opencode，值得提前查二进制是否就绪（触发条件扩为 cli==="opencode" || providers 非空）。
+      if (cli === "opencode" || providerIds.length > 0) {
+        const opencodeBin = cli === "opencode" ? bin : findOnPath("opencode");
+        if (opencodeBin) {
+          const v = opencodeVersionOf(opencodeBin);
           if (!v) warn(null, "无法解析 opencode --version 输出 —— 请自查 >= 1.2.24（认证下限）");
           else if (versionLt(v, MIN_OPENCODE)) warn("W05", `opencode ${v.join(".")} < ${MIN_OPENCODE.join(".")}（认证下限）—— 请升级`);
           else ok(`opencode ${v.join(".")} >= ${MIN_OPENCODE.join(".")}（认证下限）`);
+        } else if (cli !== "opencode") {
+          // cli===opencode 时「不在 PATH」已由上面的 W04 报过，这里只覆盖新增面
+          // （providers 非空但本项目当前 cli 不是 opencode），不重复发码。
+          warn(null, "providers 非空但 opencode 不在 PATH —— 一旦某 agent 的 model 被覆盖成 provider/model 形，其 opencode fire 会失败");
         }
       }
       if (cli === "claude" && promptMode !== "inline") {
@@ -231,6 +262,24 @@ export function doctorMain(argv = process.argv.slice(2)): number {
         if (age > 60) warn("W07", `wl-run.lock 陈旧（age ${age}min > 60min）—— 多半是崩溃残锁；wl-run 下次启动自动回收`);
         else ok(`wl-run.lock 在位且新鲜（age ${age}min）—— 调度器可能正在运行`);
       } catch { /* 无锁 = 未在跑，正常，不打行 */ }
+    }
+
+    // provider 注册表体检（workspace 级，与项目无关，只跑一次）：
+    //   W09 每条 authTokenEnv 能否从当前进程 env 解析——绝不打印变量的值，只打印变量名；
+    //   W10 opencode.json 是否已同步（只读，不做任何修改——真正的写落在 sync-opencode）。
+    if (providerIds.length) {
+      console.log(`\n—— provider 注册表 ——`);
+      for (const id of providerIds) {
+        const entry = providers[id];
+        if (process.env[entry.authTokenEnv] !== undefined) {
+          ok(`provider '${id}' 认证 ${entry.authTokenEnv} 可解析`);
+        } else {
+          warn("W09", `provider '${id}' 认证环境变量 ${entry.authTokenEnv} 不可解析 —— 其 opencode fire 会预检失败；请 export 该变量`);
+        }
+      }
+      const drift = opencodeSyncDrift(ws.root, providers);
+      if (drift === null) ok(`opencode.json 已含 ${providerIds.length} 个注册 provider`);
+      else warn("W10", `${drift} —— 运行: writing-loop sync-opencode`);
     }
   }
 
