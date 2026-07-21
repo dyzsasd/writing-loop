@@ -22,5 +22,17 @@ jobs:
       - name: board-lock 自检（acquire / contend / stale-reclaim / release / 多锁序）
         run: bash scripts/board-lock.sh --self-test
 
-      - name: wl-run 自检（间隔触发 · 写者单飞 · cap 超时杀 · keystone 升档 · fires.jsonl · dry-run 零 spawn · 锁防重跑）
-        run: python3 scripts/test-wl-run.py
+      # 0.5.0 起 wl-run 是 hub/ 的原生 TS 调度器（scripts/test-wl-run.py 已随 Python 版一并
+      # 退役）——自检走 hub 的 TS 测试套件。version-sync 发行不变量只有在 CI checkout 里跑
+      # 才守得住「release-version stamp 了但 git add 漏了 manifest」类漂移（0.2.0/0.6.0 两次
+      # 事故的结构性根因：本地磁盘上 stamp 产物永远自洽，只有 checkout 反映 commit 真容）。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24   # >= 23.6：node 直跑 .ts（原生 type stripping），与 hub/README 开发要求一致
+
+      - name: hub 自检（typecheck + 全 TS 测试套件：调度器 · 车道门控 · provider 路由 · version-sync 发行不变量）
+        run: |
+          cd hub
+          npm ci
+          npm run typecheck
+          npm test

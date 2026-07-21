@@ -24,8 +24,8 @@ import { fileURLToPath } from "node:url";
 import { opencodeSyncDrift } from "./opencode-sync.ts";
 import { findOnPath } from "./paths.ts";
 import {
-  buildTrimSettingsJson, claudeSupportsSettingsFlag, parseProviders, readEnabledPlugins,
-  type ProviderEntry,
+  authGapPhrase, buildTrimSettingsJson, claudeSupportsSettingsFlag, parseProviders,
+  readEnabledPlugins, type ProviderEntry,
 } from "./scheduler.ts";
 import {
   dataRoot, findWorkspaceRoot, loadConfig, projectDataDir, resolveRepoPath,
@@ -271,10 +271,13 @@ export function doctorMain(argv = process.argv.slice(2)): number {
       console.log(`\n—— provider 注册表 ——`);
       for (const id of providerIds) {
         const entry = providers[id];
-        if (process.env[entry.authTokenEnv] !== undefined) {
+        // 与 providerAuthGap 同判据：空串同视为不可解析（`export KEY=` 手滑形——设了但为空，
+        // opencode 会拿 "" 白跑 401），措辞点名两态之别。
+        const v = process.env[entry.authTokenEnv];
+        if (v !== undefined && v !== "") {
           ok(`provider '${id}' 认证 ${entry.authTokenEnv} 可解析`);
         } else {
-          warn("W09", `provider '${id}' 认证环境变量 ${entry.authTokenEnv} 不可解析 —— 其 opencode fire 会预检失败；请 export 该变量`);
+          warn("W09", `provider '${id}' 认证环境变量 ${entry.authTokenEnv} 不可解析（${authGapPhrase(v === "" ? "empty" : "unset")}）—— 其 opencode fire 会预检失败；请 export 非空值`);
         }
       }
       const drift = opencodeSyncDrift(ws.root, providers);

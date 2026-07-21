@@ -16,6 +16,7 @@ export type FireRow = {
   startedAt?: string; endedAt?: string; durationSeconds?: number;
   exitCode?: number | null; timedOut?: boolean; noop?: boolean;
   keystoneEscalated?: boolean; spawnError?: string;
+  provider?: string | null; providerAuthMissing?: string;  // 0.7.0 成本归因 + 认证 guard 拦截标记
 };
 
 // ─── frontmatter 小解析器（§18 票文件格式；5 字段，容错） ───────────────────────
@@ -199,7 +200,7 @@ export function statusMain(argv = process.argv.slice(2)): number {
     : "  无 .lock 在位");
   console.log(`fires.jsonl 末 ${recent.length} fire${fires.length ? `（共 ${fires.length} 行）` : ""}:`);
   console.log(recent.length
-    ? recent.map((f) => `  ${(f.startedAt ?? "-").padEnd(26)} ${(f.agent ?? "?").padEnd(15)} exit ${f.spawnError ? "spawn!" : String(f.exitCode ?? "-")}  ${fmtDur(f.durationSeconds)}${f.noop ? "  no-op" : ""}${f.keystoneEscalated ? "  keystone" : ""}`).join("\n")
+    ? recent.map((f) => `  ${(f.startedAt ?? "-").padEnd(26)} ${(f.agent ?? "?").padEnd(15)} exit ${f.spawnError ? "spawn!" : f.providerAuthMissing ? "auth!" : String(f.exitCode ?? "-")}  ${fmtDur(f.durationSeconds)}${f.noop ? "  no-op" : ""}${f.keystoneEscalated ? "  keystone" : ""}`).join("\n")
     : "  尚无 fire 记录（writing-loop run 起调度器）");
   return 0;
 }

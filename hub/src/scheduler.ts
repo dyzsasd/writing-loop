@@ -46,6 +46,7 @@ import {
 } from "node:fs";
 import { constants as osConstants, homedir } from "node:os";
 import { delimiter, isAbsolute, join, relative } from "node:path";
+import { opencodeSyncDrift } from "./opencode-sync.ts";
 import { pluginRoot } from "./paths.ts";
 import {
   dataRoot as dataRootOf, findWorkspaceRoot, loadConfig, resolveProject, WsError,
@@ -298,6 +299,16 @@ function checkProviderEntry(id: string, v: unknown): ProviderEntry {
   if (e.extraOptions !== undefined
       && (e.extraOptions === null || typeof e.extraOptions !== "object" || Array.isArray(e.extraOptions))) {
     die(`providers.${id}.extraOptions 若存在必须是对象`);
+  }
+  if (e.extraOptions !== undefined) {
+    // 保留键防线：渲染时 extraOptions 展开在 baseURL/apiKey 之后（opencode-sync.ts），若不
+    // 拦截，操作者可经 extraOptions.apiKey 把字面密钥写进 opencode.json——正面违反
+    // 「config 里永远不放密钥值」硬不变量。baseUrl 一并拦（易与 baseURL 混拼）。
+    for (const k of ["baseURL", "baseUrl", "apiKey"]) {
+      if (Object.prototype.hasOwnProperty.call(e.extraOptions, k)) {
+        die(`providers.${id}.extraOptions 不得含 '${k}'——端点用顶层 baseUrl 字段、认证用 authTokenEnv（apiKey 恒渲染为 {env:VAR} 间接引用，绝不放字面密钥值）`);
+      }
+    }
   }
   if (e.effortMode !== undefined && e.effortMode !== "passthrough" && e.effortMode !== "strip") {
     die(`providers.${id}.effortMode 若存在必须是 "passthrough" | "strip"（得到 ${JSON.stringify(e.effortMode)}）`);
@@ -1071,6 +1082,7 @@ export function buildInlinePrompt(agent: string, key: string, repo: string, data
 export function fireArgv(
   sched: Sched, agent: string, model: string, effort: string, repo: string,
   dataRootPath: string, key: string, root: string | null,
+  providers: Record<string, ProviderEntry> = {},
 ): { argv: string[]; inlinePrompt: string | null } {
   const skill = `/writing-loop:${agent}-agent`;
   const override = sched.agents[agent].command;
@@ -1094,10 +1106,13 @@ export function fireArgv(
     // 模型名规则：Claude 档位名（opus/sonnet…不含 "/"）绝不传给 opencode——省略 -m
     // 落 opencode 自身默认模型；仅 provider/model 形（含 "/"）才传。effort 原样传
     // --variant（opencode 的 reasoning-effort 旗标，值随模型而定 —— 不做 codex 的
-    // max→xhigh clamp）。cwd 与 claude 车道一致 = repoPath（spawn 处统一）。
+    // max→xhigh clamp），但 model 前缀命中注册表且该条目 effortMode:"strip" ⇒ 整个省略
+    // --variant（dev-loop run-agents passEffort 同款：strip 是「端点不认 variant 值」的
+    // 逃生口，没有它这类端点每 fire 必错）。cwd 与 claude 车道一致 = repoPath（spawn 处统一）。
     const argv = ["opencode", "run"];
     if (model && model.includes("/")) argv.push("-m", model);
-    if (effort) argv.push("--variant", effort);
+    const entry = providers[opencodeProviderPrefix(model) ?? ""];
+    if (effort && entry?.effortMode !== "strip") argv.push("--variant", effort);
     argv.push(prompt);
     return { argv, inlinePrompt: prompt };
   }
@@ -1120,7 +1135,10 @@ export function fireArgv(
   return { argv, inlinePrompt: inline ? prompt : null };
 }
 
-export function fireEnv(sched: Sched): NodeJS.ProcessEnv {
+export function fireEnv(
+  sched: Sched, wsRoot: string | null = null,
+  providers: Record<string, ProviderEntry> = {},
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
   const homeBin = join(homedir(), ".local", "bin");
   env.PATH = homeBin + delimiter + (env.PATH ?? "");
@@ -1128,6 +1146,12 @@ export function fireEnv(sched: Sched): NodeJS.ProcessEnv {
     // 在继承 process.env 之后赋值 ⇒ fire 策略压过操作者自己的 export
     // （dev-loop PORTABILITY §5 认证同款）。紧凑 JSON 序列化。
     env.OPENCODE_PERMISSION = JSON.stringify(effectiveOpencodePermission(sched));
+    // 注册表非空 ⇒ 显式指路 workspace 根的 opencode.json。不指不行：opencode（1.2.24
+    // 实测）的项目级 config findUp 止步于 cwd 的 git 根，而 fire 的 cwd=repoPath 本身就是
+    // git repo ⇒ workspace 根的同步产物对 fire 不可见，sync-opencode/W10 全绿也白搭。
+    if (wsRoot !== null && Object.keys(providers).length) {
+      env.OPENCODE_CONFIG = join(wsRoot, "opencode.json");
+    }
   }
   return env;
 }
@@ -1168,14 +1192,22 @@ export function providerOf(cli: Sched["cli"], model: string | undefined): string
 // 省一次白跑的 boot）。
 export function providerAuthGap(
   providers: Record<string, ProviderEntry>, cli: Sched["cli"], model: string | undefined,
-): { prefix: string; authTokenEnv: string } | null {
+): { prefix: string; authTokenEnv: string; reason: "unset" | "empty" } | null {
   if (cli !== "opencode") return null;
   const prefix = opencodeProviderPrefix(model);
   if (prefix === null) return null;
   const entry = providers[prefix];
   if (!entry) return null;
-  if (process.env[entry.authTokenEnv] !== undefined) return null;
-  return { prefix, authTokenEnv: entry.authTokenEnv };
+  // 空串与未设置同判不可解析（`export KEY=` 类手滑：opencode 会拿 "" 当 apiKey 白跑一整个
+  // boot 的 401——正是本 guard 要省掉的白跑）；reason 区分两态，报错措辞各自点名。
+  const v = process.env[entry.authTokenEnv];
+  if (v !== undefined && v !== "") return null;
+  return { prefix, authTokenEnv: entry.authTokenEnv, reason: v === undefined ? "unset" : "empty" };
+}
+
+// guard 命中的人话措辞（launch FAIL 行 / dry-run note / 测试三处共用一份，防漂移）。
+export function authGapPhrase(reason: "unset" | "empty"): string {
+  return reason === "empty" ? "已设置但为空串" : "未设置";
 }
 
 // ---------------------------------------------------------------------------
@@ -1498,14 +1530,17 @@ export class Scheduler {
   }
 
   // ---- 起 fire ----
-  launch(agent: string, gate: GateEval | null = null): void {
+  // 返回 false 当且仅当 provider 认证 guard 拦截（调用方按 interval 节律推进 due——env 在
+  // 进程内不会刷新，200ms tick 级重试只会刷屏+胀账本）；spawn 失败等其余路径一律 true
+  //（spawnError 的「下 tick 立即重试」语义有意保留：二进制装好即恢复，与 guard 不同）。
+  launch(agent: string, gate: GateEval | null = null): boolean {
     const { model, effort, escalated } = resolveTier(this.sched, agent, this.boardDir);
     // pre-spawn 认证 guard（dev-loop run-agents.ts:883-936 移植）：cli=opencode 且 model 的
     // provider 前缀命中注册表条目、但 authTokenEnv 环境变量不可解析 ⇒ 不 spawn，仍记账
     // （同现有 spawnError 分支的「不 spawn 但仍记账」模式），不进 inflight。
     const gap = providerAuthGap(this.providers, this.sched.cli, model);
     if (gap) {
-      console.log(`[${utcIso()}] FAIL ${agent}：provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析 —— 请 export 该变量后重试（doctor 会体检此项）`);
+      console.log(`[${utcIso()}] FAIL ${agent}：provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析（${authGapPhrase(gap.reason)}）—— export 非空值后重启 wl-run 生效（进程内 env 不刷新；doctor 会体检此项）`);
       const nowIso = utcIso();
       this.ledgerAppend({
         agent, model, effort, startedAt: nowIso, endedAt: nowIso, durationSeconds: 0,
@@ -1513,9 +1548,9 @@ export class Scheduler {
         provider: providerOf(this.sched.cli, model), providerAuthMissing: gap.authTokenEnv,
       });
       this.firedOnce.add(agent);
-      return;
+      return false;
     }
-    const { argv } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root);
+    const { argv } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root, this.providers);
     mkdirSync(this.logsDir, { recursive: true });
     this.logSeq++;
     const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
@@ -1524,7 +1559,7 @@ export class Scheduler {
     let child: ChildProcess;
     try {
       child = spawn(argv[0], argv.slice(1), {
-        cwd: this.repo, env: fireEnv(this.sched),
+        cwd: this.repo, env: fireEnv(this.sched, this.wsRoot, this.providers),
         stdio: ["ignore", fd, fd], detached: true, // detached ⇒ 新进程组（cap 超时可 killpg 全组）
       });
     } catch (e) {
@@ -1539,7 +1574,7 @@ export class Scheduler {
         provider: providerOf(this.sched.cli, model), spawnError: msg,
       });
       this.firedOnce.add(agent);
-      return;
+      return true;
     }
     closeSync(fd); // 子进程已持有 fd
     const fire = new Fire(agent, child, model, effort, escalated, this.sched.agents[agent].capSeconds, logPath);
@@ -1558,6 +1593,7 @@ export class Scheduler {
     this.firedOnce.add(agent);
     const cls = REPO_WRITERS.has(agent) ? "repo-writer" : "board-only";
     console.log(`[${fire.startedIso}] fire ${agent}（${model}/${effort || "-"}${escalated ? "，keystone 升档" : ""}，${cls}，cap ${fire.cap}s）→ ${relative(this.projData, logPath)}`);
+    return true;
   }
 
   // ---- 收 fire ----
@@ -1651,6 +1687,14 @@ export class Scheduler {
       `单飞写者=${this.selected.filter((a) => REPO_WRITERS.has(a)).join(",") || "无"} · 板上≤${BOARD_ONLY_MAX} 并发\n` +
       `        repo=${this.repo}\n        ledger=${this.ledgerPath}` +
       (this.sched.trimNote ? `\n        trim=${this.sched.trimNote}` : ""));
+    // 启动时的注册表↔opencode.json 漂移预警（只读、只警不拦；doctor W10 同判据）——
+    // 没有它，「改了 providers 忘了 sync」要烧掉真 fire 才暴露。
+    if (this.sched.cli === "opencode" && Object.keys(this.providers).length) {
+      const drift = opencodeSyncDrift(this.wsRoot, this.providers);
+      if (drift !== null) {
+        console.log(`wl-run: WARN ${drift} —— opencode fire 将看不到注册 provider；先跑: writing-loop sync-opencode`);
+      }
+    }
     try {
       for (;;) {
         this.pollInflight(due);
@@ -1677,7 +1721,11 @@ export class Scheduler {
             if (this.inflight.some((f) => f.agent === agent)) continue;
             if (this.args.once && this.firedOnce.has(agent)) continue;
             if (due.get(agent)! > now || !this.slotFree(agent)) continue;
-            if (!this.sched.laneGating) { this.launch(agent); continue; }
+            if (!this.sched.laneGating) {
+              // guard 拦截（返回 false）⇒ 按 interval 节律推进 due（防 200ms tick 级刷屏/胀账本）
+              if (!this.launch(agent)) due.set(agent, mono() + this.sched.agents[agent].intervalSeconds);
+              continue;
+            }
             // 车道门控：spawn 前求本 agent 的 lane 谓词（求值发生在落判当刻——§0 决策点
             // 重验天然满足）。谓词为空 ⇒ 不 spawn，按与 fire 同型的节律推进 due（[gated]
             // 求值频率 = 0.5.0 的 fire 频率，无额外扫描面）。
@@ -1697,7 +1745,7 @@ export class Scheduler {
               due.set(agent, mono() + this.sched.agents[agent].intervalSeconds);
               continue;
             }
-            this.launch(agent, g);
+            if (!this.launch(agent, g)) due.set(agent, mono() + this.sched.agents[agent].intervalSeconds);
           }
         }
         if (this.args.once && !this.inflight.length && this.selected.every((a) => this.firedOnce.has(a))) break;
@@ -1723,7 +1771,7 @@ export class Scheduler {
     if (this.sched.laneGating) this.seedLastCleanFromLedger(); // 门控求值全程只读（不写 ledger/不拿锁承诺不破）
     for (const agent of this.selected) {
       const { model, effort, escalated } = resolveTier(this.sched, agent, this.boardDir);
-      const { argv, inlinePrompt } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root);
+      const { argv, inlinePrompt } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root, this.providers);
       const blk = this.sched.agents[agent];
       const cls = REPO_WRITERS.has(agent) ? "repo-writer（全局单飞）" : `board-only（≤${BOARD_ONLY_MAX} 并发）`;
       console.log(`\n${agent}  [${cls}]  interval ${blk.intervalSeconds}s · cap ${blk.capSeconds}s${escalated ? " · KEYSTONE 升档中（板上有 In Review+keystone）" : ""}`);
@@ -1739,9 +1787,13 @@ export class Scheduler {
       console.log(`  env : PATH=~/.local/bin:$PATH（继承其余环境）`);
       if (this.sched.cli === "opencode") {
         console.log(`  perm: OPENCODE_PERMISSION=${JSON.stringify(effectiveOpencodePermission(this.sched))}`);
+        if (Object.keys(this.providers).length) {
+          // 与 fireEnv 同源：注册表非空 ⇒ 真 spawn 会带 OPENCODE_CONFIG 指路 workspace 根
+          console.log(`  conf: OPENCODE_CONFIG=${join(this.wsRoot, "opencode.json")}（cwd 是 git repo 时 opencode 自身发现不到 workspace 根配置——显式指路）`);
+        }
         const gap = providerAuthGap(this.providers, this.sched.cli, model);
         if (gap) {
-          console.log(`  note: provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析 —— 真实 fire 会预检失败（doctor 会体检此项）`);
+          console.log(`  note: provider '${gap.prefix}' 认证环境变量 ${gap.authTokenEnv} 不可解析（${authGapPhrase(gap.reason)}）—— 真实 fire 会预检失败（doctor 会体检此项）`);
         }
       }
       if (this.sched.laneGating) {

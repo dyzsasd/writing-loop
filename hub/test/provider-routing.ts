@@ -28,6 +28,7 @@ import type { WlConfig } from "../src/workspace.ts";
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const runEntry = join(hubRoot, "src", "run.ts");
 const doctorEntry = join(hubRoot, "src", "doctor.ts");
+const firesEntry = join(hubRoot, "src", "fires.ts");
 
 const AGENTS = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
   "sweep", "script-doctor", "market-watch", "reflect"];
@@ -66,11 +67,14 @@ function testPureHelpers(): void {
   check("providerAuthGap：无 provider 前缀 ⇒ null", providerAuthGap(providers, "opencode", "opus") === null);
   check("providerAuthGap：前缀未命中注册表 ⇒ null（内建 provider，不校验）",
     providerAuthGap(providers, "opencode", "builtin/m1") === null);
-  check("providerAuthGap：命中且认证不可解析 ⇒ 返回 {prefix, authTokenEnv}",
+  check("providerAuthGap：命中且认证未设置 ⇒ 返回 {prefix, authTokenEnv, reason:unset}",
     JSON.stringify(providerAuthGap(providers, "opencode", "testprov/m1"))
-    === JSON.stringify({ prefix: "testprov", authTokenEnv: "WL_TEST_PURE_AUTH" }));
+    === JSON.stringify({ prefix: "testprov", authTokenEnv: "WL_TEST_PURE_AUTH", reason: "unset" }));
+  process.env.WL_TEST_PURE_AUTH = "";
+  check("providerAuthGap：空串同判不可解析（`export KEY=` 手滑形）⇒ reason:empty",
+    providerAuthGap(providers, "opencode", "testprov/m1")?.reason === "empty");
   process.env.WL_TEST_PURE_AUTH = "x";
-  check("providerAuthGap：认证可解析 ⇒ null", providerAuthGap(providers, "opencode", "testprov/m1") === null);
+  check("providerAuthGap：认证可解析（非空）⇒ null", providerAuthGap(providers, "opencode", "testprov/m1") === null);
   delete process.env.WL_TEST_PURE_AUTH;
 }
 
@@ -107,6 +111,14 @@ function testValidation(): void {
   check("校验：缺失 models 拒绝", dies(cfgWith({ x: noModels }), "models"));
   check("校验：未知键拒绝", dies(cfgWith({ x: { ...okEntry, bogus: 1 } }), "bogus"));
   check("校验：坏 effortMode 拒绝", dies(cfgWith({ x: { ...okEntry, effortMode: "bogus" } }), "effortMode"));
+  // 保留键防线：extraOptions 渲染时展开在 baseURL/apiKey 之后，若不拒绝，extraOptions.apiKey
+  // 可把字面密钥写进 opencode.json（「config 永不放密钥值」硬不变量的破口）
+  check("校验：extraOptions 含 apiKey 拒绝（字面密钥破口）",
+    dies(cfgWith({ x: { ...okEntry, extraOptions: { apiKey: "sk-live-oops" } } }), "apiKey"));
+  check("校验：extraOptions 含 baseURL 拒绝",
+    dies(cfgWith({ x: { ...okEntry, extraOptions: { baseURL: "https://elsewhere" } } }), "baseURL"));
+  check("校验：extraOptions 含 baseUrl（混拼形）拒绝",
+    dies(cfgWith({ x: { ...okEntry, extraOptions: { baseUrl: "https://elsewhere" } } }), "baseUrl"));
 
   const withStrip = parseProviders(cfgWith({
     x: { ...okEntry, effortMode: "strip", extraOptions: { headers: { a: "b" } } },
@@ -236,8 +248,10 @@ function testSync(): void {
 // ---------------------------------------------------------------------------
 // 5. 调度器 opencode 车道（假二进制，仿 test/scheduler-engines.ts 手法）
 // ---------------------------------------------------------------------------
+// 假 agent 把 spawn 事实 + 收到的 OPENCODE_CONFIG（第二行）一并写进 marker——后者用于断言
+// fireEnv 的 git 边界修复（0.7.0 事故：workspace 根 opencode.json 对 cwd=git repo 的 fire 不可见）。
 const FAKE_AGENT = `import { writeFileSync } from "node:fs";
-writeFileSync(process.argv[2], "spawned");
+writeFileSync(process.argv[2], "spawned\\n" + (process.env.OPENCODE_CONFIG ?? ""));
 console.log("done");
 `;
 
@@ -276,6 +290,13 @@ function runWl(ws: string, extraEnv: Record<string, string>, ...args: string[]):
   return { code: r.status ?? 1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 
+function runTool(entry: string, ws: string, ...args: string[]): { code: number; out: string } {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.WRITING_LOOP_WORKSPACE;
+  const r = spawnSync(process.execPath, [entry, ...args], { cwd: ws, encoding: "utf8", env, timeout: 60_000 });
+  return { code: r.status ?? 1, out: (r.stdout ?? "") + (r.stderr ?? "") };
+}
+
 function ledger(ws: string): Array<Record<string, unknown>> {
   try {
     return readFileSync(join(ws, ".writing-loop", "t1", "fires.jsonl"), "utf8")
@@ -312,6 +333,26 @@ function testSchedulerGuard(): void {
       last?.exitCode === null && last?.noop === false && last?.timedOut === false);
     check("guard launch：FAIL 提示行含变量名与 doctor 指引",
       r.stdout.includes(`认证环境变量 ${AUTH_VAR} 不可解析`) && r.stdout.includes("doctor 会体检此项"));
+    check("guard launch：FAIL 提示要求重启 wl-run（进程内 env 不刷新，export 后重试是无效指引）",
+      r.stdout.includes("重启 wl-run"));
+    // fires 遥测面必须能看见 guard 拦截（0.7.0 回归：provider/providerAuthMissing 只写不显）
+    const fr = runTool(firesEntry, ws, "--project", "t1");
+    check("fires：guard 拦截行 exit 列显 auth!、provider 列显 testprov",
+      fr.out.includes("auth!") && fr.out.includes("testprov"), `out=${fr.out.slice(-500)}`);
+    check("fires：按 agent 汇总单列认证拦截计数（不当谜团失败）", fr.out.includes("认证拦截 1"));
+    rmSync(ws, { recursive: true, force: true });
+  }
+
+  // 洪泛回归（0.7.0 事故形：guard 拦截不推 due ⇒ 200ms tick 级重试，1 秒 ~5 行账本、且
+  // 永不自愈）：连续模式 --for 1 全程账本行数必须是 interval 节律的 1-2 行，不是 tick 级的 ~5 行
+  {
+    const { ws, marker } = makeGuardWs("testprov/fake-model");
+    const r = runWl(ws, {}, "--project", "t1", "--for", "1", "--agents", "sweep");
+    const rows = ledger(ws);
+    check("guard 洪泛回归：--for 1 连续模式下账本 ≤2 行（interval 节律，非 tick 级刷账）",
+      rows.length >= 1 && rows.length <= 2, `rows=${rows.length}`);
+    check("guard 洪泛回归：假二进制始终未被调用", !existsSync(marker));
+    check("guard 洪泛回归：rc=0（guard 拦截不是调度器错误）", r.code === 0, `stderr=${r.stderr.slice(-300)}`);
     rmSync(ws, { recursive: true, force: true });
   }
 
@@ -326,6 +367,10 @@ function testSchedulerGuard(): void {
     check("guard 放行：ledger 无 providerAuthMissing 字段", last?.providerAuthMissing === undefined, `last=${JSON.stringify(last)}`);
     check("guard 放行：ledger 的 provider 字段 = testprov", last?.provider === "testprov");
     check("guard 放行：exitCode=0（假脚本正常退出）", last?.exitCode === 0, `last=${JSON.stringify(last)}`);
+    check("guard 放行：spawn env 带 OPENCODE_CONFIG=workspace 根 opencode.json（git 边界修复——" +
+      "opencode 项目级 config findUp 止步 cwd 的 git 根，不显式指路则同步产物对 fire 不可见）",
+      readFileSync(marker, "utf8").split("\n")[1] === join(ws, "opencode.json"),
+      `marker=${readFileSync(marker, "utf8")}`);
     rmSync(ws, { recursive: true, force: true });
   }
 
@@ -347,6 +392,49 @@ function testSchedulerGuard(): void {
     check("claude 车道零泄漏：无 providerAuthMissing/testprov 字样",
       !r.stdout.includes("providerAuthMissing") && !r.stdout.includes("testprov"));
     check("claude 车道：dry-run 仍正常渲染 claude 命令", r.code === 0 && r.stdout.includes("cli=claude"));
+    rmSync(ws, { recursive: true, force: true });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 5b. effortMode / OPENCODE_CONFIG 的 dry-run 渲染面（无 command 覆盖 ⇒ 走 fireArgv 的
+//     opencode 分支；dry-run 零 spawn，不需要真 opencode 二进制）
+// ---------------------------------------------------------------------------
+function makeVariantWs(effortMode?: "passthrough" | "strip"): string {
+  const ws = tmpDir("wl-provider-variant-");
+  mkdirSync(join(ws, ".writing-loop"), { recursive: true });
+  mkdirSync(join(ws, "t1"), { recursive: true });
+  const agents: Record<string, unknown> = {};
+  for (const a of AGENTS) agents[a] = { enabled: false };
+  agents.sweep = { enabled: true, model: "testprov/fake-model" }; // effort 走 SPECS 默认（high，非空）
+  writeFileSync(join(ws, ".writing-loop", "config.json"), JSON.stringify({
+    version: 1,
+    providers: { testprov: { ...GUARD_PROVIDERS.testprov, ...(effortMode ? { effortMode } : {}) } },
+    scheduler: { cli: "opencode", agents },
+    projects: { t1: { title: "t", repoPath: "t1", enabled: true } },
+  }, null, 2));
+  return ws;
+}
+
+function testVariantStrip(): void {
+  // 默认（passthrough）：--variant 照传；注册表非空 ⇒ conf 行声明 OPENCODE_CONFIG 指路
+  {
+    const ws = makeVariantWs();
+    const r = runWl(ws, { [AUTH_VAR]: "x" }, "--project", "t1", "--dry-run");
+    check("variant：默认 passthrough ⇒ dry-run cmd 含 --variant",
+      r.code === 0 && r.stdout.includes("--variant"), `stdout=${r.stdout.slice(-600)}`);
+    check("variant：-m testprov/fake-model 照传", r.stdout.includes("-m testprov/fake-model"));
+    check("OPENCODE_CONFIG：注册表非空 ⇒ dry-run conf 行指路 workspace 根",
+      r.stdout.includes(`conf: OPENCODE_CONFIG=${join(ws, "opencode.json")}`), `stdout=${r.stdout.slice(-600)}`);
+    rmSync(ws, { recursive: true, force: true });
+  }
+  // strip：--variant 整个省略（0.7.0 死旋钮回归——校验/文档齐备但 fireArgv 从未消费）
+  {
+    const ws = makeVariantWs("strip");
+    const r = runWl(ws, { [AUTH_VAR]: "x" }, "--project", "t1", "--dry-run");
+    check("variant：effortMode:strip ⇒ dry-run cmd 无 --variant",
+      r.code === 0 && !r.stdout.includes("--variant"), `stdout=${r.stdout.slice(-600)}`);
+    check("variant：strip 不影响 -m 传参", r.stdout.includes("-m testprov/fake-model"));
     rmSync(ws, { recursive: true, force: true });
   }
 }
@@ -376,6 +464,10 @@ function testDoctor(): void {
       missing.out.includes("WARN W09") && missing.out.includes(AUTH) && missing.out.includes("testprov"),
       `out=${missing.out.slice(-600)}`);
     check("doctor：W09 warn 不导致整体 FAILED（暖警告不失败）", missing.code === 0);
+
+    const empty = runDoctor(ws, { [AUTH]: "" });
+    check("doctor W09：空串同判不可解析（`export KEY=` 手滑形，点名两态之别）",
+      empty.out.includes("WARN W09") && empty.out.includes("已设置但为空串"), `out=${empty.out.slice(-600)}`);
 
     const present = runDoctor(ws, { [AUTH]: "dummy-secret-value" });
     check("doctor W09：认证可解析 ⇒ ok 且不再 WARN W09",
@@ -410,6 +502,7 @@ for (const [name, fn] of [
   ["testRender", testRender],
   ["testSync", testSync],
   ["testSchedulerGuard", testSchedulerGuard],
+  ["testVariantStrip", testVariantStrip],
   ["testDoctor", testDoctor],
 ] as Array<[string, () => void]>) {
   try { fn(); }

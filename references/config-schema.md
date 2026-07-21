@@ -133,17 +133,29 @@
   密钥值误当名字填进去）；实际密钥只从 `process.env[authTokenEnv]` 读，config.json 本身
   绝不出现密钥值。
 - `models`：非空字符串数组（每个元素非空）。
-- `extraOptions`（可选）：对象，透传进渲染出的 opencode provider `options`。
-- `effortMode`（可选）：`"passthrough"`（默认）| `"strip"`。
+- `extraOptions`（可选）：对象，透传进渲染出的 opencode provider `options`；**不得**含
+  `baseURL`/`baseUrl`/`apiKey`（端点走顶层 `baseUrl`、认证走 `authTokenEnv`——apiKey 恒
+  渲染为 `{env:VAR}` 间接引用）。校验层只拦这三个保留键；其余内容**原样**写进
+  opencode.json——所以绝不要把密钥值放进 extraOptions 的任何角落（如
+  `headers.Authorization`），认证一律走 `authTokenEnv` 环境变量间接引用。
+- `effortMode`（可选）：`"passthrough"`（默认）| `"strip"`。`strip` = 该 provider 的
+  opencode fire **整个省略 `--variant`**——留给不认 variant 值的端点当逃生口（否则这类
+  端点每 fire 必错）；`passthrough` = effort 照传 `--variant`。
 - 未知字段一律拒绝；`providers` 若存在必须是对象（非数组）。
 
 `writing-loop sync-opencode` 把这个注册表渲染进 `<workspace-root>/opencode.json`
 （create-or-merge：新建/合并/原地更新，注册表之外的手写 provider 与其余顶层键绝不
 触碰；绝不碰 `~/.config/opencode/opencode.json` 全局配置）。改了 `providers` 块后手动
 跑一次该命令，再 `writing-loop doctor` 复核——doctor 对 providers 的体检不带独立编号
-体系，warn 文案本身自解释：某条目的 `authTokenEnv` 环境变量不可解析（其 opencode fire
-会预检失败）、或 `opencode.json` 与本注册表有漂移（缺失/未同步/过期，提示运行
-`sync-opencode`）。两者都只读，不会自动帮你改文件。
+体系，warn 文案本身自解释：某条目的 `authTokenEnv` 环境变量不可解析（**未设置或已设置
+但为空串**都算——其 opencode fire 会预检失败）、或 `opencode.json` 与本注册表有漂移
+（缺失/未同步/过期，提示运行 `sync-opencode`）。两者都只读，不会自动帮你改文件；
+`writing-loop run` 启动时也做同一漂移检查（只警不拦）。
+
+注册表非空时，每个 opencode fire 的 spawn env 都带
+`OPENCODE_CONFIG=<workspace-root>/opencode.json` 显式指路——不指不行：opencode 的项目级
+config 发现 findUp 止步于 cwd 的 git 根，而 fire 的 cwd=repoPath 本身就是 git repo，
+workspace 根的同步产物否则对 fire 不可见（sync/doctor 全绿也白搭）。
 
 ## 内建调度器 — `scheduler` 块（`writing-loop run`）
 
