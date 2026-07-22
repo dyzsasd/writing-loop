@@ -251,7 +251,7 @@ function testSync(): void {
 // 假 agent 把 spawn 事实 + 收到的 OPENCODE_CONFIG（第二行）一并写进 marker——后者用于断言
 // fireEnv 的 git 边界修复（0.7.0 事故：workspace 根 opencode.json 对 cwd=git repo 的 fire 不可见）。
 const FAKE_AGENT = `import { writeFileSync } from "node:fs";
-writeFileSync(process.argv[2], "spawned\\n" + (process.env.OPENCODE_CONFIG ?? ""));
+writeFileSync(process.argv[2], "spawned\\n" + (process.env.OPENCODE_CONFIG ?? "") + "\\n" + (process.env.XDG_CONFIG_HOME ?? ""));
 console.log("done");
 `;
 
@@ -371,6 +371,30 @@ function testSchedulerGuard(): void {
       "opencode 项目级 config findUp 止步 cwd 的 git 根，不显式指路则同步产物对 fire 不可见）",
       readFileSync(marker, "utf8").split("\n")[1] === join(ws, "opencode.json"),
       `marker=${readFileSync(marker, "utf8")}`);
+    check("guard 放行：spawn env 带 XDG_CONFIG_HOME=workspace 密闭目录（0.7.2 fire 密闭默认开——" +
+      "全局 ~/.config/opencode 插件不进 fire）",
+      readFileSync(marker, "utf8").split("\n")[2] === join(ws, ".writing-loop", "opencode-xdg"),
+      `marker=${readFileSync(marker, "utf8")}`);
+    check("guard 放行：密闭目录已创建", existsSync(join(ws, ".writing-loop", "opencode-xdg")));
+    rmSync(ws, { recursive: true, force: true });
+  }
+
+  // opencodeHermetic:false 显式关 ⇒ XDG_CONFIG_HOME 不注入（沿用继承环境）
+  {
+    const { ws, marker } = makeGuardWs("testprov/fake-model");
+    const cfgPath = join(ws, ".writing-loop", "config.json");
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { scheduler: Record<string, unknown> };
+    cfg.scheduler.opencodeHermetic = false;
+    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    const env: NodeJS.ProcessEnv = { ...process.env, [AUTH_VAR]: "dummy-token" };
+    delete env.XDG_CONFIG_HOME; // 干净基线：继承环境里无此变量 ⇒ 关密闭后 fire 也不该有
+    delete env.WRITING_LOOP_WORKSPACE;
+    const r = spawnSync(process.execPath, [runEntry, "--project", "t1", "--once", "--agents", "sweep"],
+      { cwd: ws, encoding: "utf8", env, timeout: 60_000 });
+    check("密闭关：rc=0", (r.status ?? 1) === 0, `stderr=${(r.stderr ?? "").slice(-300)}`);
+    check("密闭关：spawn env 无 XDG_CONFIG_HOME（第三行空）",
+      existsSync(marker) && readFileSync(marker, "utf8").split("\n")[2] === "",
+      `marker=${existsSync(marker) ? readFileSync(marker, "utf8") : "<missing>"}`);
     rmSync(ws, { recursive: true, force: true });
   }
 
@@ -426,6 +450,8 @@ function testVariantStrip(): void {
     check("variant：-m testprov/fake-model 照传", r.stdout.includes("-m testprov/fake-model"));
     check("OPENCODE_CONFIG：注册表非空 ⇒ dry-run conf 行指路 workspace 根",
       r.stdout.includes(`conf: OPENCODE_CONFIG=${join(ws, "opencode.json")}`), `stdout=${r.stdout.slice(-600)}`);
+    check("fire 密闭：默认开 ⇒ dry-run xdg 行声明 XDG_CONFIG_HOME 密闭目录",
+      r.stdout.includes(`xdg : XDG_CONFIG_HOME=${join(ws, ".writing-loop", "opencode-xdg")}`), `stdout=${r.stdout.slice(-600)}`);
     rmSync(ws, { recursive: true, force: true });
   }
   // strip：--variant 整个省略（0.7.0 死旋钮回归——校验/文档齐备但 fireArgv 从未消费）

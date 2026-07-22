@@ -146,6 +146,12 @@ export type Sched = {
   cli: "claude" | "codex" | "opencode";
   promptMode: "slash" | "inline";
   opencodePermission: Record<string, unknown> | null; // null ⇒ 用内建 OPENCODE_PERMISSION_DEFAULT
+  opencodeHermetic: boolean;          // fire 密闭：XDG_CONFIG_HOME 指向 workspace 专属空目录 ⇒
+                                      // 操作者 ~/.config/opencode 的全局插件/provider/agent 一概不进
+                                      // fire（0.7.2 实案：全局 oh-my-opencode 的 Sisyphus agent 在
+                                      // fire 内间歇卡死 initConfigContext，烧满 cap）。默认 true；
+                                      // false = 沿用全局环境（操作者显式要求 fire 吃全局配置时才关）。
+                                      // 密闭只动 CONFIG 面——auth 存 XDG_DATA（~/.local/share），不受影响。
   graceSeconds: number;
   keystoneReviewer: { model: string; effort: string };
   laneGating: boolean;                // 车道门控 config 开关（默认 true；false 回退 0.5.0 无门控行为）
@@ -194,6 +200,9 @@ function applyLayer(sched: Sched, src: string, layer: unknown): void {
     } else if (k === "opencodePermission") {
       if (v === null || typeof v !== "object" || Array.isArray(v)) die(`${src}.opencodePermission 必须是对象（整对象覆盖内建默认，不做 deep-merge）`);
       sched.opencodePermission = v as Record<string, unknown>;
+    } else if (k === "opencodeHermetic") {
+      if (typeof v !== "boolean") die(`${src}.opencodeHermetic 必须是布尔（得到 ${JSON.stringify(v)}）`);
+      sched.opencodeHermetic = v;
     } else if (k === "graceSeconds") {
       if (!Number.isInteger(v) || (v as number) < 0) die(`${src}.graceSeconds 必须是 ≥0 的整数`);
       sched.graceSeconds = v as number;
@@ -220,6 +229,7 @@ export function buildSched(cfg: WlConfig, key: string, project: WlProject): Sche
     cli: "claude",
     promptMode: "slash",
     opencodePermission: null,
+    opencodeHermetic: true,
     graceSeconds: GRACE_DEFAULT,
     keystoneReviewer: { ...KEYSTONE_DEFAULT },
     laneGating: true,
@@ -1152,6 +1162,15 @@ export function fireEnv(
     if (wsRoot !== null && Object.keys(providers).length) {
       env.OPENCODE_CONFIG = join(wsRoot, "opencode.json");
     }
+    // fire 密闭（0.7.2）：XDG_CONFIG_HOME 指向 workspace 专属空目录 ⇒ 操作者
+    // ~/.config/opencode 的全局插件/provider/agent 一概不进 fire。实案：全局 oh-my-opencode
+    // 的 Sisyphus agent 在 fire 内间歇卡死 initConfigContext，烧满 cap 才被回收。
+    // OPENCODE_CONFIG 是显式路径不受 XDG 影响；auth 存 XDG_DATA（~/.local/share），不受影响。
+    if (sched.opencodeHermetic && wsRoot !== null) {
+      const xdg = join(dataRootOf(wsRoot), "opencode-xdg");
+      try { mkdirSync(xdg, { recursive: true }); } catch { /* 只读环境（dry-run 试算等）⇒ 仍设 env，opencode 容忍缺目录 */ }
+      env.XDG_CONFIG_HOME = xdg;
+    }
   }
   return env;
 }
@@ -1790,6 +1809,9 @@ export class Scheduler {
         if (Object.keys(this.providers).length) {
           // 与 fireEnv 同源：注册表非空 ⇒ 真 spawn 会带 OPENCODE_CONFIG 指路 workspace 根
           console.log(`  conf: OPENCODE_CONFIG=${join(this.wsRoot, "opencode.json")}（cwd 是 git repo 时 opencode 自身发现不到 workspace 根配置——显式指路）`);
+        }
+        if (this.sched.opencodeHermetic) {
+          console.log(`  xdg : XDG_CONFIG_HOME=${join(this.dataRootPath, "opencode-xdg")}（fire 密闭——全局 opencode 插件/agent 不进 fire；opencodeHermetic:false 可关）`);
         }
         const gap = providerAuthGap(this.providers, this.sched.cli, model);
         if (gap) {
