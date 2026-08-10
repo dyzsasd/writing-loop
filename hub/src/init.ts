@@ -1,11 +1,12 @@
 // `writing-loop init` —— 铺 workspace 骨架：目标目录下建 .writing-loop/ + 空 config.json
 // {"version":1,"projects":{}}。幂等：绝不覆盖任何已存在文件；已有 workspace ⇒ 打印项目清单。
-// 真正的立项（interview、repo scaffold、首张 outline 票）属于 /writing-loop:add-script，
-// 本命令只负责让「workspace 根」存在——非技术操作者的第一条命令。
+// 真正的立项（interview、repo scaffold、首张 outline 票）由 Studio / project CLI 共用的
+// onboarding core 完成；本命令只负责让「workspace 根」存在——非技术操作者的第一条命令。
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, WsError, type WlConfig } from "./workspace.ts";
+import { registerWorkspace } from "./workspace-registry.ts";
 
 const SKELETON: WlConfig = { version: 1, projects: {} };
 
@@ -66,9 +67,18 @@ export function initMain(argv = process.argv.slice(2)): number {
     }
   }
 
+  // Registry is a non-authoritative convenience index. init remains successful if the user's
+  // home index is locked or corrupt; the diagnostic makes the degraded state actionable.
+  try {
+    const registered = registerWorkspace(dir);
+    console.log(`\nworkspace ID: ${registered.id}（已注册到本机索引）`);
+  } catch (error) {
+    console.log(`\n注意: workspace 本机索引注册失败（init 已成功）：${error instanceof Error ? error.message : String(error)}`);
+  }
+
   console.log(`\nNEXT: ${projectCount
     ? "writing-loop run 起调度器（或 writing-loop status 看板）"
-    : "在 Claude Code 里跑 /writing-loop:add-script 做立项 interview（拆书或原创，由它写入 config.json 并铺剧本 repo）"}`);
+    : "writing-loop studio 打开本地立项向导（或用 /writing-loop:add-script 采访后调用 project plan/create）"}`);
   return 0;
 }
 

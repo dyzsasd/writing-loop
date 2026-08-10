@@ -39,15 +39,17 @@
 //   （缺省用内建 wildcard-deny 基线 OPENCODE_PERMISSION_DEFAULT；不做 deep-merge）。
 // 零依赖：node:* 内建 API only。自测：hub/test/scheduler*.ts（npm test）。
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
-  appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readdirSync, readSync,
-  statSync, unlinkSync, utimesSync, writeFileSync, writeSync, existsSync, readFileSync,
+  appendFileSync, closeSync, constants as fsConstants, fstatSync, fsyncSync, futimesSync,
+  lstatSync, mkdirSync, openSync, readdirSync, readSync, renameSync, statSync, unlinkSync,
+  writeFileSync, writeSync, existsSync, readFileSync,
 } from "node:fs";
 import { constants as osConstants, homedir } from "node:os";
 import { delimiter, isAbsolute, join, relative } from "node:path";
 import { opencodeSyncDrift } from "./opencode-sync.ts";
 import { pluginRoot } from "./paths.ts";
+import { isCleanFire, TICKET_STATES as SHARED_TICKET_STATES } from "./status.ts";
 import {
   dataRoot as dataRootOf, findWorkspaceRoot, loadConfig, resolveProject, WsError,
   type WlConfig, type WlProject,
@@ -124,15 +126,6 @@ export class WlExit extends Error {
   constructor(code: number, msg: string) { super(msg); this.name = "WlExit"; this.code = code; }
 }
 function die(msg: string, code = 1): never { throw new WlExit(code, msg); }
-
-function readHead(path: string, n: number): string {
-  const fd = openSync(path, "r");
-  try {
-    const buf = Buffer.alloc(n);
-    const got = readSync(fd, buf, 0, n, 0);
-    return buf.subarray(0, got).toString("utf8"); // 非法序列成替换符——等价 errors="replace"
-  } finally { closeSync(fd); }
-}
 
 // ---------------------------------------------------------------------------
 // scheduler 配置合并（低→高：SPECS 默认 < workspace scheduler < 项目 models/efforts
@@ -396,7 +389,7 @@ export const TERMINAL_STATES: ReadonlySet<string> = new Set(["Done", "Canceled",
 // 票 state 的闭集词表（§18；与 agent/board_op.py 写入面一致）。词表外的值（手误
 // "In  Review"/"InReview" 类）解析「成功」但随后所有精确匹配枝都静默不命中 = fail-closed
 // ——按单向安全一律标 malformed（保守放行，Fix 轮 1）。
-export const TICKET_STATES: ReadonlySet<string> = new Set(["Todo", "Backlog", "In Progress", "In Review", ...TERMINAL_STATES]);
+export const TICKET_STATES: ReadonlySet<string> = SHARED_TICKET_STATES;
 const CLAIM_STALE_MS = 60 * 60_000;       // §7 认领陈旧阈值（60min）
 const KEYSTONE_STALL_MS = 30 * 60_000;    // §1 keystone-stall 护栏阈值（默认 30min）
 const SWEEP_CADENCE_MS = 30 * 60_000;     // sweep 兜底节拍（SKILL §0 cadence gate，30min 级）
@@ -1230,15 +1223,10 @@ export function authGapPhrase(reason: "unset" | "empty"): string {
 }
 
 // ---------------------------------------------------------------------------
-// 项目锁（board-lock.sh choreography；缺 bash 时 inline 同语义）
+// 项目锁（board-lock.sh choreography 的进程内实现）。scheduler 还必须携带拿锁时的
+// dev/ino/token：仅凭路径或 holder 外形做 heartbeat/release，会在锁被外力替换后误触、
+// 误删 successor。路径消失也绝不“补建”——那已经是失锁，必须让主循环 drain。
 // ---------------------------------------------------------------------------
-function lockHelper(): string | null {
-  try {
-    const p = join(pluginRoot(), "scripts", "board-lock.sh");
-    return existsSync(p) ? p : null;
-  } catch { return null; }
-}
-
 // 与 board-lock.sh is_holder_shaped 的锚定文法逐字对齐（秒精度、无后缀）——两个工具互认
 // 彼此的锁；任何偏离都会让对方把本方残锁判成「非锁文件」而拒收（WL-53 守卫的反面）。
 function holderLine(): string {
@@ -1248,64 +1236,163 @@ function holderLine(): string {
 
 const HOLDER_RE = /^holder pid=\d+ at \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\n?$/;
 
-function isHolderShaped(path: string): boolean {
-  try { return HOLDER_RE.test(readHead(path, 256)); } catch { return false; }
+type FileIdentity = { dev: number; ino: number };
+
+export type LockOwnership = FileIdentity & { path: string; token: string };
+
+function sameIdentity(a: FileIdentity, b: FileIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
 }
 
-export function acquireLock(lockPath: string): boolean {
-  if (!lockPath.endsWith(".lock")) throw new Error("锁路径必须以 .lock 结尾（防误传目标文件）");
-  const helper = lockHelper();
-  if (helper) {
-    const r = spawnSync("bash", [helper, "acquire", lockPath], { stdio: ["ignore", "inherit", "inherit"] });
-    if (!r.error) return r.status === 0;
-    // bash 二进制缺失 ⇒ 落入 inline 同语义路径
+function randomSibling(path: string, purpose: string): string {
+  return `${path}.${purpose}-${process.pid}-${randomBytes(16).toString("hex")}.tmp`;
+}
+
+function writeAll(fd: number, data: Buffer): void {
+  let offset = 0;
+  while (offset < data.length) {
+    const written = writeSync(fd, data, offset, data.length - offset);
+    if (written <= 0) throw new Error("短写：未能推进文件偏移");
+    offset += written;
   }
+}
+
+function readSmallFd(fd: number, size: number): string | null {
+  if (!Number.isSafeInteger(size) || size < 0 || size > 4096) return null;
+  const data = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const got = readSync(fd, data, offset, size - offset, offset);
+    if (got === 0) break;
+    offset += got;
+  }
+  return offset === size ? data.toString("utf8") : null;
+}
+
+// 用 fd 验证 inode/token，再复核该 inode 仍挂在给定路径。调用者随后只可操作 fd；
+// 路径操作须走 moveAndRemoveOwned 的 rename→复核 choreography。
+function openOwned(path: string, identity: FileIdentity, token?: string): number | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const st = fstatSync(fd);
+    if (!st.isFile() || !sameIdentity(st, identity)) throw new Error("inode mismatch");
+    if (token !== undefined && readSmallFd(fd, st.size) !== token) throw new Error("token mismatch");
+    const linked = lstatSync(path);
+    if (!linked.isFile() || !sameIdentity(linked, identity)) throw new Error("path replaced");
+    return fd;
+  } catch {
+    if (fd !== null) try { closeSync(fd); } catch { /* best effort */ }
+    return null;
+  }
+}
+
+// Node 没有 conditional-unlink-by-inode。先把路径原子移到不可预测的同目录名字，再复核
+// 被移走的 inode/token，确认仍是自己的才删除；若极窄竞争窗里移到的是 successor，则保留
+// 隔离文件作为证据，绝不 unlink 它。
+function moveAndRemoveOwned(path: string, identity: FileIdentity, token?: string): boolean {
+  const preflight = openOwned(path, identity, token);
+  if (preflight === null) return false;
+  try { closeSync(preflight); } catch { return false; }
+  const quarantine = randomSibling(path, "release");
+  try { renameSync(path, quarantine); } catch { return false; }
+  const moved = openOwned(quarantine, identity, token);
+  if (moved === null) {
+    console.error(`wl-run: ${path} 在释放竞争窗中被替换；successor 已保留于 ${quarantine}，绝不删除`);
+    return false;
+  }
+  try { closeSync(moved); } catch { return false; }
+  try {
+    unlinkSync(quarantine);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function inspectHolder(lockPath: string): { owner: LockOwnership; mtimeMs: number } | null {
+  let fd: number | null = null;
+  try {
+    fd = openSync(lockPath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const st = fstatSync(fd);
+    const token = st.isFile() ? readSmallFd(fd, st.size) : null;
+    if (token === null || !HOLDER_RE.test(token)) throw new Error("not a holder");
+    const linked = lstatSync(lockPath);
+    if (!linked.isFile() || !sameIdentity(linked, st)) throw new Error("path replaced");
+    return { owner: { path: lockPath, dev: st.dev, ino: st.ino, token }, mtimeMs: st.mtimeMs };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) try { closeSync(fd); } catch { /* best effort */ }
+  }
+}
+
+export function lockOwnershipValid(owner: LockOwnership): boolean {
+  const fd = openOwned(owner.path, owner, owner.token);
+  if (fd === null) return false;
+  try { closeSync(fd); } catch { return false; }
+  return true;
+}
+
+export function acquireLock(lockPath: string): LockOwnership | null {
+  if (!lockPath.endsWith(".lock")) throw new Error("锁路径必须以 .lock 结尾（防误传目标文件）");
   for (const attempt of [1, 2]) {
+    let fd: number | null = null;
+    let created: FileIdentity | null = null;
+    const token = holderLine();
     try {
-      const fd = openSync(lockPath, "wx"); // O_CREAT|O_EXCL|O_WRONLY：OS 保证唯一赢家
-      writeSync(fd, holderLine());
+      fd = openSync(lockPath,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+        0o600);
+      const st = fstatSync(fd);
+      created = { dev: st.dev, ino: st.ino };
+      writeAll(fd, Buffer.from(token, "utf8"));
+      fsyncSync(fd);
       closeSync(fd);
-      return true;
+      fd = null;
+      const owner: LockOwnership = { path: lockPath, ...created, token };
+      if (lockOwnershipValid(owner)) return owner;
+      moveAndRemoveOwned(lockPath, created);
+      return null; // 路径在创建后被移除/替换；绝不碰 successor。
     } catch (e) {
+      if (fd !== null) try { closeSync(fd); } catch { /* best effort */ }
+      if (created !== null) moveAndRemoveOwned(lockPath, created);
       if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      let stale = false;
-      try { stale = Date.now() - statSync(lockPath).mtimeMs > 60 * 60 * 1000; } catch { stale = false; }
+      const inspected = inspectHolder(lockPath);
+      let mtimeMs: number | null = null;
+      try { mtimeMs = lstatSync(lockPath).mtimeMs; } catch { /* 消失中的竞争者：本次保守失败 */ }
+      const stale = mtimeMs !== null && Date.now() - mtimeMs > 60 * 60 * 1000;
       if (attempt === 1 && stale) {
         // WL-53 守卫（inline 同 board-lock.sh）：超龄但非 holder 格式 ⇒ 绝不 rm。
-        if (!isHolderShaped(lockPath)) {
+        if (inspected === null) {
           console.error(`wl-run: ${lockPath} 超龄但不是本工具的锁文件——绝不删除，请人工检查（WL-53）`);
-          return false;
+          return null;
         }
         console.error(`wl-run: stale lock >60min，强清重试：${lockPath}`);
-        try { unlinkSync(lockPath); } catch { /* 竞争者先清了 ⇒ 重试照样走 O_EXCL */ }
+        if (!moveAndRemoveOwned(lockPath, inspected.owner, inspected.owner.token)) return null;
         continue;
       }
-      return false;
+      return null;
     }
   }
-  return false;
+  return null;
 }
 
-export function releaseLock(lockPath: string): void {
-  const helper = lockHelper();
-  if (helper) {
-    const r = spawnSync("bash", [helper, "release", lockPath], { stdio: ["ignore", "inherit", "inherit"] });
-    if (!r.error) return;
-  }
-  if (isHolderShaped(lockPath)) {
-    try { unlinkSync(lockPath); } catch { /* 已被清 ⇒ 幂等 */ }
-  } else {
-    console.error(`wl-run: ${lockPath} 不是 holder 格式——拒绝释放删除，请人工检查（WL-53）`);
-  }
+export function releaseLock(owner: LockOwnership): boolean {
+  return moveAndRemoveOwned(owner.path, owner, owner.token);
 }
 
-export function heartbeatLock(lockPath: string): void {
+export function heartbeatLock(owner: LockOwnership): boolean {
+  const fd = openOwned(owner.path, owner, owner.token);
+  if (fd === null) return false;
   try {
     const now = new Date();
-    utimesSync(lockPath, now, now);
+    futimesSync(fd, now, now); // fd 锚定原 inode；绝不 touch 同路径 successor。
+    return lockOwnershipValid(owner);
   } catch {
-    try { writeFileSync(lockPath, holderLine()); } // 锁被外力移走 —— 重建，绝不无锁裸跑
-    catch { /* 目录都没了也不弄死主循环 */ }
+    return false;
+  } finally {
+    try { closeSync(fd); } catch { /* best effort */ }
   }
 }
 
@@ -1316,6 +1403,7 @@ class Fire {
   readonly startedMono = mono();
   readonly startedIso = utcIso();
   timedOut = false;
+  descendantDrain = false;           // leader 已退但同 PGID 工具进程仍活；不得算 clean
   killDeadline: number | null = null;
   exited = false;
   rc: number | null = null;          // 信号死 ⇒ 负信号号（同 python subprocess returncode）
@@ -1334,6 +1422,55 @@ class Fire {
     escalated: boolean, cap: number, logPath: string) {
     this.agent = agent; this.child = child; this.model = model; this.effort = effort;
     this.escalated = escalated; this.cap = cap; this.logPath = logPath;
+  }
+}
+
+// 仪表盘的实时真相源。fires.jsonl 只在 fire 结束时追加，无法回答“现在谁正在写”；
+// 这个小型、原子替换的 run-state 文件只承载易失运行态，业务真相仍是板 + repo + ledger。
+export type RunState = {
+  version: 1;
+  project: string;
+  pid: number;
+  status: "running" | "stopping" | "stopped";
+  cli: "claude" | "codex" | "opencode";
+  selectedAgents: string[];
+  startedAt: string;
+  updatedAt: string;
+  endedAt?: string;
+  inFlight: Array<{
+    agent: string;
+    pid: number | null;
+    model: string;
+    effort: string;
+    startedAt: string;
+    capSeconds: number;
+    logFile: string;
+  }>;
+};
+
+// run-state 是观测快照，但仍不能用可预测的 `<pid>.tmp` + O_TRUNC：攻击者可预植
+// symlink 让一次状态刷新截断任意文件。随机同目录临时文件以 O_EXCL|O_NOFOLLOW 0600
+// 创建，fd 完整写入并 fsync 后才 rename；异常清理也只移除刚创建的 inode。
+export function writeRunStateAtomic(path: string, state: RunState): boolean {
+  const tmp = randomSibling(path, "snapshot");
+  let fd: number | null = null;
+  let created: FileIdentity | null = null;
+  try {
+    fd = openSync(tmp,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+      0o600);
+    const st = fstatSync(fd);
+    created = { dev: st.dev, ino: st.ino };
+    writeAll(fd, Buffer.from(JSON.stringify(state, null, 2) + "\n", "utf8"));
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = null;
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    if (fd !== null) try { closeSync(fd); } catch { /* best effort */ }
+    if (created !== null) moveAndRemoveOwned(tmp, created);
+    return false; // observability best effort：永远不能杀 scheduler
   }
 }
 
@@ -1358,6 +1495,18 @@ function killpg(child: ChildProcess, sig: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try { process.kill(-child.pid, sig); } // detached ⇒ 子进程是进程组长，负 pid 杀全组
   catch { /* 组已消失 / 无权限 ⇒ 静默（同 0.4.0） */ }
+}
+
+function processGroupAlive(child: ChildProcess): boolean {
+  if (child.pid === undefined) return false;
+  try {
+    process.kill(-child.pid, 0); // leader 退出后，只要同 PGID descendant 仍在，这里仍为真。
+    return true;
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error
+      ? (error as NodeJS.ErrnoException).code : undefined;
+    return code !== "ESRCH"; // EPERM/未知错误都按仍活处理，禁止不确定时释放项目锁。
+  }
 }
 
 const signalNumber = (sig: NodeJS.Signals): number =>
@@ -1442,11 +1591,17 @@ export class Scheduler {
   readonly logsDir: string;
   readonly ledgerPath: string;
   readonly lockPath: string;
+  readonly runStatePath: string;
   readonly selected: string[];
   readonly inflight: Fire[] = [];
   readonly firedOnce = new Set<string>();
   stopRequested = 0;                 // 1 = 优雅停，2 = 立即杀
   private logSeq = 0;
+  private runStartedAt = "";
+  private draining = false;          // signal / --for 一旦进入收尾，直至 stopped 都不可回跳 running
+  private configReadWarned = false;
+  private lockOwnership: LockOwnership | null = null;
+  private lockLostReason: string | null = null;
 
   readonly args: Args;
   readonly wsRoot: string;
@@ -1481,10 +1636,57 @@ export class Scheduler {
     this.logsDir = join(this.projData, "logs");
     this.ledgerPath = join(this.projData, "fires.jsonl");
     this.lockPath = join(this.projData, "wl-run.lock");
+    this.runStatePath = join(this.projData, "run-state.json");
     this.selected = this.selectAgents(args.agents);
     const mdp = project?.marketDataPath;
     this.marketDataPath = typeof mdp === "string" && mdp
       ? (isAbsolute(mdp) ? mdp : join(wsRoot, mdp)) : null;
+  }
+
+  private writeRunState(status: RunState["status"], endedAt?: string): void {
+    if (!this.runStartedAt) return;
+    const state: RunState = {
+      version: 1,
+      project: this.key,
+      pid: process.pid,
+      status,
+      cli: this.sched.cli,
+      selectedAgents: [...this.selected],
+      startedAt: this.runStartedAt,
+      updatedAt: utcIso(),
+      ...(endedAt ? { endedAt } : {}),
+      inFlight: this.inflight.map((f) => ({
+        agent: f.agent,
+        pid: f.child.pid ?? null,
+        model: f.model,
+        effort: f.effort,
+        startedAt: f.startedIso,
+        capSeconds: f.cap,
+        logFile: relative(this.projData, f.logPath),
+      })),
+    };
+    writeRunStateAtomic(this.runStatePath, state);
+  }
+
+  private projectEnabledOnDisk(): boolean | null {
+    try {
+      const projects = loadConfig(this.wsRoot).config.projects;
+      if (!projects || typeof projects !== "object" || Array.isArray(projects)) return null;
+      if (!Object.prototype.hasOwnProperty.call(projects, this.key)) return false;
+      const project = projects[this.key];
+      return project !== null && typeof project === "object" && project.enabled !== false;
+    } catch {
+      return null; // 手工编辑中的坏 config 不足以证明应停；只告警并在下一采样重试。
+    }
+  }
+
+  private markLockLost(reason: string): void {
+    if (this.lockLostReason !== null) return;
+    this.lockLostReason = reason;
+    this.draining = true;
+    this.stopRequested = Math.max(this.stopRequested, 1);
+    this.writeRunState("stopping");
+    console.error(`wl-run: 项目锁所有权已丢失（${reason}）——停止派发并 drain；绝不重建或删除 successor：${this.lockPath}`);
   }
 
   private selectAgents(spec: string | null): string[] {
@@ -1527,9 +1729,9 @@ export class Scheduler {
     for (const ln of raw.split("\n")) {
       if (!ln.trim()) continue;
       try {
-        const r = JSON.parse(ln) as { agent?: unknown; endedAt?: unknown; exitCode?: unknown; timedOut?: unknown };
+        const r = JSON.parse(ln) as { agent?: string; endedAt?: string; exitCode?: number | null; timedOut?: boolean; descendantDrain?: boolean };
         if (typeof r.agent !== "string" || typeof r.endedAt !== "string") continue;
-        if (r.exitCode !== 0 || r.timedOut === true) continue;
+        if (!isCleanFire(r)) continue;
         const t = Date.parse(r.endedAt);
         if (!Number.isNaN(t)) this.lastCleanEndMs.set(r.agent, Math.max(t, this.lastCleanEndMs.get(r.agent) ?? 0));
       } catch { /* 坏行跳过 */ }
@@ -1610,6 +1812,7 @@ export class Scheduler {
     });
     this.inflight.push(fire);
     this.firedOnce.add(agent);
+    this.writeRunState("running");
     const cls = REPO_WRITERS.has(agent) ? "repo-writer" : "board-only";
     console.log(`[${fire.startedIso}] fire ${agent}（${model}/${effort || "-"}${escalated ? "，keystone 升档" : ""}，${cls}，cap ${fire.cap}s）→ ${relative(this.projData, logPath)}`);
     return true;
@@ -1623,15 +1826,17 @@ export class Scheduler {
     const noop = detectNoop(fire.logPath);
     // 车道门控账本维护：干净退出（exit 0 且未超时）才推进墙钟基点/提交 showrunner 基线；
     // 崩溃/超时 ⇒ 基线清空 ⇒ 下次门控求值恒「已变」（单向安全规则③）。
-    const clean = rc === 0 && !fire.timedOut;
+    const clean = isCleanFire({ exitCode: rc, timedOut: fire.timedOut, descendantDrain: fire.descendantDrain });
     if (clean) this.lastCleanEndMs.set(fire.agent, Date.now());
     if (fire.agent === "showrunner") this.showrunnerBaseline = clean ? fire.gateSnapshot : null;
     this.ledgerAppend({
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: ended, durationSeconds: dur,
       exitCode: rc, timedOut: fire.timedOut, noop, keystoneEscalated: fire.escalated,
+      descendantDrain: fire.descendantDrain || undefined,
       provider: providerOf(this.sched.cli, fire.model),
     });
+    this.writeRunState(this.draining || this.stopRequested ? "stopping" : "running");
     const flags: string[] = [];
     if (fire.timedOut) flags.push(`TIMEOUT>${fire.cap}s`);
     if (noop) flags.push("no-op");
@@ -1650,17 +1855,30 @@ export class Scheduler {
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: nowIso, durationSeconds: 0,
       exitCode: null, timedOut: false, noop: false, keystoneEscalated: fire.escalated,
+      descendantDrain: fire.descendantDrain || undefined,
       provider: providerOf(this.sched.cli, fire.model), spawnError: fire.spawnError,
     });
+    this.writeRunState(this.draining || this.stopRequested ? "stopping" : "running");
   }
 
   pollInflight(due: Map<string, number>): void {
     const now = mono();
     for (const fire of [...this.inflight]) {
-      if (fire.exited) {
+      const groupAlive = processGroupAlive(fire.child);
+      if (fire.exited && !groupAlive) {
         if (fire.spawnError !== null && fire.rc === null) this.finishSpawnError(fire);
         else due.set(fire.agent, this.finish(fire, fire.rc));
         continue;
+      }
+      if (fire.exited && groupAlive) {
+        if (!fire.descendantDrain) {
+          fire.descendantDrain = true;
+          console.log(`[${utcIso()}] fire ${fire.agent} leader 已退出但同进程组仍有 descendant —— TERM（3s 后 KILL）`);
+        }
+        if (fire.killDeadline === null) {
+          killpg(fire.child, "SIGTERM");
+          fire.killDeadline = now + 3;
+        }
       }
       if (fire.killDeadline !== null) {
         if (now >= fire.killDeadline) {
@@ -1683,14 +1901,55 @@ export class Scheduler {
     }
   }
 
+  // 主循环自身若因磁盘/账本错误抛出，detached agent 不会自动随父进程退出。释放项目锁
+  // 前必须先 TERM→KILL 并确认 leader 已 reap；若仍无法确认，就保留锁与 stopping 真相，
+  // 宁可等待人工/陈旧锁恢复，也不能允许第二个 scheduler 和孤儿并发写同一 repo。
+  private async emergencyDrain(): Promise<boolean> {
+    // 不能只看 ChildProcess leader：Claude/Codex 可能派生工具进程，leader 收到 TERM 先退，
+    // 同 PGID descendant 仍会继续写。负 PGID 的 signal-0 才是整个 fire 已消失的证据。
+    const alive = (): Fire[] => this.inflight.filter((fire) => processGroupAlive(fire.child));
+    if (!alive().length) {
+      this.inflight.length = 0;
+      return true;
+    }
+    this.draining = true;
+    this.writeRunState("stopping");
+    console.error(`wl-run: 主循环异常，紧急终止 ${alive().length} 个 in-flight agent 后再释放项目锁`);
+    for (const fire of alive()) killpg(fire.child, "SIGTERM");
+    let deadline = mono() + 3;
+    while (alive().length && mono() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    for (const fire of alive()) killpg(fire.child, "SIGKILL");
+    deadline = mono() + 3;
+    while (alive().length && mono() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (alive().length) return false;
+    this.inflight.length = 0;
+    return true;
+  }
+
   // ---- 主循环 ----
   async run(): Promise<number> {
     mkdirSync(this.projData, { recursive: true });
-    if (!acquireLock(this.lockPath)) {
+    this.lockOwnership = acquireLock(this.lockPath);
+    if (this.lockOwnership === null) {
       die(`另一个 wl-run 正持有 ${this.lockPath}（或 <60min 前崩溃）—— 先停它，或等陈旧锁 60min 自动回收`);
     }
+    if (this.projectEnabledOnDisk() === false) {
+      releaseLock(this.lockOwnership);
+      this.lockOwnership = null;
+      die(`项目 '${this.key}' 已从 config 移除或 enabled:false —— 不启动调度器`);
+    }
+    this.runStartedAt = utcIso();
+    this.writeRunState("running");
     if (this.sched.laneGating) this.seedLastCleanFromLedger();
-    const onSignal = (): void => { this.stopRequested = Math.min(this.stopRequested + 1, 2); };
+    const onSignal = (): void => {
+      this.stopRequested = Math.min(this.stopRequested + 1, 2);
+      this.draining = true;
+      this.writeRunState("stopping");
+    };
     process.on("SIGINT", onSignal);
     process.on("SIGTERM", onSignal);
 
@@ -1700,6 +1959,7 @@ export class Scheduler {
       due.set(a, this.args.once ? start : start + this.sched.agents[a].staggerSeconds);
     }
     let lastBeat = start;
+    let nextConfigCheck = start;
     let graceDeadline: number | null = null;
     console.log(
       `wl-run: 项目 ${this.key} · cli=${this.sched.cli}${this.sched.laneGating ? " · laneGating=on" : ""} · agents=${this.selected.join(",")} · ` +
@@ -1718,12 +1978,33 @@ export class Scheduler {
       for (;;) {
         this.pollInflight(due);
         const now = mono();
+        if (this.lockLostReason === null
+            && (this.lockOwnership === null || !lockOwnershipValid(this.lockOwnership))) {
+          this.markLockLost("锁路径缺失、inode 被替换或 token 不再匹配");
+        }
+        if (now >= nextConfigCheck) {
+          const enabled = this.projectEnabledOnDisk();
+          if (enabled === false && !this.draining) {
+            this.draining = true;
+            this.stopRequested = Math.max(this.stopRequested, 1);
+            this.writeRunState("stopping");
+            console.log(`[${utcIso()}] config 检测到项目 ${this.key} enabled:false/已移除 —— 停止派发并优雅收尾`);
+          } else if (enabled === null && !this.configReadWarned) {
+            this.configReadWarned = true;
+            console.log(`[${utcIso()}] WARN 暂时无法复核 config 中的项目启停状态 —— 保持当前运行并继续重试`);
+          } else if (enabled !== null) {
+            this.configReadWarned = false;
+          }
+          nextConfigCheck = now + 1;
+        }
         const stopping = this.stopRequested > 0
           || (this.args.forSeconds > 0 && now - start >= this.args.forSeconds);
         if (this.stopRequested >= 2) this.killAll("SIGKILL");
         if (stopping) {
+          this.draining = true;
           if (graceDeadline === null) {
             graceDeadline = now + this.sched.graceSeconds;
+            this.writeRunState("stopping");
             if (this.inflight.length) {
               console.log(`wl-run: 停止请求 —— 等 in-flight 收尾（宽限 ${this.sched.graceSeconds}s，再按一次 Ctrl-C 立即杀）`);
             }
@@ -1769,16 +2050,38 @@ export class Scheduler {
         }
         if (this.args.once && !this.inflight.length && this.selected.every((a) => this.firedOnce.has(a))) break;
         if (now - lastBeat >= HEARTBEAT_S) {
-          heartbeatLock(this.lockPath);
+          if (this.lockOwnership === null || !heartbeatLock(this.lockOwnership)) {
+            this.markLockLost("heartbeat 无法确认原 inode/token");
+          }
+          this.writeRunState(this.draining || this.stopRequested ? "stopping" : "running");
           lastBeat = now;
         }
         await new Promise((r) => setTimeout(r, TICK_MS));
       }
     } finally {
-      releaseLock(this.lockPath);
+      const drained = await this.emergencyDrain();
+      if (drained) {
+        this.writeRunState("stopped", utcIso());
+        if (this.lockOwnership !== null && !releaseLock(this.lockOwnership)
+            && this.lockLostReason === null) {
+          this.lockLostReason = "release 前锁路径缺失、inode 被替换或 token 不再匹配";
+          console.error(`wl-run: ${this.lockLostReason}；绝不删除 successor：${this.lockPath}`);
+        }
+        this.lockOwnership = null;
+      } else {
+        this.writeRunState("stopping");
+        const kept = this.lockOwnership !== null && heartbeatLock(this.lockOwnership);
+        if (kept) {
+          console.error(`wl-run: 无法确认全部 agent 已退出；保留 ${this.lockPath}，禁止第二个 scheduler 并发启动`);
+        } else {
+          this.markLockLost("紧急收尾时无法确认原锁 inode/token");
+          console.error("wl-run: 无法确认全部 agent 已退出且项目锁已丢失——需立即人工检查孤儿进程");
+        }
+      }
       process.removeListener("SIGINT", onSignal);
       process.removeListener("SIGTERM", onSignal);
     }
+    if (this.lockLostReason !== null) die(`项目锁所有权已丢失：${this.lockLostReason}`);
     console.log(`wl-run: 干净停止（ledger：${this.ledgerPath}）`);
     return 0;
   }

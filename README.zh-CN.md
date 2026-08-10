@@ -61,18 +61,80 @@ Codex 还可作为可选的**加速器**（按项目 `codex` 配置 opt-in）：
 视觉 token 变成人物/场景概念图；以及给审读/剧本医生的**异构第二引擎审查**。未装或关闭 ⇒
 一切行为完全不变。
 
-可选安装 **`writing-loop` npm CLI**——内建调度器与板工具的薄前端：
+要直接使用 Studio/命令、确定性立项、内建 scheduler 与板工具，请安装 **`writing-loop`
+npm CLI**。`add-script` skill 可 fallback 到插件内置 core；已有项目也可不装全局 CLI、只用
+slash agent。
 
 ```bash
 npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
 ```
 
+在 workspace 目录中打开本地编剧工作台：
+
+```bash
+writing-loop init                 # 每个 workspace 一次：创建 .writing-loop/
+writing-loop studio               # http://127.0.0.1:8791/
+writing-loop workspace list       # 本机 workspace 索引
+writing-loop snapshot             # 输出与 UI 相同的多项目 JSON 投影
+writing-loop project list         # 包含已暂停剧本
+writing-loop production status    # 本地权威 take/QC 账本；不会连接远端服务
+writing-loop production enqueue --plan --project demo --input enqueue.json
+writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
+writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
+writing-loop production handoff --project demo --input handoff.json  # 仅 approved take；输出 canonical JSON
+writing-loop project plan --input request.json
+writing-loop project create --input request.json --confirm wlplan_…
+writing-loop project verify my-drama
+```
+
+`init` 会为 workspace 在 `.writing-loop/workspace.json` 建立一个持久、不透明的 ID，并尝试
+把规范化后的路径登记到有界的本机索引：`$WRITING_LOOP_HOME/workspaces.json`（默认
+`~/.writing-loop/workspaces.json`；索引写失败会告警，但不会把已成功的 init 判失败）。也可显式管理：
+
+```bash
+writing-loop workspace add ../another-room --label "古装短剧"
+writing-loop workspace list --json
+writing-loop workspace remove ws_0123456789abcdef0123456789abcdef
+writing-loop studio --workspace ws_0123456789abcdef0123456789abcdef
+writing-loop studio --single       # 强制保留单 workspace 的旧 URL
+```
+
+registry 只是可重建的本机便利索引，不是项目真相源：普通 CLI 仍按 CWD /
+`WRITING_LOOP_WORKSPACE` 找根；`remove` 只删指针，绝不删 workspace。登记项超过一个时，
+Studio 首页成为作品工作区总台，每个 workspace 的所有路由都进入 `/w/<workspace-id>/`
+命名空间；只有一个 workspace（或传 `--single`）时，原有 `/p/...`、`/api/...` 地址保持兼容。
+
+Studio 只监听本机，以服务端渲染呈现作品书架、故事成熟度、创作任务、人工决策门、
+最近分集和正在工作的 Agent。“新建项目”与 `/writing-loop:add-script` 都先做操作者在场的
+采访，再调用同一个 onboarding core：生成确定性的**零写入 plan**，要求显式确认 `planId`，
+才原子预留最终目录、在 journal 下创建并写后回读验证。上面的 CLI 暴露同一套
+plan/create/verify 边界。自动立项只
+创建全新 repo；Studio 还把目标限制在当前 workspace 内。
+config 让项目可见前，durable 每项目 journal 允许在完整 commit/manifest 已落盘时，以
+**同一 request + 原 `planId`**从真实进程崩溃续跑；摘要前的半成品会原样保留并硬停人工审计。
+发布后 receipt 让重试幂等。恢复需要显式重跑，不是后台 daemon；config/templates
+漂移、PID 仍活、产物被改或所有权歧义都会硬停人工审计。
+
+项目页可按服务端白名单只读打开 Ticket、剧情文档、分集、报告与评估详情。活动时间线由
+每项目运行态中的持久、可重建 `ActivityIndexer` v2 缓存支持；源账本、Ticket 与剧本文档仍是
+权威真相。元数据签名未变化时跳过深扫；首次有界建索引、保留上限或损坏重建造成的缺口都会
+显式告警。分页 cursor 绑定 workspace、项目与 index generation，不能跨域复用。
+`run-state.json` 只叠加实时运行 Agent，不写进历史。
+
+Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共同生成；Studio 进程重启后，
+浏览器仍可用 `Last-Event-ID` 续接。来自另一个 workspace 或 fleet 流的 cursor 会被拒绝，而不是
+静默串流。SSE 只是变更通知，历史仍以有界 activity API 为准。只展示账本可证实的模型与时长；
+账本没有 token/账单证据时，
+用量与成本明确显示 **unknown / 未记录**，绝不估价。除确认立项外，Studio 的其他写面仅为
+原子暂停/恢复。scheduler 检测到暂停后停止新派发，完成 graceful drain 才释放项目锁。
+
 编剧团队可跑在**三个引擎**任一之上——Claude Code（默认）/ Codex / opencode
 （`writing-loop run --cli opencode`；见 conventions §25）。
 
-**2. 立项**——在一个空的项目文件夹里运行立项 skill。它会做 interview（题材、
-受众画像、monetization、合规预筛；改编项目另加原著文本 + 拆书），脚手架出 bible /
-outline / ledgers / episodes 目录树，注册项目，并 file 第一张票（大纲票）：
+**2. 立项**——在已 init 的 workspace 中点 Studio“新建项目”，或运行立项 skill。请选择一个
+**尚不存在**的 repo 路径，不要先建文件夹。attended interview 收题材、受众、monetization、
+合规预筛；改编另收授权与拆书阈值。确认零写入 plan 后，共享 core 才生成文档树、注册项目、
+file 第一张大纲票，并验证三处 ground truth：
 
 ```
 /writing-loop:add-script
@@ -93,9 +155,9 @@ outline / ledgers / episodes 目录树，注册项目，并 file 第一张票（
 /writing-loop:sweep-agent               # 板生命周期卫生：错标修复、孤儿回收
 ```
 
-**没有服务端**——板就是 `<workspace>/.writing-loop/<project-key>/board/`
-下的一堆纯文件，调度要么手动 slash、要么 `writing-loop` CLI（`writing-loop run`）、
-要么你自己的 `cron`。拷走文件夹即完成迁机。
+**没有远程后端**——板仍是 `<workspace>/.writing-loop/<project-key>/board/`
+下的一堆纯文件；可选 Studio 只是从这些文件重建的本机视图。调度要么手动 slash、
+要么 `writing-loop run`、要么你自己的 `cron`。拷走文件夹即完成迁机。
 
 总编剧把队列压浅（Backlog-first，只有它能放行到 Todo），单集票在一道顺序前置后
 严格按集序流转，任何 fail 都走三级路由（notes 回炉 → `Mode: direct-write` →
@@ -204,9 +266,24 @@ Linear/hub backend（v1 纯本地）、Communication/Codex agent。完整的照�
 
 ## v1 边界
 
-- **仅本地板。** 唯一 backend 是 `<workspace>/.writing-loop/` 下的纯文件板（协议见
-  [`references/conventions.md`](references/conventions.md) §18）。无 Linear、无 hub、
-  不用网络盘。调度靠手动 slash 或你自己的 `cron`。
+- **仅本地板。** 唯一真相源是 `<workspace>/.writing-loop/` 下的纯文件板（协议见
+  [`references/conventions.md`](references/conventions.md) §18）。Studio 是仅限本机的
+  观测投影（写面只有确认立项与启停），不是第二套 backend。无 Linear、云服务或网络盘。
+  调度可用手动 slash、内建 scheduler 或自己的 `cron`。
+- **Phase 2 基础能力已完成，但还不是完整产品 parity。** 指纹确认立项、同指纹 journal
+  崩溃恢复、白名单详情、持久有界 activity、跨重启 SSE、稳定 workspace identity/registry 与
+  多工作区 Studio 命名空间均已交付。更丰富的写作指标和真实 provider 成本仍需权威账本先增加
+  字段；没有证据时继续显示 `unknown`，绝不估算。
+- **Phase 3C 已交付可远程部署的制片 control plane 与私有 Gateway 内核，但还不是打包好的 GPU
+  一体机。** 在 Phase 3A/3B 的 revision/AssetRef、原子账本、门禁、精确单次提交与恢复协调器之上，
+  当前已有零网络 plan/confirm enqueue、一轮式 `writing-loop-production-worker`、owner-only runtime
+  config、逐 workflow 输入策略、H3 四模型/fixed-pipeline contract、source→consumer staging、
+  template→bound graph materialization、verified receipt、durable admission settlement，以及 scope-bound
+  stage/job/output Gateway 与统一 strict router。Studio 的 production HTTP 面仍只读；endpoint、profile、
+  token 不能从浏览器或 enqueue argv 注入。正式部署仍需提供 H3/ComfyUI 推理、TLS/mTLS、凭据签发、
+  server profile 与模型/custom-node attestation、资产存储、durable admission/配额和真实账单对账。
+  文档中的 representative API-format fixture 尚未经过 live ComfyUI `/prompt`，不代表 H3 已部署。
+  H3 位于镜头音视频生成层，不替代 writing-loop 的剧本写作模型；MiniMax 地域/商业许可仍是上线门禁。
 - **仅已校准题材。** R 规则的数值参数已（基于证据）校准的是**脑洞爽剧 / 复仇
   打脸 / 职业单元剧**。女频甜宠 / 虐恋 profile 出厂即标 **`UNCALIBRATED`**（参数
   为暂定值）——`add-script` 在未校准题材立项时会显式警告。

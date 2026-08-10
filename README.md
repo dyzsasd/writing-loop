@@ -75,21 +75,129 @@ config): **image generation** — turn the bible's visual tokens into character 
 scene concept art — and an **independent second-engine review** for the Reviewer /
 Script-Doctor. Absent or disabled ⇒ everything behaves exactly the same.
 
-Optionally install the **`writing-loop` npm CLI** — a thin front-end for the
-built-in scheduler and board tooling:
+To use Studio or the commands directly, install the **`writing-loop` npm CLI**
+for deterministic onboarding, the built-in scheduler, and board tooling. The
+`add-script` skill can fall back to the core bundled with the installed plugin;
+existing projects can also run slash agents without a global CLI.
 
 ```bash
 npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
 ```
 
+From a workspace folder, open the local writers' room:
+
+```bash
+writing-loop init                 # once: create .writing-loop/ in this workspace
+writing-loop studio               # http://127.0.0.1:8791/
+writing-loop workspace list       # machine-local workspace registry
+writing-loop snapshot             # the same multi-project read model as JSON
+writing-loop project list         # includes paused dramas
+writing-loop production status    # local authoritative take/QC ledger; no remote calls
+writing-loop production enqueue --plan --project demo --input enqueue.json
+writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
+writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
+writing-loop production handoff --project demo --input handoff.json  # approved takes only; stdout JSON
+writing-loop project plan --input request.json
+writing-loop project create --input request.json --confirm wlplan_…
+writing-loop project verify my-drama
+```
+
+A minimal `handoff.json` names an existing human-approved shot take; `createdAt`
+must be canonical UTC ISO time and cannot predate the production revision being exported:
+
+```json
+{
+  "version": 1,
+  "handoffId": "handoff-episode-001-v1",
+  "studioProjectId": "demo-episode-001",
+  "pipeline": "cinematic",
+  "createdAt": "2026-08-10T12:11:00.000Z",
+  "delivery": {
+    "version": 1,
+    "aspectRatio": "9:16",
+    "width": 1080,
+    "height": 1920,
+    "fps": 24,
+    "container": "video/mp4",
+    "language": "zh-CN"
+  },
+  "taskIds": ["take-shot-001-approved"]
+}
+```
+
+The command emits `{ digestAlgorithm, digest, handoff }`; it does not contact,
+import into, or start video-creation-studio. Treat every emitted `AssetRef.uri` as
+an opaque identity: only a trusted scheme-and-authority allowlist resolver may open
+it, and consumers must never pass an arbitrary `https:` URI directly to `fetch`.
+
+`init` gives the workspace a durable opaque ID in
+`.writing-loop/workspace.json` and attempts to register its canonical path in the
+bounded, machine-local registry at `$WRITING_LOOP_HOME/workspaces.json` (default:
+`~/.writing-loop/workspaces.json`). A registry failure is reported without undoing a
+successful init. You can also manage those pointers explicitly:
+
+```bash
+writing-loop workspace add ../another-room --label "Historical dramas"
+writing-loop workspace list --json
+writing-loop workspace remove ws_0123456789abcdef0123456789abcdef
+writing-loop studio --workspace ws_0123456789abcdef0123456789abcdef
+writing-loop studio --single       # keep the legacy one-workspace URL surface
+```
+
+The registry is a convenience index, never a source of project truth: normal CLI
+root discovery still uses CWD / `WRITING_LOOP_WORKSPACE`, and `remove` deletes only
+the local pointer. If more than one entry is registered, Studio opens
+an editorial fleet page and namespaces every workspace route under `/w/<workspace-id>/`.
+With one workspace (or `--single`) the existing `/p/...` and `/api/...` routes remain
+unchanged.
+
+Studio is a loopback-only, server-rendered view over the same plain files. It
+shows the drama library, story maturity, creative lanes, human decision gates,
+recent episodes, and live in-flight agents. “New project” and
+`/writing-loop:add-script` both collect an operator-attended interview, then call
+the same onboarding core: first a deterministic **zero-write plan**, then an
+explicit `planId` confirmation, atomic reservation of the final directories,
+journaled creation, and write-after-read verification.
+The CLI commands above expose that same plan/create/verify boundary. Creation is
+limited to a brand-new repo; Studio additionally keeps it inside the workspace.
+Before config makes the project visible, a durable per-project journal lets the
+exact same request and original `planId` resume after a real process crash once
+the complete commit/manifest evidence is durable. Earlier partial trees are
+preserved and hard-stop for manual audit;
+after publication, the receipt makes retries idempotent. Recovery is an explicit
+retry, not a daemon: changed config/templates, a live PID, modified artifacts,
+or ambiguous ownership hard-stop for manual audit.
+
+Project pages open allowlisted, read-only details for tickets, story documents,
+episodes, reports, and evaluations. Their activity view is backed by the persistent,
+rebuildable `ActivityIndexer` v2 cache in each project's runtime directory. Source
+ledgers, tickets, and script files remain authoritative; a metadata signature avoids
+deep rescans when they have not changed, and retention/bootstrap gaps are always
+reported explicitly. Pagination cursors are bound to workspace, project, and index
+generation. `run-state.json` remains a live overlay only and is never written into
+historical activity.
+
+Studio's SSE event IDs combine the stable snapshot with the projects' durable index
+revisions. Browsers can resume with `Last-Event-ID` after the Studio process restarts;
+a cursor from another workspace (or from the fleet stream) is rejected instead of
+being silently reused. The stream is still a change notification, not an event-ledger
+transport—the activity API is the bounded historical read surface.
+Recorded models and duration are shown; token usage and cost remain **unknown / not
+recorded** when the ledger has no evidence—Studio never invents an estimate.
+Besides confirmed project creation, Studio's only writes are atomic pause/resume.
+A running scheduler observes a pause, stops dispatching, and completes its
+graceful drain before releasing the project lock.
+
 The room runs on any of **three engines** — Claude Code (default), Codex, or
 opencode (`writing-loop run --cli opencode`; see conventions §25).
 
-**2. Start a project** — run the intake skill from an empty project folder. It
-interviews you (genre, audience profile, monetization, compliance pre-screen;
-for adaptations, the source text + book-teardown), scaffolds the bible /
-outline / ledgers / episodes tree, registers the project, and files the very
-first ticket (the outline ticket):
+**2. Start a project** — from an initialized workspace, use Studio's “New
+project” or run the intake skill. Choose a path for a repo that does not exist
+yet; do not create the folder first. The attended interview covers genre,
+audience, monetization and compliance (plus rights and teardown thresholds for
+adaptations). It shows a zero-write plan for approval, then the shared core
+creates the document tree, registers the project, files the first outline
+ticket, and verifies all three ground truths:
 
 ```
 /writing-loop:add-script
@@ -111,10 +219,11 @@ order, or point external `cron` at them:
 /writing-loop:sweep-agent              # board hygiene, mislabel repair, orphan recovery
 ```
 
-There is **no server** — the board is plain files under
-`<workspace>/.writing-loop/<project-key>/board/`, and scheduling is a manual slash
-call, the `writing-loop` CLI (`writing-loop run`), or your own `cron`. Copy the
-folder and you've migrated machines.
+There is **no remote backend** — the board remains plain files under
+`<workspace>/.writing-loop/<project-key>/board/`. The optional Studio process is
+local-only and reconstructs its UI from those files; scheduling is still a
+manual slash call, `writing-loop run`, or your own `cron`. Copy the folder and
+you've migrated machines.
 
 The Showrunner keeps the queue shallow (Backlog-first; only it promotes to
 Todo), episode tickets flow strictly in episode order behind a sequential
@@ -232,10 +341,29 @@ full carry-over / replace / cut ledger.
 
 ## v1 boundaries
 
-- **Local board only.** The single backend is a plain file board under
+- **Local board only.** The single source of truth is a plain file board under
   `<workspace>/.writing-loop/` (protocol in [`references/conventions.md`](references/conventions.md)
-  §18). No Linear, no hub, no network share. Scheduling is manual slash or your
-  own `cron`.
+  §18). Studio is a loopback-only projection, not a second backend. No Linear,
+  cloud service, or network share. Scheduling is manual slash, the built-in
+  scheduler, or your own `cron`.
+- **Phase 2 foundation is complete, not full product parity.** Confirmed onboarding,
+  journaled same-fingerprint crash recovery, allowlisted details, persistent bounded
+  activity, restart-resumable SSE, stable workspace identity/registry, and the
+  multi-workspace Studio namespace are delivered. Rich writing analytics and real
+  provider cost collection still require new authoritative ledger fields; absent
+  evidence remains `unknown`, never estimated.
+- **Phase 3C delivers a remotely deployable production control plane and private Gateway kernels,
+  not a bundled GPU appliance.** It builds on the Phase 3A/3B ledger, gates and crash-recoverable
+  coordinator with zero-network plan/confirm enqueue, a one-shot production worker, owner-only
+  runtime configuration, per-workflow input policy, an H3 four-model/fixed-pipeline contract,
+  source→consumer staging, template→bound graph materialization, verified receipts, durable
+  admission settlement, and scope-bound stage/job/output Gateway handlers behind a strict router. Studio's production
+  HTTP surface remains read-only; endpoints, profiles and tokens cannot come from browser or
+  enqueue arguments. A real deployment must still provide H3/ComfyUI inference, TLS/mTLS,
+  credential issuance, pinned server profiles and model/custom-node attestation, asset storage,
+  durable admission/quota, provider billing reconciliation, and any verified writable Studio API.
+  The representative API-format fixture has not passed a live ComfyUI `/prompt` and is not an H3
+  deployment claim. H3 is a shot-level audio/video generator, not the script-writing model.
 - **Calibrated genres only.** The R-rule numeric parameters are calibrated
   (evidence-based) for **brainstorm-thrill / revenge-face-slap / episodic
   professional** dramas. Female-lead sweet-pet / tragic-romance profiles ship

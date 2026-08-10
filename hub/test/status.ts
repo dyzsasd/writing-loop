@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTicketFrontmatter } from "../src/status.ts";
+import { aggregate } from "../src/fires.ts";
+import { parseFireRow, parseTicketFrontmatter } from "../src/status.ts";
 
 let fails = 0;
 const ok = (c: boolean, m: string): void => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fails++; };
@@ -44,6 +45,39 @@ ok(t !== null && t.title === "ep-009 写作（含: 冒号）", "title 含冒号�
 ok(t !== null && t.labels.join(",") === "episode,keystone", "labels 内联数组拆分");
 ok(t !== null && t.updated === "2026-07-10T09:00:00Z", "updated 字段取到");
 ok(parseTicketFrontmatter("没有 frontmatter 的正文") === null, "无 frontmatter 返回 null（容错）");
+ok(parseFireRow({}) === null && parseFireRow({ agent: "" }) === null, "空对象/空 agent 不是合法 FireRow");
+ok(parseFireRow({ agent: "overflow", durationSeconds: 1e308 }) === null,
+"极大但 finite 的 fire 时长被协议上限拒绝，不会让聚合溢出为 Infinity/null");
+ok(parseFireRow({ agent: "evil\nforged" }) === null
+  && parseFireRow({ agent: "safe", model: "\u001b[31mspoof" }) === null,
+"FireRow 拒绝换行/ANSI 控制字符，终端输出不能被遥测账本伪造");
+const hostileAgg = aggregate([{ agent: "__proto__", exitCode: 0 }, { agent: "constructor", exitCode: 1 }]);
+ok(Object.getPrototypeOf(hostileAgg) === null && hostileAgg["__proto__"].fires === 1
+  && hostileAgg["constructor"].fires === 1 && ({} as { fires?: number }).fires === undefined,
+"恶意 agent 名只作为 null-prototype 聚合键，不修改 Object.prototype");
+
+const blockLabels = parseTicketFrontmatter(`---
+id: WL-10
+title: 人工决策停靠
+type: Improvement
+state: Todo
+owner: showrunner
+assignee: null
+labels:
+  - writing-loop
+  - needs-showrunner
+priority: 2
+updated: 2026-07-10T10:00:00Z
+---
+Episode: 12
+`, "WL-10.md");
+ok(blockLabels?.labels.join(",") === "writing-loop,needs-showrunner", "block labels 不再被 status/UI 漏读（回归）");
+ok(blockLabels?.owner === "showrunner" && blockLabels.assignee === null, "owner/assignee 投影可用于编剧工作台");
+ok(blockLabels?.episode === 12 && blockLabels.priority === 2, "Episode/priority 投影可用于编剧工作台");
+const badState = parseTicketFrontmatter(ticket("WL-11", "手误状态", "InReview", []), "WL-11.md");
+ok(badState?.state === "?" && badState.malformed, "词表外 state 标为 malformed，不从 UI 泳道静默漏过");
+const hugeEpisode = parseTicketFrontmatter(ticket("WL-12", "溢出集号", "Todo", []).replace("Episode: 7", `Episode: ${"9".repeat(180)}`), "WL-12.md");
+ok(hugeEpisode?.episode === null, "Ticket Episode 超过 6 位时保持 null，不生成 Infinity DTO");
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "wl-status-")));
 try {
@@ -67,6 +101,7 @@ try {
 
   writeFileSync(join(repo, "episodes", "ep-001.md"), "# ep-001\n");
   writeFileSync(join(repo, "episodes", "ep-007.md"), "# ep-007\n");
+  writeFileSync(join(repo, "episodes", `ep-${"9".repeat(180)}.md`), "# 非法超长集号\n");
 
   // 锁：一枚 2h 陈旧（STALE）、一枚新鲜、一枚 repo 写锁陈旧
   const past = new Date(Date.now() - 2 * 3600 * 1000);
@@ -107,7 +142,7 @@ try {
   ok(j.board.counts["In Review"] === 1 && j.board.unparsed === 1, "json 计数 + 畸形票桶");
   ok(j.inReview.length === 1 && j.inReview[0].id === "WL-1", "json.inReview");
   ok(j.parked.length === 1 && j.parked[0].needs.includes("needs-showrunner"), "json.parked 带 needs 标签");
-  ok(j.episodeFrontier === 7, "json.episodeFrontier = 7");
+  ok(j.episodeFrontier === 7 && Number.isFinite(j.episodeFrontier), "超长集号文件名被忽略，json.episodeFrontier 保持有限值 7");
   ok(j.locks.some((l) => l.stale) && j.locks.some((l) => !l.stale), "json.locks 陈旧与新鲜并存");
   ok(j.recentFires.length === 5 && j.totalFires === 6, "json.recentFires 末 5 / 全 6");
 

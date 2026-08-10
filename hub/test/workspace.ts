@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  findWorkspaceRoot, loadConfig, resolveProject, resolveRepoPath, WsError,
+  findWorkspaceRoot, loadConfig, projectDataDir, resolveProject, resolveRepoPath, WsError,
 } from "../src/workspace.ts";
 
 let fails = 0;
@@ -16,6 +16,7 @@ const throwsWith = (fn: () => unknown, needle: string): boolean => {
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "wl-ws-")));
 const savedEnv = process.env.WRITING_LOOP_WORKSPACE;
+const savedHome = process.env.WRITING_LOOP_HOME;
 delete process.env.WRITING_LOOP_WORKSPACE;
 
 try {
@@ -55,6 +56,13 @@ try {
   ok(throwsWith(() => findWorkspaceRoot(A), ".writing-loop"), "env 指向无 .writing-loop/ 的目录硬错");
   delete process.env.WRITING_LOOP_WORKSPACE;
 
+  // WRITING_LOOP_HOME/registry never participates in legacy non-Studio root resolution.
+  process.env.WRITING_LOOP_HOME = "relative-home-that-registry-would-reject";
+  ok(findWorkspaceRoot(join(A, "repo1", "sub")) === A, "WRITING_LOOP_HOME 不改变 CWD ascent 根解析");
+  process.env.WRITING_LOOP_WORKSPACE = B;
+  ok(findWorkspaceRoot(join(A, "repo1")) === B, "WRITING_LOOP_WORKSPACE 仍高于 CWD，registry 不插队");
+  delete process.env.WRITING_LOOP_WORKSPACE;
+
   // ── config 装载 ──
   const wsA = loadConfig(A);
   ok(Object.keys(wsA.config.projects ?? {}).length === 3, "loadConfig 读到 3 个项目");
@@ -78,12 +86,20 @@ try {
   ok(throwsWith(() => resolveProject(wsA, null, tmp), "--project"), "多 enabled 且 cwd 不定位 ⇒ 歧义报错要求 --project");
   ok(throwsWith(() => resolveProject(wsA, null, tmp), "p1"), "歧义报错列出候选 key");
   ok(throwsWith(() => resolveProject(wsA, "ghost", A), "现有"), "未知 key 报错并列出现有项目");
+  ok(throwsWith(() => resolveProject(wsA, "constructor", A), "无项目"), "原型继承名不能伪装成 config 自有项目");
   ok(throwsWith(() => resolveProject(wsA, "p3", A), "enabled:false"), "enabled:false 项目按 flag 指名也拒绝");
   // p3 与 p2 同 repoPath 但 disabled——cwd 匹配只扫 enabled，p2 胜出
   ok(resolveProject(wsA, null, join(A, "repo2")).key === "p2", "cwd 匹配跳过 enabled:false 的项目");
+  ok(throwsWith(() => projectDataDir(A, "../../escape"), "非法项目 key"), "运行态路径 API 拒绝路径穿越 key");
+
+  const unsafe = loadConfig(B);
+  unsafe.config.projects = { "../../escape": { title: "恶意条目", repoPath: "solo" } };
+  ok(throwsWith(() => resolveProject(unsafe, "../../escape", B), "非法项目 key"), "scheduler/status 共用解析层在接触项目运行态前拒绝恶意 config key");
 } finally {
   if (savedEnv === undefined) delete process.env.WRITING_LOOP_WORKSPACE;
   else process.env.WRITING_LOOP_WORKSPACE = savedEnv;
+  if (savedHome === undefined) delete process.env.WRITING_LOOP_HOME;
+  else process.env.WRITING_LOOP_HOME = savedHome;
   rmSync(tmp, { recursive: true, force: true });
 }
 

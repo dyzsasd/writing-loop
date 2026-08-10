@@ -36,3 +36,42 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+
+  published-node20:
+    name: published CLI smoke (Node 20.11 floor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.11.0
+          cache: npm
+          cache-dependency-path: hub/package-lock.json
+
+      # Source tests intentionally use Node 24's native TS stripping. This job instead exercises
+      # the compiled npm shape on the exact minimum runtime promised by hub/package.json.
+      - name: build published JavaScript
+        working-directory: hub
+        run: |
+          npm ci
+          npm run build
+
+      - name: dist CLI + Web Streams/fetch adapter smoke
+        working-directory: hub
+        run: |
+          node dist/cli.js version
+          node dist/cli.js --help
+          node --input-type=module -e 'import { ComfyUiAdapter } from "./dist/production-adapter.js"; const adapter = new ComfyUiAdapter({ baseUrl: "https://comfy.invalid/", backendInstanceId: "ci-node20", fetch: async (_url, init) => { if (init?.redirect !== "error") throw new Error("redirect boundary missing"); return new Response(JSON.stringify({ id: "job-ci", status: "pending", priority: 1, outputs_count: 0 }), { headers: { "content-type": "application/json" } }); }, preferJobsApi: true }); const observation = await adapter.inspect("job-ci"); if (observation.state !== "pending") throw new Error("adapter smoke failed");'
+          node test/node20-production-smoke.mjs
+
+      - name: npm tarball install + packaged H3 runtime smoke
+        working-directory: hub
+        run: |
+          pack_dir="$(mktemp -d)"
+          tarball="$(npm pack --silent --pack-destination "$pack_dir")"
+          mkdir "$pack_dir/install"
+          cd "$pack_dir/install"
+          npm init --yes >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund "$pack_dir/$tarball"
+          node node_modules/@dyzsasd/writing-loop/examples/production/representative-h3/smoke.mjs

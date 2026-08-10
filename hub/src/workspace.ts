@@ -10,6 +10,18 @@ export class WsError extends Error {
   constructor(msg: string) { super(msg); this.name = "WsError"; }
 }
 
+export const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9._-]{0,31}$/;
+
+export function assertProjectKey(key: string): void {
+  // JavaScript 的 `$` 也可匹配末尾换行之前；完整长度复核让协议成为真正的全字符串约束。
+  const match = PROJECT_KEY_PATTERN.exec(key);
+  if (!match || match[0].length !== key.length) {
+    throw new WsError(
+      `非法项目 key ${JSON.stringify(key)}——须匹配 ${PROJECT_KEY_PATTERN.source}（1–32 位小写字母、数字、点、下划线或连字符）`,
+    );
+  }
+}
+
 // config.json 的最小机读形状（config-schema.md 的宽松镜像——多余字段一律透传不校验，
 // 校验属于 doctor/add-script，不属于路径解析层）。
 export type WlProject = {
@@ -32,6 +44,24 @@ export type WlConfig = {
 };
 export type Workspace = { root: string; config: WlConfig };
 export type ResolvedProject = { key: string; project: WlProject; repoPath: string };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Runtime-check one JSON project entry before any caller dereferences or resolves its paths. */
+export function requireProjectEntry(key: string, value: unknown): WlProject {
+  assertProjectKey(key);
+  if (!isRecord(value)) throw new WsError(`config.json 项目 '${key}' 必须是 JSON 对象`);
+  return value as WlProject;
+}
+
+/** Stable, validated project enumeration for CLI/read-model/scheduler consumers. */
+export function projectEntries(config: WlConfig): Array<[string, WlProject]> {
+  const value = (config as Record<string, unknown>).projects;
+  if (value === undefined || value === null) return [];
+  if (!isRecord(value)) throw new WsError("config.json 的 projects 必须是 JSON 对象");
+  return Object.entries(value).map(([key, project]) => [key, requireProjectEntry(key, project)]);
+}
 
 const isDir = (p: string): boolean => {
   try { return statSync(p).isDirectory(); } catch { return false; }
@@ -65,8 +95,14 @@ export function findWorkspaceRoot(cwd = process.cwd()): string | null {
 
 // ─── .writing-loop/ 路径 API ───────────────────────────────────────────────────
 export function dataRoot(root: string): string { return join(root, ".writing-loop"); }
-export function projectDataDir(root: string, key: string): string { return join(dataRoot(root), key); }
+export function projectDataDir(root: string, key: string): string {
+  assertProjectKey(key);
+  return join(dataRoot(root), key);
+}
 export function resolveRepoPath(root: string, project: WlProject): string {
+  if (project.repoPath !== undefined && typeof project.repoPath !== "string") {
+    throw new WsError("config.json 项目的 repoPath 必须是字符串");
+  }
   const rp = project.repoPath ?? "";
   return isAbsolute(rp) ? rp : join(root, rp);
 }
@@ -109,13 +145,15 @@ export function loadConfig(root: string): Workspace {
 // 优先级：--project flag > CWD 在某 enabled 项目 repoPath 内 > 恰一个 enabled；
 // 歧义时列出候选报错，绝不猜、绝不遍历。
 export function resolveProject(ws: Workspace, flagKey?: string | null, cwd = process.cwd()): ResolvedProject {
-  const projects = ws.config.projects ?? {};
-  const enabled = Object.entries(projects).filter(([, p]) => p.enabled !== false);
+  const entries = projectEntries(ws.config);
+  const projects = Object.fromEntries(entries) as Record<string, WlProject>;
+  const enabled = entries.filter(([, p]) => p.enabled !== false);
   if (flagKey) {
-    const p = projects[flagKey];
-    if (!p) {
+    assertProjectKey(flagKey);
+    if (!Object.prototype.hasOwnProperty.call(projects, flagKey)) {
       throw new WsError(`config.json 无项目 '${flagKey}'（现有：${Object.keys(projects).join("、") || "无"}）`);
     }
+    const p = projects[flagKey];
     if (p.enabled === false) {
       throw new WsError(`项目 '${flagKey}' 已 enabled:false（操作者暂停中）—— 不驱动`);
     }

@@ -1,0 +1,120 @@
+// Install-shape, secret-free and no-network smoke for the packaged representative H3 bundle.
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  createProductionRuntimeRegistry,
+  parseProductionRuntimeConfig,
+} from "../../../dist/production-runtime-config.js";
+import {
+  materializeProductionH3Workflow,
+  productionH3WorkflowSha256,
+} from "../../../dist/production-h3-graph.js";
+import { productionWorkerMain } from "../../../dist/production-worker.js";
+
+const exampleRoot = import.meta.dirname;
+const runtimeSource = JSON.parse(readFileSync(join(exampleRoot, "production-runtime.json"), "utf8"));
+const templateSource = JSON.parse(readFileSync(
+  join(exampleRoot, "workflows", "h3-fl2va-portrait.json"), "utf8",
+));
+const parsed = parseProductionRuntimeConfig(runtimeSource);
+const workflow = parsed.workflows[0];
+const profile = parsed.stagingProfiles[0];
+if (workflow?.h3GraphContract === null || workflow?.h3GraphContract === undefined
+  || profile === undefined) {
+  throw new Error("packaged H3 runtime config lost its workflow/profile binding");
+}
+
+const sentinelBefore = templateSource[profile.bindings[0].source.nodeId].inputs.image;
+const materialized = materializeProductionH3Workflow(
+  templateSource,
+  workflow.h3GraphContract,
+  profile.execution,
+  profile.bindings,
+  profile.bindings.map((binding) => ({
+    index: binding.index,
+    slot: binding.slot,
+    assetSha256: String(binding.index + 1).repeat(64),
+    providerObjectKey: `scoped/example/${binding.index}/frame.png`,
+  })),
+  profile.profileId,
+);
+if (materialized.templateWorkflowSha256 !== workflow.workflowSha256
+  || materialized.boundWorkflowSha256 === materialized.templateWorkflowSha256
+  || productionH3WorkflowSha256(materialized.workflow) !== materialized.boundWorkflowSha256
+  || templateSource[profile.bindings[0].source.nodeId].inputs.image !== sentinelBefore
+  || materialized.workflow[profile.bindings[0].source.nodeId].inputs.image
+    !== "scoped/example/0/frame.png") {
+  throw new Error("packaged H3 template→bound materialization smoke failed");
+}
+
+const root = realpathSync(mkdtempSync(join(tmpdir(), "wl-packaged-h3-")));
+let networkCalls = 0;
+const noNetwork = async () => {
+  networkCalls++;
+  throw new Error("packaged production smoke attempted network I/O");
+};
+try {
+  const state = join(root, ".writing-loop");
+  const runtime = join(root, "runtime");
+  mkdirSync(join(state, "drama-a"), { recursive: true });
+  mkdirSync(join(runtime, "workflows"), { recursive: true });
+  writeFileSync(join(state, "workspace.json"), `${JSON.stringify({
+    version: 1, id: parsed.workspaceId,
+  })}\n`);
+  writeFileSync(join(state, "config.json"), `${JSON.stringify({
+    version: 1, projects: { "drama-a": { enabled: true } },
+  })}\n`);
+  const configFile = join(runtime, "production-runtime.json");
+  writeFileSync(configFile, `${JSON.stringify(runtimeSource, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(
+    join(runtime, "workflows", "h3-fl2va-portrait.json"),
+    `${JSON.stringify(templateSource, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+
+  const credentialEnv = {};
+  for (const name of [
+    parsed.gateway.credentialEnv,
+    ...parsed.backends.map((backend) => backend.credentialEnv),
+    ...parsed.stagingProfiles.map((entry) => entry.credentialEnv),
+  ]) {
+    if (name !== null) credentialEnv[name] = "smoke-only-placeholder";
+  }
+  const registry = createProductionRuntimeRegistry({
+    root,
+    configFile,
+    env: credentialEnv,
+    fetchByBackend: Object.fromEntries(parsed.backends.map((backend) => [backend.backendInstanceId, noNetwork])),
+    stagingFetchByProfile: Object.fromEntries(parsed.stagingProfiles.map((entry) => [entry.profileId, noNetwork])),
+    gatewayFetch: noNetwork,
+    now: () => "2026-08-10T12:00:00.000Z",
+  });
+  if (registry.projects.length !== 1 || registry.projects[0].allowDispatch !== true) {
+    throw new Error("packaged production runtime assembly smoke failed");
+  }
+  const round = await registry.runner.runOnceAll();
+  if (round.outcomes.length !== 1 || round.outcomes[0].status !== "succeeded" || networkCalls !== 0) {
+    throw new Error("packaged runtime empty round was not hermetic");
+  }
+
+  const workerExit = await productionWorkerMain(
+    ["--config", configFile, "--once", "--json"],
+    root,
+    {
+      createRegistry: ({ root: workerRoot, configFile: workerConfig }) => {
+        if (workerRoot !== root || workerConfig !== configFile) {
+          throw new Error("worker changed the trusted runtime scope");
+        }
+        return registry;
+      },
+      signalSource: null,
+    },
+  );
+  if (workerExit !== 0 || networkCalls !== 0) {
+    throw new Error("packaged worker --once fake-port smoke failed");
+  }
+  console.log("PACKAGED_H3_PRODUCTION_SMOKE_OK");
+} finally {
+  rmSync(root, { recursive: true, force: true });
+}

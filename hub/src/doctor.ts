@@ -14,30 +14,57 @@
 //       enabledPlugins 读不到 / claude 无 --settings flag）——wl-run 会优雅降级不注入，仅提示
 //   W09 provider 注册表某条目的 authTokenEnv 环境变量不可解析（其 opencode fire 会预检失败）
 //   W10 opencode.json 与 providers 注册表有漂移（缺失/未同步/过期——运行 sync-opencode 修复）
+//   W11 config 已发布但 onboarding journal 仍残留（需 verify 后人工审计恢复元数据）
+//   W12 workspace identity 尚未创建（旧 workspace 可用 workspace add 一次性补齐）
+//   W13 本机 workspace registry 缺当前 workspace 或含 degraded 指针（registry 非权威，
+//       不阻断单 workspace 创作；用 workspace list/add/remove 显式修复）
+//   W14 production enqueue 崩溃前缀可用原 input + planId 精确向前恢复
 // FAIL（结构性）：workspace 不可解析、config.json 不可解析/非对象、providers 注册表非法
-//       （阻断 writing-loop run 整体起 fire）、板目录不可写。
+//       （阻断 writing-loop run 整体起 fire）、板目录不可写、不可见的崩溃立项事务、
+//       已存在但损坏的 workspace identity / registry（拒绝静默覆盖稳定 ID 或本机指针）、
+//       会永久阻断写入/索引刷新且 owner 已退出或无法安全确认的 O_EXCL 残留锁。
 import { execFileSync } from "node:child_process";
-import { accessSync, constants, readdirSync, readFileSync, statSync } from "node:fs";
+import { accessSync, constants, lstatSync, opendirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hasSymlinkComponent, readRegularTextHead } from "./bounded-fs.ts";
+import { ONBOARDING_JOURNAL_MAX_BYTES } from "./onboarding.ts";
 import { opencodeSyncDrift } from "./opencode-sync.ts";
 import { findOnPath } from "./paths.ts";
+import { inspectProductionRecovery } from "./production-recovery.ts";
 import {
   authGapPhrase, buildTrimSettingsJson, claudeSupportsSettingsFlag, parseProviders,
   readEnabledPlugins, type ProviderEntry,
 } from "./scheduler.ts";
 import {
+  inspectWorkspaceRegistry, readWorkspaceIdentity, type WorkspaceIdentity,
+  type WorkspaceRegistrySnapshot,
+} from "./workspace-registry.ts";
+import {
   dataRoot, findWorkspaceRoot, loadConfig, projectDataDir, resolveRepoPath,
-  WsError, type WlConfig, type WlProject, type Workspace,
+  requireProjectEntry, WsError, type WlConfig, type WlProject, type Workspace,
 } from "./workspace.ts";
 
 const MIN_NODE = [20, 11] as const;
 const MIN_OPENCODE = [1, 2, 24] as const; // dev-loop docs/PORTABILITY.md 认证下限
+const EXCLUSIVE_LOCK_BYTES = 8 * 1024;
+const STALE_EXCLUSIVE_LOCK_MINUTES = 60;
 
 // ─── 小工具 ────────────────────────────────────────────────────────────────────
 const isDir = (p: string): boolean => { try { return statSync(p).isDirectory(); } catch { return false; } };
 const exists = (p: string): boolean => { try { statSync(p); return true; } catch { return false; } };
+const errorCode = (error: unknown): string | null => error && typeof error === "object" && "code" in error
+  ? String((error as NodeJS.ErrnoException).code)
+  : null;
+const processAlive = (pid: number): boolean => {
+  if (!Number.isInteger(pid) || pid <= 0) return true;
+  try { process.kill(pid, 0); return true; }
+  catch (error) {
+    return !(error && typeof error === "object" && "code" in error
+      && String((error as NodeJS.ErrnoException).code) === "ESRCH");
+  }
+};
 
 function schedStr(block: Record<string, unknown> | undefined, field: string): string | null {
   const v = block?.[field];
@@ -108,15 +135,80 @@ export function doctorMain(argv = process.argv.slice(2)): number {
 
   let failed = false;
   let next: string | null = null; // 首个（最高优先）NEXT 建议胜出
+  let nextPriority: 0 | 1 | 2 = 0; // 0=unset，1=WARN/普通建议，2=FAIL 恢复动作
   const ok = (m: string): void => { console.log(`ok  : ${m}`); };
   const warn = (code: string | null, m: string, suggest?: string): void => {
     console.log(`WARN${code ? ` ${code}` : ""}: ${m}`);
-    if (suggest) next ??= suggest;
+    if (suggest && nextPriority < 1) { next = suggest; nextPriority = 1; }
   };
   const fail = (m: string, suggest?: string): void => {
     console.log(`FAIL: ${m}`);
     failed = true;
-    if (suggest) next ??= suggest;
+    if (suggest && nextPriority < 2) { next = suggest; nextPriority = 2; }
+  };
+
+  // Identity/registry/activity locks use O_EXCL and deliberately never auto-reap: only the
+  // operator can decide that the original writer will not return. Doctor therefore performs a
+  // bounded, inode-safe read, reports PID + mtime and gives a conservative manual recovery step.
+  const diagnoseExclusiveLock = (
+    file: string,
+    subject: string,
+    blockedAction: string,
+    recoveryAction: string,
+  ): void => {
+    try { lstatSync(file); }
+    catch (error) {
+      if (errorCode(error) === "ENOENT") return;
+      fail(`无法检查 ${subject} ${file}：${error instanceof Error ? error.message : String(error)}`,
+        `保留现场并人工审计 ${file}`);
+      return;
+    }
+
+    const read = readRegularTextHead(file, EXCLUSIVE_LOCK_BYTES);
+    if (!read) {
+      // A legitimate writer may have released the lock between lstat and open. Only suppress the
+      // diagnostic when the path is now genuinely absent; replacement/special files remain FAIL.
+      try { lstatSync(file); }
+      catch (error) { if (errorCode(error) === "ENOENT") return; }
+      const recovery = `确认没有活跃写者后，${recoveryAction}`;
+      fail(`${subject} 无法安全读取（须为单链接普通文件）：${file} —— ${blockedAction}`, recovery);
+      return;
+    }
+    if (read.truncated) {
+      const recovery = `确认没有活跃写者后，${recoveryAction}`;
+      fail(`${subject} 超过 ${EXCLUSIVE_LOCK_BYTES} bytes 安全预算：${file} —— ${blockedAction}`, recovery);
+      return;
+    }
+
+    let ownerPid: number | null = null;
+    let acquiredAt = "?";
+    try {
+      const parsed = JSON.parse(read.text) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+        || typeof parsed.pid !== "number" || !Number.isInteger(parsed.pid) || parsed.pid <= 0) {
+        throw new Error("owner 元数据无效");
+      }
+      ownerPid = parsed.pid;
+      acquiredAt = typeof parsed.acquiredAt === "string" ? parsed.acquiredAt
+        : typeof parsed.createdAt === "string" ? parsed.createdAt : "?";
+    } catch (error) {
+      const recovery = `确认没有活跃写者后，${recoveryAction}`;
+      fail(`${subject} owner 元数据无法验证：${file}（${error instanceof Error ? error.message : String(error)}）—— ${blockedAction}`,
+        recovery);
+      return;
+    }
+
+    const age = Math.max(0, Math.round((Date.now() - Date.parse(read.updatedAt)) / 60_000));
+    const owner = `pid=${ownerPid} acquiredAt=${acquiredAt}`;
+    if (!processAlive(ownerPid)) {
+      const recovery = `确认 PID ${ownerPid} 已退出后，${recoveryAction}`;
+      fail(`${subject} 的 owner PID ${ownerPid} 已退出（age ${age}min；${owner}）—— ${blockedAction}`, recovery);
+    } else if (age > STALE_EXCLUSIVE_LOCK_MINUTES) {
+      const recovery = `确认 ${owner} 对应写者已退出后，${recoveryAction}`;
+      fail(`${subject} 陈旧（age ${age}min；${owner}）—— ${blockedAction}`, recovery);
+    } else {
+      ok(`${subject} 在位且新鲜（age ${age}min；${owner}）—— 写者可能正在工作`);
+    }
   };
 
   console.log("writing-loop doctor — 只读体检\n");
@@ -141,6 +233,104 @@ export function doctorMain(argv = process.argv.slice(2)): number {
       "writing-loop init 铺骨架（或在 Claude Code 里跑 /writing-loop:add-script 立项）");
   }
 
+  // Stable identity + machine-local registry diagnosis. Both APIs below are diagnostic reads:
+  // doctor must never call ensureWorkspaceIdentity/registerWorkspace and therefore never creates
+  // workspace.json, WRITING_LOOP_HOME, registry files or locks. Registry reads are bounded by the
+  // registry module (256 KiB / 128 entries), and only three degraded samples are printed here.
+  let workspaceIdentity: WorkspaceIdentity | null = null;
+  let identityMissing = false;
+  let registry: WorkspaceRegistrySnapshot | null = null;
+  let registryInspectionError: string | null = null;
+  if (root) {
+    try {
+      workspaceIdentity = readWorkspaceIdentity(root);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      identityMissing = message.startsWith("workspace identity 缺失：");
+      if (!identityMissing) {
+        fail(`workspace identity 无法安全读取：${message}`,
+          "从可信备份恢复 .writing-loop/workspace.json；不要用新 ID 覆盖损坏的稳定 identity");
+      }
+    }
+    try {
+      registry = inspectWorkspaceRegistry();
+    } catch (error) {
+      // writingLoopHome() validates WRITING_LOOP_HOME before the registry inspector can build a
+      // snapshot. Convert that configuration error into the same stable doctor tail contract.
+      registryInspectionError = error instanceof Error ? error.message : String(error);
+    }
+
+    const identityLock = join(root, ".writing-loop", "workspace.json.lock");
+    if (hasSymlinkComponent(root, [".writing-loop", "workspace.json.lock"])) {
+      fail(`workspace identity 写锁路径含符号链接：${identityLock}`, `人工审计并修复 ${identityLock}`);
+    } else {
+      diagnoseExclusiveLock(
+        identityLock,
+        "workspace identity 写锁",
+        "稳定 identity 创建可能被崩溃残锁阻断",
+        `人工审计并移除 ${identityLock}；不要改写 workspace ID`,
+      );
+    }
+    if (registry && registry.registryStatus !== "corrupt") {
+      diagnoseExclusiveLock(
+        `${registry.file}.lock`,
+        "workspace registry 写锁",
+        "workspace add/remove 可能被崩溃残锁阻断",
+        `人工审计并移除 ${registry.file}.lock；不要删除 ${registry.file}`,
+      );
+    }
+
+    if (registryInspectionError) {
+      fail(`workspace registry 无法检查：${registryInspectionError}`,
+        "修正或 unset WRITING_LOOP_HOME，再运行 writing-loop workspace list");
+    } else if (registry?.registryStatus === "corrupt") {
+      fail(`workspace registry 损坏：${registry.diagnostics[0] ?? registry.file}`,
+        `保留现场并人工审计 ${registry.file}；不要用 workspace add 静默覆盖`);
+    }
+
+    if (identityMissing) {
+      warn("W12", `workspace identity 缺失：${join(root, ".writing-loop", "workspace.json")} —— 旧 workspace 仍可单独使用，但没有稳定 Studio namespace`,
+        `writing-loop workspace add ${root}`);
+    } else if (workspaceIdentity) {
+      ok(`workspace identity: ${workspaceIdentity.id}`);
+    }
+
+    if (registry?.registryStatus === "missing") {
+      warn("W13", `本机 workspace registry 尚未创建：${registry.file}`,
+        `writing-loop workspace add ${root}`);
+    } else if (registry?.registryStatus === "ok") {
+      const degraded = registry.entries.filter((entry) => entry.status !== "ok");
+      const currentById = workspaceIdentity
+        ? registry.entries.find((entry) => entry.id === workspaceIdentity!.id)
+        : undefined;
+      const currentByRoot = registry.entries.find((entry) => entry.root === root);
+      const currentHealthy = workspaceIdentity !== null
+        && currentById?.status === "ok" && currentById.root === root;
+      const currentProblem = workspaceIdentity !== null && !currentHealthy
+        ? currentById
+          ? `当前 ID ${workspaceIdentity.id} 的 registry 指针为 ${currentById.status}（${currentById.diagnostic ?? currentById.root}）`
+          : currentByRoot
+            ? `当前 root 被另一个 ID ${currentByRoot.id} 绑定（status=${currentByRoot.status}）`
+            : `registry 缺当前 workspace ${workspaceIdentity.id}`
+        : null;
+
+      if (currentProblem || degraded.length) {
+        const samples = degraded.slice(0, 3)
+          .map((entry) => `${entry.id}=${entry.status}${entry.diagnostic ? ` (${entry.diagnostic})` : ""}`)
+          .join("；");
+        const suffix = degraded.length
+          ? `；degraded ${degraded.length}/${registry.entries.length}${samples ? `：${samples}` : ""}`
+          : "";
+        warn("W13", `${currentProblem ?? "本机 registry 含不可用指针"}${suffix}`,
+          currentProblem && !currentByRoot
+            ? `writing-loop workspace add ${root}`
+            : "运行 writing-loop workspace list 核对；确认废弃后用 workspace remove ID 只移除本机指针");
+      } else if (workspaceIdentity) {
+        ok(`workspace registry 已登记当前 workspace（${registry.entries.length} 条，全部健康）`);
+      }
+    }
+  }
+
   // 3. config.json 可解析 + 项目轻校验
   let ws: Workspace | null = null;
   if (root) {
@@ -153,10 +343,148 @@ export function doctorMain(argv = process.argv.slice(2)): number {
   }
 
   if (ws) {
-    const projects = Object.entries(ws.config.projects ?? {});
-    const enabled = projects.filter(([, p]) => p.enabled !== false);
+    const rawProjects = (ws.config as Record<string, unknown>).projects;
+    let projects: Array<[string, unknown]> = [];
+    if (rawProjects === undefined || rawProjects === null) {
+      projects = [];
+    } else if (typeof rawProjects === "object" && !Array.isArray(rawProjects)) {
+      projects = Object.entries(rawProjects as Record<string, unknown>);
+    } else {
+      fail("config.json 的 projects 必须是 JSON 对象", "修复 .writing-loop/config.json 的 projects");
+    }
+    const validProjects: Array<[string, WlProject]> = [];
+    for (const [key, value] of projects) {
+      try {
+        validProjects.push([key, requireProjectEntry(key, value)]);
+      } catch (error) {
+        fail(error instanceof WsError ? error.message : String(error),
+          "把非法项目 key 迁移为 1–32 位小写 ASCII key（建议先备份 config.json 与对应 .writing-loop 数据目录）");
+      }
+    }
+    const enabled = validProjects.filter(([, p]) => p.enabled !== false);
     ok(`config.json 可解析（项目 ${projects.length} 个，enabled ${enabled.length} 个）`);
-    if (!projects.length) next ??= "在 Claude Code 里跑 /writing-loop:add-script 立项 interview";
+
+    // config 写锁跨项目共享；陈旧锁会阻断 Studio/CLI/add-script 的任何索引更新，doctor
+    // 只诊断不擅自删除。删除前必须由操作者确认记录中的 PID 已不存活。
+    const configLock = join(dataRoot(ws.root), "config.json.lock");
+    if (hasSymlinkComponent(ws.root, [".writing-loop", "config.json.lock"])) {
+      fail(`config.json.lock 路径含符号链接：${configLock}`, `人工审计并修复 ${configLock}`);
+    } else {
+      diagnoseExclusiveLock(
+        configLock,
+        "config.json.lock",
+        "项目启停/注册会被阻断",
+        `优先用原 input + planId 重试未完成立项；无 journal 时再人工审计后手动移除 ${configLock}`,
+      );
+    }
+
+    // Activity index locks are intentionally per-project and can survive a process crash. Check
+    // disabled projects too: re-enabling one should not reveal a permanent refresh failure later.
+    for (const [key] of validProjects) {
+      const activityLock = join(projectDataDir(ws.root, key), ".activity-index.v2.lock");
+      if (hasSymlinkComponent(ws.root, [".writing-loop", key, ".activity-index.v2.lock"])) {
+        fail(`项目 '${key}' activity index 刷新锁路径含符号链接：${activityLock}`,
+          `人工审计并修复 ${projectDataDir(ws.root, key)}`);
+      } else {
+        diagnoseExclusiveLock(
+          activityLock,
+          `项目 '${key}' activity index 刷新锁`,
+          "Studio activity bootstrap/refresh 会被阻断",
+          `人工审计并移除 ${activityLock}；activity index 是可重建缓存，不要删除源 ledger`,
+        );
+      }
+    }
+
+    // Correlate immutable production intents with the authoritative ledger. This is deliberately
+    // read-only: recoverable crash prefixes get an exact-replay warning, while missing/corrupt
+    // evidence is structural and blocks remote dispatch until an operator audits it.
+    if (workspaceIdentity) {
+      for (const [key] of validProjects) {
+        try {
+          const findings = inspectProductionRecovery(ws.root, workspaceIdentity.id, key);
+          if (findings.length === 0) {
+            ok(`项目 '${key}' production enqueue 恢复链一致`);
+          }
+          for (const finding of findings) {
+            const subject = finding.taskId === null ? `项目 '${key}'` : `项目 '${key}' task '${finding.taskId}'`;
+            if (finding.severity === "failure") {
+              fail(`${subject} production ${finding.code}：${finding.detail}`,
+                `保留现场并人工审计 ${projectDataDir(ws.root, key)}；禁止猜测或重发远端任务`);
+            } else {
+              warn("W14", `${subject} production ${finding.code}：${finding.detail}`,
+                "使用原 enqueue input 先 --plan，再以匹配 --confirm PLAN_ID 精确重放");
+            }
+          }
+        } catch (error) {
+          fail(`项目 '${key}' production 恢复证据无法安全读取：${error instanceof Error ? error.message : String(error)}`,
+            `保留现场并人工审计 ${projectDataDir(ws.root, key)}`);
+        }
+      }
+    }
+
+    // Durable onboarding journal 是 config 发布前崩溃的恢复依据；doctor 只诊断，绝不
+    // 删除 journal/lease/所有权标记。最多逐项读取 100 个 entry，避免损坏目录拖垮体检。
+    const txDir = join(dataRoot(ws.root), ".onboarding-transactions");
+    if (hasSymlinkComponent(ws.root, [".writing-loop", ".onboarding-transactions"])) {
+      fail(`onboarding 事务路径含符号链接：${txDir}`, `人工审计并修复 ${txDir}`);
+    } else try {
+      const txInfo = lstatSync(txDir);
+      if (!txInfo.isDirectory() || txInfo.isSymbolicLink()) {
+        fail(`onboarding 事务路径不是普通目录：${txDir}`, `人工审计并修复 ${txDir}`);
+      } else {
+        const names: string[] = [];
+        const handle = opendirSync(txDir);
+        try {
+          for (;;) {
+            const entry = handle.readSync();
+            if (!entry) break;
+            if (names.length >= 100) {
+              fail(`onboarding 事务目录超过 100 个 entry；拒绝无界扫描：${txDir}`, `人工审计 ${txDir}`);
+              break;
+            }
+            names.push(entry.name);
+          }
+        } finally { handle.closeSync(); }
+        for (const name of names.filter((entry) => /^[a-z0-9][a-z0-9._-]{0,31}\.json$/.test(entry)).sort()) {
+          const file = join(txDir, name);
+          const key = name.slice(0, -5);
+          try {
+            const read = readRegularTextHead(file, ONBOARDING_JOURNAL_MAX_BYTES);
+            if (!read) throw new Error("journal 不是可安全读取的单链接普通文件");
+            if (read.truncated) throw new Error(`journal 超过 ${ONBOARDING_JOURNAL_MAX_BYTES} bytes 安全预算`);
+            const journal = JSON.parse(read.text) as {
+              kind?: unknown; planId?: unknown; ownerPid?: unknown; state?: unknown;
+            };
+            if (journal.kind !== "writing-loop/onboarding-transaction" || typeof journal.planId !== "string"
+              || typeof journal.ownerPid !== "number" || !Number.isInteger(journal.ownerPid) || journal.ownerPid <= 0
+              || typeof journal.state !== "string") throw new Error("journal 结构无效");
+            const visible = Object.prototype.hasOwnProperty.call(ws.config.projects ?? {}, key);
+            if (visible) {
+              warn("W11", `项目 '${key}' 已在 config 可见，但 onboarding journal 仍残留（state=${journal.state} planId=${journal.planId}）—— 先 project verify，再人工审计恢复元数据`);
+            } else if (processAlive(journal.ownerPid)) {
+              ok(`项目 '${key}' 立项事务正在执行或 PID 被复用（pid=${journal.ownerPid} state=${journal.state}）`);
+            } else {
+              const recovery = `用原 input 和 --confirm ${journal.planId} 重试 project create；不要手动删除受管 repo/data`;
+              fail(`项目 '${key}' 有未完成的崩溃立项事务（pid=${journal.ownerPid} state=${journal.state} planId=${journal.planId}）`, recovery);
+            }
+          } catch (error) {
+            fail(`onboarding journal 无法安全读取 ${file}：${error instanceof Error ? error.message : String(error)}`,
+              `保留现场并人工审计 ${file}`);
+          }
+        }
+      }
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") {
+        fail(`onboarding 事务目录无法安全读取 ${txDir}：${error instanceof Error ? error.message : String(error)}`,
+          `保留现场并人工审计 ${txDir}`);
+      }
+      // ENOENT = 尚未使用自动立项，正常。
+    }
+
+    if (!projects.length && nextPriority < 1) {
+      next = "在 Claude Code 里跑 /writing-loop:add-script 立项 interview";
+      nextPriority = 1;
+    }
 
     // provider 注册表校验（workspace 顶层 providers；先解析好，供下面 per-project 的 W05
     // 扩展条件、与循环结束后的 W09/W10 workspace 级检查共用）。非法 ⇒ FAIL（阻断

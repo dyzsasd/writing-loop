@@ -81,21 +81,99 @@ bible en concept art de personnages / décors — et une **revue indépendante p
 second moteur** pour le Reviewer / Script-Doctor. Absent ou désactivé ⇒ tout se
 comporte exactement pareil.
 
-En option, installez le **CLI npm `writing-loop`** — une façade mince pour
-l'ordonnanceur intégré et l'outillage du tableau :
+Pour utiliser directement Studio et les commandes, installez le **CLI npm
+`writing-loop`** : accueil déterministe, ordonnanceur intégré et outillage du
+tableau. La skill `add-script` peut se rabattre sur le cœur inclus dans le plugin ;
+un projet existant peut aussi lancer les agents slash sans CLI global.
 
 ```bash
 npm i -g @dyzsasd/writing-loop    # writing-loop run / status / doctor / fires …
 ```
 
+Depuis le workspace, ouvrez la salle d'écriture locale :
+
+```bash
+writing-loop init                 # une fois : crée .writing-loop/ dans ce workspace
+writing-loop studio               # http://127.0.0.1:8791/
+writing-loop workspace list       # registre local des workspaces
+writing-loop snapshot             # projection JSON multi-projets
+writing-loop project list         # inclut les projets en pause
+writing-loop production status    # registre local take/QC ; aucun appel distant
+writing-loop production enqueue --plan --project demo --input enqueue.json
+writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
+writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
+writing-loop production handoff --project demo --input handoff.json  # takes approuvés ; JSON canonique sur stdout
+writing-loop project plan --input request.json
+writing-loop project create --input request.json --confirm wlplan_…
+writing-loop project verify mon-drame
+```
+
+`init` attribue au workspace un identifiant opaque et durable dans
+`.writing-loop/workspace.json`, puis tente d'enregistrer son chemin canonique dans
+le registre local borné `$WRITING_LOOP_HOME/workspaces.json` (par défaut
+`~/.writing-loop/workspaces.json`). Un échec du registre est signalé sans annuler
+une initialisation déjà réussie. Les pointeurs se gèrent aussi explicitement :
+
+```bash
+writing-loop workspace add ../autre-room --label "Drames historiques"
+writing-loop workspace list --json
+writing-loop workspace remove ws_0123456789abcdef0123456789abcdef
+writing-loop studio --workspace ws_0123456789abcdef0123456789abcdef
+writing-loop studio --single       # conserver les anciennes URL mono-workspace
+```
+
+Le registre est un index de commodité reconstructible, jamais une source de vérité :
+les autres commandes trouvent toujours la racine via le CWD ou
+`WRITING_LOOP_WORKSPACE`, et `remove` ne supprime que le pointeur local. Avec plusieurs
+entrées enregistrées, Studio affiche une page d'ensemble et place toutes les routes
+d'un workspace sous `/w/<workspace-id>/`. Avec un seul workspace (ou `--single`), les
+routes historiques `/p/...` et `/api/...` restent inchangées.
+
+Studio n'écoute que la boucle locale et reconstruit la bibliothèque, la maturité
+du récit, les décisions humaines et les agents en cours depuis les mêmes fichiers.
+« Nouveau projet » et `/writing-loop:add-script` mènent le même entretien avec
+l'opérateur, puis délèguent au même cœur d'accueil : plan déterministe **sans
+écriture**, confirmation explicite du `planId`, réservation atomique des chemins
+finaux, création journalisée et vérification après relecture. Les commandes ci-dessus exposent la même frontière
+plan/create/verify. La création exige un nouveau repo ; Studio le limite en plus
+au workspace courant.
+Avant que la config rende le projet visible, un journal durable par projet permet
+de reprendre après un vrai crash avec la **même requête et le `planId` initial**
+si le commit et le manifeste complets sont déjà durables. Un arbre partiel antérieur
+est conservé et impose un audit manuel ;
+après publication, le reçu rend les reprises idempotentes. Il faut relancer la
+commande : aucun daemon ne récupère en arrière-plan. Config/templates modifiés,
+PID encore vivant, artefacts modifiés ou propriété ambiguë imposent un audit.
+
+La page d'un projet ouvre en lecture seule les détails autorisés des tickets,
+documents narratifs, épisodes, rapports et évaluations. Son activité bornée repose
+sur un cache `ActivityIndexer` v2 persistant et reconstructible dans l'état du projet ;
+les ledgers, tickets et fichiers du scénario restent les sources d'autorité. Une
+signature de métadonnées évite les rescans profonds inutiles, tandis que toute lacune
+d'amorçage, de rétention ou de reconstruction est signalée. Les curseurs de pagination
+sont liés au workspace, au projet et à la génération de l'index. `run-state.json` ne
+reste qu'une surcouche temps réel et n'entre jamais dans l'historique.
+
+Les IDs SSE de Studio combinent le snapshot stable et les révisions durables des
+index. Après redémarrage de Studio, le navigateur peut reprendre avec
+`Last-Event-ID` ; un curseur d'un autre workspace ou du flux global est refusé. Le
+SSE signale un changement, il ne remplace pas l'API d'activité historique bornée.
+Modèles et durée ne sont affichés que s'ils sont prouvés ; sans données
+de ledger, tokens et coût restent **inconnus / non enregistrés**, jamais estimés.
+Outre la création confirmée, les seules écritures de Studio sont pause/reprise
+atomiques. Un ordonnanceur actif observe la pause, cesse les nouveaux départs puis
+termine son drain contrôlé.
+
 La room tourne sur l'un des **trois moteurs** — Claude Code (par défaut), Codex ou
 opencode (`writing-loop run --cli opencode` ; voir conventions §25).
 
-**2. Démarrer un projet** — lancez la skill d'accueil depuis un dossier de projet
-vide. Elle vous interroge (genre, profil d'audience, monétisation, pré-filtrage
-conformité ; pour les adaptations, le texte source + le décorticage du livre),
-échafaude l'arborescence bible / plan / registres / épisodes, enregistre le
-projet, et crée le tout premier ticket (le ticket de plan) :
+**2. Démarrer un projet** — depuis un workspace initialisé, choisissez « Nouveau
+projet » dans Studio ou lancez la skill d'accueil. Indiquez un chemin de repo qui
+n'existe pas encore, sans créer le dossier. L'entretien couvre genre, audience,
+monétisation et conformité (plus droits et seuils de décorticage pour une
+adaptation). Après approbation du plan sans écriture, le cœur partagé crée
+l'arborescence, enregistre le projet, ouvre le premier ticket de plan et vérifie
+les trois vérités-terrain :
 
 ```
 /writing-loop:add-script
@@ -117,10 +195,10 @@ Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 /writing-loop:sweep-agent              # hygiène du tableau, réparation d'étiquetage, récupération des orphelins
 ```
 
-Il n'y a **pas de serveur** — le tableau est de simples fichiers sous
-`<workspace>/.writing-loop/<clé-projet>/board/`, et l'ordonnancement est un appel slash
-manuel, le CLI `writing-loop` (`writing-loop run`), ou votre propre `cron`. Copiez
-le dossier et vous avez migré de machine.
+Il n'y a **pas de backend distant** — le tableau reste composé de simples fichiers sous
+`<workspace>/.writing-loop/<clé-projet>/board/`. Studio n'est qu'une projection
+locale ; l'ordonnancement est un appel slash manuel, `writing-loop run`, ou votre
+propre `cron`. Copiez le dossier et vous avez migré de machine.
 
 Le Showrunner garde la file peu profonde (Backlog-first ; lui seul promeut vers
 Todo), les tickets d'épisode s'écoulent strictement dans l'ordre des épisodes
@@ -242,11 +320,30 @@ le registre complet reprise / remplacement / suppression.
 
 ## Limites de la v1
 
-- **Tableau local uniquement.** L'unique backend est un simple tableau de fichiers
+- **Tableau local uniquement.** L'unique source de vérité est un simple tableau de fichiers
   sous `<workspace>/.writing-loop/` (protocole dans
-  [`references/conventions.md`](references/conventions.md) §18). Pas de Linear, pas
-  de hub, pas de partage réseau. L'ordonnancement est manuel (slash) ou votre
-  propre `cron`.
+  [`references/conventions.md`](references/conventions.md) §18). Studio est une
+  projection loopback, pas un second backend. Pas de Linear, de service cloud ou
+  de partage réseau. L'ordonnancement est manuel, intégré, ou via votre `cron`.
+- **Le socle de la Phase 2 est terminé, pas la parité produit complète.** L'accueil
+  confirmé par empreinte, la reprise par journal, les détails autorisés, l'activité
+  bornée persistante, le SSE reprenable après redémarrage, l'identité/registre de
+  workspaces et l'espace de noms Studio multi-workspace sont livrés. Les métriques
+  d'écriture avancées et les coûts réels attendent des champs de ledger faisant
+  autorité ; sans preuve, la valeur reste `unknown`, jamais estimée.
+- **La Phase 3C livre un control plane de production déployable à distance et les noyaux d'une
+  Gateway privée, pas une appliance GPU intégrée.** Elle ajoute au ledger et au coordinateur
+  récupérable des Phases 3A/3B un enqueue plan/confirmation sans réseau, un worker one-shot, une
+  configuration runtime réservée au propriétaire, une politique d'entrée par workflow, un contrat
+  H3 à quatre modèles et pipeline actif fixe, le staging source→consumer, la matérialisation
+  template→bound, des reçus vérifiés, le règlement durable de l'admission, et des handlers Gateway stage/job/output isolés par
+  scope derrière un routeur strict. La surface production HTTP de Studio reste en lecture seule ;
+  endpoint, profil et token ne viennent ni du navigateur ni des arguments d'enqueue. Le déploiement
+  doit encore fournir l'inférence H3/ComfyUI, TLS/mTLS, l'émission de credentials, les profils serveur
+  et attestations modèle/custom-node, le stockage, l'admission/quota durable, la réconciliation de
+  facturation et toute API Studio modifiable vérifiée. Le fixture API-format représentatif n'a pas
+  passé de `/prompt` ComfyUI réel et ne prouve pas un déploiement H3. H3 génère l'audio/vidéo des plans ; il ne
+  remplace pas le modèle d'écriture.
 - **Genres calibrés uniquement.** Les paramètres numériques des règles R sont
   calibrés (fondés sur des preuves) pour les drames **brainstorm-thrill /
   vengeance-gifle / professionnel épisodique**. Les profils héroïne sweet-pet /

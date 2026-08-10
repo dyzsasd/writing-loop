@@ -21,6 +21,12 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   init:                    ["init"],                  // 铺 workspace 骨架（.writing-loop/ + 空 config.json）
   run:                     ["run"],                   // 起内建调度器 wl-run（原生 TS，src/scheduler.ts）
   status:                  ["status"],                // 只读板摘要（state 计数 / 停靠票 / 写作前沿 / 陈旧锁 / 末 5 fire）
+  snapshot:                ["snapshot"],              // 多项目稳定 JSON 投影（UI/外部编排共用）
+  studio:                  ["studio"],                // loopback-only 本地编剧工作台
+  ui:                      ["studio"],                // studio 的短别名
+  project:                 ["project"],               // 项目清单与安全启停
+  production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
+  workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
   "sync-opencode":         ["sync-opencode"],          // providers 注册表 → opencode.json（create-or-merge）
   fires:                   ["fires"],                 // fires.jsonl 遥测尾巴 + 按 agent 聚合成功率
@@ -49,6 +55,30 @@ const usage = (): void => {
                               只读板摘要：各 state 计数、In Review / In Progress 明细、
                               needs-* 停靠票、写作前沿（episodes/ep-*.md 最大集号）、
                               陈旧锁扫描、fires.jsonl 末 5 行
+  snapshot [--project K] [--compact]
+                              输出 workspace / 剧本项目的稳定 JSON 投影（包含暂停项目）
+  studio [--host 127.0.0.1|localhost|::1] [--port 8791] [--workspace ID] [--single]
+                              启动仅限本机访问的编剧工作台；registry 有多个登记项时显示
+                              创作总台，--workspace 选默认工作区，--single 保留单工作区 URL
+  project list [--json]       列出全部剧本项目（包含暂停项目）
+  project enable|disable K    原子更新项目启停开关，并保留 config 未知字段
+  project plan --input request.json
+                              零写入预览立项计划并返回确认指纹
+  project create --input request.json --confirm PLAN_ID [--json]
+                              以匹配的确认指纹原子发布 repo、运行态板与 config
+  project verify KEY [--json] 独立核验立项后的 repo、首票与运行态布局
+  production status [--project K] [--json]
+                              查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
+  production enqueue --plan --project K --input FILE [--json]
+                              零写入计划并返回确认指纹
+  production enqueue --project K --input FILE --confirm PLAN_ID [--json]
+                              以匹配指纹持久化 immutable intent + task + dispatch；零远端网络
+  production handoff --project K --input FILE
+                              输出仅含人工 approved take 的 Studio 交接清单；不连接远端
+  workspace list [--json]     列出本机 workspace ID 索引（含 missing/corrupt 状态）
+  workspace add [DIR] [--label L]
+                              创建/复用稳定 ID，并按 canonical root 注册
+  workspace remove ID          只删本机索引指针，绝不删除 workspace
   doctor                      只读体检：node/workspace/config/各项目/调度 CLI 引擎；
                               暖警告不失败、结构性问题才 FAIL；末行 DOCTOR_OK/FAILED + NEXT:
   sync-opencode [--dir D]     把 config.json 顶层 providers 注册表同步进 opencode.json

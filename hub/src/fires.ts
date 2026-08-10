@@ -3,7 +3,7 @@
 // 时间戳可信性见 conventions §18「时钟纪律」：本账本由 wl-run 进程自己的 UTC 时钟记账。
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fmtDur, readFires, type FireRow } from "./status.ts";
+import { fmtDur, isCleanFire, readFires, type FireRow } from "./status.ts";
 import { projectDataDir, requireWorkspace, resolveProject, WsError } from "./workspace.ts";
 
 function usage(): void {
@@ -11,17 +11,18 @@ function usage(): void {
 用法: writing-loop fires [--project K] [--last N] [--json]   （--last 默认 20）`);
 }
 
-type AgentAgg = { fires: number; ok: number; noop: number; timedOut: number; authGap: number };
+type AgentAgg = { fires: number; ok: number; noop: number; timedOut: number; descendantDrains: number; authGap: number };
 
 export function aggregate(rows: FireRow[]): Record<string, AgentAgg> {
-  const agg: Record<string, AgentAgg> = {};
+  const agg = Object.create(null) as Record<string, AgentAgg>;
   for (const r of rows) {
     const a = r.agent ?? "?";
-    agg[a] ??= { fires: 0, ok: 0, noop: 0, timedOut: 0, authGap: 0 };
+    agg[a] ??= { fires: 0, ok: 0, noop: 0, timedOut: 0, descendantDrains: 0, authGap: 0 };
     agg[a].fires++;
-    if (r.exitCode === 0) agg[a].ok++;
+    if (isCleanFire(r)) agg[a].ok++;
     if (r.noop) agg[a].noop++;
     if (r.timedOut) agg[a].timedOut++;
+    if (r.descendantDrain) agg[a].descendantDrains++;
     if (r.providerAuthMissing) agg[a].authGap++;  // guard 拦截行（零 token，但拉低成功率——单列出来免当谜团）
   }
   return agg;
@@ -73,12 +74,12 @@ export function firesMain(argv = process.argv.slice(2)): number {
   for (const f of tail) {
     // exit 列三态标记：spawn! = 起进程失败；auth! = provider 认证 guard 拦截（零 token）
     const exit = f.spawnError ? "spawn!" : f.providerAuthMissing ? "auth!" : String(f.exitCode ?? "-");
-    console.log(`  ${(f.startedAt ?? "-").padEnd(26)} ${(f.agent ?? "?").padEnd(15)} ${String(f.model ?? "-").padEnd(10)} ${String(f.effort ?? "-").padEnd(7)} ${String(f.provider ?? "-").padEnd(12)} ${fmtDur(f.durationSeconds).padEnd(9)} ${exit.padEnd(6)} ${(f.noop ? "yes" : "-").padEnd(5)} ${f.keystoneEscalated ? "yes" : "-"}${f.timedOut ? "  TIMEOUT" : ""}`);
+    console.log(`  ${(f.startedAt ?? "-").padEnd(26)} ${(f.agent ?? "?").padEnd(15)} ${String(f.model ?? "-").padEnd(10)} ${String(f.effort ?? "-").padEnd(7)} ${String(f.provider ?? "-").padEnd(12)} ${fmtDur(f.durationSeconds).padEnd(9)} ${exit.padEnd(6)} ${(f.noop ? "yes" : "-").padEnd(5)} ${f.keystoneEscalated ? "yes" : "-"}${f.timedOut ? "  TIMEOUT" : ""}${f.descendantDrain ? "  DESCENDANT_DRAIN" : ""}`);
   }
   console.log(`\n汇总（按 agent，全 ${rows.length} fire）:`);
   for (const [agent, s] of Object.entries(agg).sort(([a], [b]) => a.localeCompare(b))) {
     const rate = s.fires ? Math.round((s.ok / s.fires) * 100) : 0;
-    console.log(`  ${agent.padEnd(15)} ${String(s.fires).padStart(3)} fire · 成功 ${s.ok}/${s.fires}（${rate}%）· no-op ${s.noop}${s.timedOut ? ` · 超时 ${s.timedOut}` : ""}${s.authGap ? ` · 认证拦截 ${s.authGap}` : ""}`);
+    console.log(`  ${agent.padEnd(15)} ${String(s.fires).padStart(3)} fire · 成功 ${s.ok}/${s.fires}（${rate}%）· no-op ${s.noop}${s.timedOut ? ` · 超时 ${s.timedOut}` : ""}${s.descendantDrains ? ` · 后代清理 ${s.descendantDrains}` : ""}${s.authGap ? ` · 认证拦截 ${s.authGap}` : ""}`);
   }
   return 0;
 }

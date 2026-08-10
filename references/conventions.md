@@ -478,7 +478,8 @@ Decisions log 记进件票号（§20 节分级；showrunner **自发**的方向�
 
 ```
 <workspace>/                 ← 复制它 = 全部搬走
-  .writing-loop/             ← 全部运行时状态（untracked；单一文件系统）
+  .writing-loop/             ← 全部权威运行时状态（untracked；单一文件系统）
+    workspace.json           ← 本 workspace 自有稳定 ID（ws_<32 hex>）
     config.json              ← workspace 索引（repoPath 用【相对路径】）
     <key>/board/ …           ← 各项目看板（§18）
     <key>/lessons/ reports/ state/
@@ -490,10 +491,49 @@ Decisions log 记进件票号（§20 节分级；showrunner **自发**的方向�
 历史（否则 `state: X→Y` 会污染正文提交）。它 untracked、绝不共享、绝不放网络盘
 （原子 rename 需单一文件系统）。
 
-**Workspace 根解析（boot 时）——只有一条规则，无环境变量、无配置**（用户是非技术型，
-保持最简）：从 CWD **向上逐级找**已存在的 `.writing-loop/` 目录（像 git 找 `.git`），
-首个命中的父目录即 workspace 根。找不到 ⇒ 未在 workspace 内：agent 报错并请操作者先
-`add-script` 立项（由它确立 workspace，见 §13）；不猜、不在 home 目录乱建。
+**索引写协议（所有写者强制共享）**：项目 key 完整匹配
+`/^[a-z0-9][a-z0-9._-]{0,31}$/`。任何 `config.json` 读-改-写先以 O_EXCL 创建同目录
+`config.json.lock`（0600，内容含真实 PID + `date -u` 的 `acquiredAt`），**取得锁后重新读**
+索引并复核前置条件；保留全部未知字段，以同目录临时文件 `fsync` 后 atomic rename，最后
+在 `finally` 释放自己的锁。锁已存在就停止写入，绝不覆盖/删除别人的锁；>60min 时先跑
+`writing-loop doctor`，只允许操作者确认记录 PID 已退出后清理。Studio、`project` CLI 与
+`add-script` 都必须调用共享的 workspace-store / onboarding core 走此协议，禁止各自直接覆盖
+config。
+
+**稳定 identity**：每个 workspace 在 `.writing-loop/workspace.json` 自己持有严格 v1 的
+`{"version":1,"id":"ws_<32 lowercase hex>"}`。`writing-loop init` / `workspace add` 首次随机
+生成，之后只校验回读；路径、title 与 config 变化都不能改 ID。文件与独立
+`workspace.json.lock` 使用单链接普通文件、O_EXCL、0600 temp、fsync + atomic rename 纪律，
+拒绝 symlink/hardlink/FIFO/device 与未知字段。整体移动 workspace 时 identity 随状态一起走；
+整体复制后若原件与副本同时存在，二者同 ID，registry 必须硬停，绝不自动把一个副本重置成
+“新 workspace”。
+
+**Workspace 根解析（boot 时）**：默认从 CWD **向上逐级找**已存在的 `.writing-loop/`
+（像 git 找 `.git`），首个命中即根。显式逃生门 `WRITING_LOOP_WORKSPACE` 若设置，必须是
+绝对路径且其下真有 `.writing-loop/`，优先于走查；坏值硬错、不静默降级。仍找不到就请
+操作者先 `writing-loop init`（再由 Studio 或 `add-script` 立项，§13）；不猜、不在 home 目录
+创建 workspace 根。下述本机 registry **不参与**普通 CLI/agent 的根解析。
+
+### 本机 workspace registry 与 Studio fleet
+
+`$WRITING_LOOP_HOME/workspaces.json`（默认 `~/.writing-loop/workspaces.json`；override 必须绝对）
+是有界、非权威、可重建的 `{version:1,workspaces:[{id,root,label?}]}` 指针表：最多 128 条，
+只存 canonical absolute root，不复制 config/board/repo 内容。registry 文件上限 256 KiB，严格
+拒绝未知字段、重复 ID/root、symlink/hardlink/特殊文件；独立 `workspaces.json.lock` 下复读，
+随机 0600 temp 经 file fsync + atomic rename + directory fsync 发布。损坏文件不自动覆盖。
+
+- `writing-loop workspace list [--json]` 只读列 registry 的 `ok|missing|corrupt` 与逐项
+  `ok|missing|corrupt`；一条坏指针不遮蔽其他条目。
+- `writing-loop workspace add [DIR] [--label L]` 确保 identity 并登记 canonical root；同 ID
+  旧 root 已消失时可视为移动而自愈指针，两个现存 root 同 ID 或同 root 不同 ID 一律硬停。
+- `writing-loop workspace remove ID` 只删本机指针，绝不删除 workspace、identity 或项目。
+- `writing-loop init` best-effort 登记当前 root；registry 损坏/锁冲突只告警，不回滚已成功 init。
+
+Studio 可用 `--workspace ws_…` 明确选 registry 条目，`--single` 强制旧单 workspace 模式。
+登记项超过一个且未强制 single 时，`/` 是 fleet 总台（missing/invalid root 逐卡降级）；每个 workspace 的 HTML/API/SSE/
+立项/启停都进入 `/w/<workspace-id>/…` 命名空间。unscoped GET 307 到选定 workspace，unscoped
+POST 409，避免写错 room。只有一个 workspace（或 single）时原 `/p/...` 与 `/api/...` 保持兼容。
+fleet/各 workspace 的 SSE cursor 也分别绑定作用域，不能串用。
 
 ### 项目条目字段
 `repoPath`（剧本 repo，**默认相对 workspace 根**——`"my-drama"`；绝对路径仍允许，
@@ -530,21 +570,44 @@ decision-needed`（超预算申请见 production 账本模板）；**方向变�
 模糊裁量，这也消解了「§20 方向决策回写」与本节的表面矛盾：可自主回写的只有
 进度级）。
 
-## §13. 首跑安装（add-script）
+## §13. 首跑安装（add-script / Studio / project CLI）
 
-1. **Interview**（原创）：题材/受众画像（必填性别+年龄+付费习惯——红线①入口预防）/
-   对标剧（建议引用 market-watch 扫榜或操作者提供）/ 核心情绪引擎 / 规模与
-   monetization / **合规预筛**（涉政涉案婚恋伦理走向——结论写入 north-star Non-goals）/
-   genre profile（未校准题材显式警告，craft-rules 附录 A）。
-   （改编）另加：原著文本入 `source/` → 选书检查表评估 → **拆书三清单**
-   （templates/deconstruction/）→ 忠实度档位（默认贴改；借壳禁用写入 Non-goals）。
-   原创管线对 1-2 部对标剧做轻量拆解（结构骨架/爽点清单/钩型序列）入 `source/`。
-2. **Scaffold**：按 templates/ 生成 bible/ + outline.md（空表）+ ledgers/ 四账本 +
-   episodes/ + evaluation/ 目录；git commit。
-3. **注册**：写 `<workspace>/.writing-loop/config.json` 项目条目（校验规则见 config-schema）；
-   创建板目录；scaffold `lessons/` 目录（shared.md + 九个角色文件，空骨架，§14）。
-4. **首张票**：file 大纲票（Feature+outline+story-designer，owner=showrunner——
-   **showrunner 不得自领大纲票**，保持验收独立性）。
+立项的权威流程是 **INTERVIEW → PLAN（零写）→ OPERATOR CONFIRM → CREATE → VERIFY**。
+`add-script` 与 Studio 负责 attended interview 和展示计划；所有 scaffold/register/首票写入
+必须委托同一个 onboarding core，不能各自实现文件事务。
+
+1. **Interview**（操作者决定，不猜占位值）：原创收题材、受众画像（必填性别+年龄）、
+   对标/differentiation、logline、规模/monetization/format、制作上限、合规预筛与 Non-goals；
+   genre 未校准则显式警告。改编另收授权范围、压缩比、S 级名场面数、具名角色数；三阈值
+   （≥10:1 / ≥3 / ≤20）未全过必须有显式风险确认。目标 repo 必须尚不存在；Studio 只允许
+   workspace 内相对路径，CLI 的外部绝对路径会警告不可随 workspace 迁移。
+2. **Plan**：core 规范化并校验完整 request，计算 `planId`。指纹绑定输入、解析路径、待写
+   config/首票、当前 config 摘要、模板摘要与实现版本；输出文件清单、警告和目标路径。
+   这一步严格零写：不建目录、不拿 config 锁、不写 report。操作者必须看完再回传同一指纹。
+3. **Create**：core 重新生成 plan；指纹或 config/template 漂移即停。匹配后以原子 `mkdir`
+   预留 final repo/data 名称（任何已有 file/symlink/目录都硬停），在 journal 下生成
+   bible/outline/ledgers/source 骨架与首个 Git commit，以及专用 board、lessons、report、
+   `events.jsonl`、成功 receipt 和唯一首张大纲票（Feature+outline+story-designer，
+   owner=showrunner；**showrunner 不得自领**）。两棵树完整且持久化后，才在 §11 config 锁内
+   复核唯一性并 atomic replace config。客户端绝不逐文件手补。
+4. **Verify**：回读 config 条目、repo 必备文档、Git HEAD、Todo outline 首票与运行态目录；
+   任一失败即非成功。独立命令为 `writing-loop project verify <key>`；create 也自动执行它。
+   同输入+同 plan receipt 的响应丢失重试只做幂等验证，不再建 commit/票。
+
+create 以 `.writing-loop/.onboarding-transactions/<key>.json` durable journal 与同目录每-key
+lease 记录 prepared → repo-staged → data-staged → repo-promoted → data-promoted；这些是兼容状态
+标签，promoted 现在表示完整性检查点而非 staging rename。config atomic replace 最后发生，仍是
+唯一可见性提交。可捕获异常逆序回滚且只删完整摘要能证明属于本事务的
+产物；真实崩溃保留证据。恢复必须由操作者以**同一规范化 request + 原 `planId`**重跑 create，
+并要求 config/template/实现版本未变、repo 是 plan 对应的干净单 commit、data receipt 与所有权
+标记完全吻合。data 还须通过完整树的有界 SHA-256 manifest：排序相对路径、目录/普通文件类型
+与完整内容都入摘要（≤2,048 files、单文件 ≤4 MiB、总计 ≤32 MiB）；修改、额外项、symlink/
+特殊文件均拒绝。发布后的重试由 receipt 幂等回读，不重复 commit/票。活动/复用 PID、漂移、
+marker/journal 缺损、repo 被改或 final/旧 staging 歧义一律硬停人工审计，绝不猜测接管未知目录。
+崩溃若落在 repo 摘要或 data manifest 持久化之前，已预留 final 中的未完成树原样保留供人工审计，恢复
+流程不自动删除/重建。
+若崩溃落在 config 已发布而清理未完成的窗口，receipt 仍保证业务重试幂等，但残留 journal/
+config lock 可能需 doctor 辅助人工清理。它不是后台恢复 worker，也不导入已有 repo。
 
 ## §14. lessons — 操作者级修正（按角色分文件）
 
@@ -739,6 +802,46 @@ bump frontmatter `updated`**——评论本身就是交接载体（§9 操作者
 punch-up 双签复核、停靠裁决都只以评论到达），`updated` 不动，Step-0 探针与板快照
 就看不见这些交接（假退出，违反 §0 铁律）。
 每个 glob **严格限定本项目板目录**——跨项目即违反 §2。
+
+**Studio 按需详情 registry（只读）**：客户端只能请求已登记的五种资源
+`ticket|document|episode|report|evaluation` 及其 opaque ID，不能提交文件路径。Ticket 只从
+本项目板解析；document 是 north-star/characters/world/outline/foreshadow/story-state/
+production 白名单；episode 是数字集号；report/evaluation 只从各自目录的安全扫描结果反查。
+读取拒绝 symlink、越界和非普通文件，单文件至多返回前 1 MiB并标 `truncated`。workspace
+snapshot 只带摘要；完整 Markdown 仅在打开详情时读取。
+
+**持久、有界 activity 投影（只读）**：项目 activity 合并 `events.jsonl` 明示项目事件、
+`fires.jsonl` 调度记录、Ticket append-only 评论/转态与当前文档/分集/报告/评估的 mtime 观测。
+只有 event/fire/转态证据可称 authoritative；旧文件只称 `snapshot-only`，不从当前状态杜撰
+历史。`ActivityIndexer` v2 把这个投影持久为
+`<workspace>/.writing-loop/<key>/activity-index.v2.json`，但它只是可删除重建的缓存；上述源文件
+仍是唯一真相。
+
+刷新先以 metadata signature 检查源变化；未变就复用 generation/revision，变化才做有界深扫、
+以稳定 event ID 合并去重并倒序保留。首次扫描硬限仍是 fires 尾 512 KiB、events 尾 128 KiB、
+最近 200 票、每票最后 40 评论、每工件类 200 项；窗口之前的历史以 `BOOTSTRAP_GAP` 明示，
+所有裁剪继续带来源 warning（report/evaluation 超过 200 项分别为 `COUNT_TRUNCATED`）。index
+默认 retention 5,000 条/16 MiB（实现硬上限 10,000/32 MiB），累计淘汰以
+`RETENTION_TRUNCATED` 明示；绝不声称保存了无限历史。
+
+index 刷新使用与 board/config **不同**的 `.activity-index.v2.lock`：O_EXCL 独占创建，随机
+0600 temp 经 file fsync + atomic rename + directory fsync 发布；index/lock 拒绝 symlink、
+hardlink、非普通文件与 validate→open 替换，释放锁前核 inode，绝不删除替换锁。损坏或超预算
+的普通 index 可从权威源重建并返回 `INDEX_REBUILT`；不安全文件则硬停。
+
+v2 `before` cursor 绑定 workspace ID + project key + index generation，并以事件
+`(effectiveAt,id)` 为边界；跨 workspace/项目/generation 或已被 retention 淘汰都明确报过期，
+不会从当前窗口假造连续性。`run-state.json` 的 in-flight agent 仍只在响应时进入 `live[]`
+overlay，不持久化进 index、不写成已完成事件。账本未记录 token/账单时 usage/cost 显式
+`unknown:not-recorded`，绝不估算。
+
+**SSE 跨重启恢复**：Studio workspace stream 的 event ID 是
+`wlsse1_<workspace-id>_<64 hex>`，聚合稳定 snapshot fingerprint 与该 workspace 所有项目的
+ActivityIndexer revision；fleet stream 单独使用 `wlsse1_fleet_<64 hex>`。因此只变 Ticket 评论/
+activity 也会触发通知。每帧写标准 `id:`；重连传 `Last-Event-ID` 后，即使 Studio 进程重启也可
+从持久 index 重算 cursor，未变化不重复 data，下一次变化再发。malformed、fleet/workspace
+类型串用或跨 workspace cursor 均拒绝。SSE 只是“读模型已变化”信号，不是无限 event-log
+offset；历史仍读有界 activity API。
 
 **frontmatter 字段稳定性契约（授权 Step-0 探针内联依赖，§0）**：本节定义的 frontmatter
 字段（`state` / `labels` / `owner` / `assignee` / `updated` / `Episode:` 机读行）是 backend 契约中最稳定
