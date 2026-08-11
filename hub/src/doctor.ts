@@ -507,14 +507,17 @@ export function doctorMain(argv = process.argv.slice(2)): number {
       else if (!exists(join(repo, ".git"))) warn("W02", `repoPath 不是 git repo（无 .git）：${repo}`);
       else ok(`repoPath 存在且是 git repo: ${repo}`);
 
-      // 创作规格轻校验（config-schema「校验规则」）：paywall.card1 ⊂ [8..12]、audience 非空
+      // 创作规格轻校验（config-schema「校验规则」）：只有 paid-app 使用 R4.5 硬付费备卡；
+      // 订阅/免费项目的空数组表示“不适用”，不能误报成待修复的规格违规。
       const card1 = p.paywall?.card1;
-      if (card1 !== undefined) {
+      if (p.monetization === "paid-app" && card1 !== undefined) {
         const okCard = Array.isArray(card1) && card1.length > 0 && card1.every((x) => Number.isInteger(x) && x >= 8 && x <= 12);
         if (okCard) ok(`paywall.card1 ⊂ [8..12]: [${(card1 as number[]).join(", ")}]`);
         else warn("W03", `paywall.card1 越界（须为 [8..12] 内的非空整数数组，得到 ${JSON.stringify(card1)}）`);
-      } else {
+      } else if (p.monetization === "paid-app") {
         warn("W03", "paywall.card1 缺失（备卡制 R4.5 的参数来源）");
+      } else {
+        ok(`${typeof p.monetization === "string" ? p.monetization : "非 paid-app"} 不适用硬付费 card1 门`);
       }
       if (typeof p.audience === "string" && p.audience.trim()) ok(`audience 非空: ${p.audience}`);
       else warn("W03", "audience 为空 —— 评估红线①（受众画像含性别+年龄）的入口预防");

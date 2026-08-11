@@ -191,7 +191,14 @@ try {
   "doctor 将活跃 PID 的新鲜 registry lock 视为正在写入，仍保持只读");
   rmSync(registryLock);
 
-  writeFileSync(config, JSON.stringify({ projects: { demo: { repoPath: ".", enabled: true } } }));
+  writeFileSync(config, JSON.stringify({ projects: { demo: { repoPath: ".", enabled: true,
+    monetization: "reelshort-sub", paywall: { card1: [], card2: [], card3: [] },
+    audience: "男性 25-44 岁海外流媒体用户" } } }));
+  const subscriptionPaywall = runDoctor();
+  ok(subscriptionPaywall.output.includes("reelshort-sub 不适用硬付费 card1 门")
+    && !subscriptionPaywall.output.includes("paywall.card1 越界")
+    && !subscriptionPaywall.output.includes("paywall.card1 缺失"),
+  "doctor 不把订阅项目的空 paywall.card1 误报为 paid-app 规格违规");
   const projectData = join(data, "demo");
   mkdirSync(projectData);
   const activityLock = join(projectData, ".activity-index.v2.lock");
