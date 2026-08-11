@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { buildProjectActivity } from "../src/activity.ts";
 import { closeStudioServer, createStudioServer, isLoopbackPeer } from "../src/studio.ts";
 import { projectPage, STYLE } from "../src/studio-view.ts";
+import { fileSystemProposal } from "../src/system-inbox.ts";
 import { buildWorkspaceSnapshot } from "../src/project-read-model.ts";
 import { loadConfig } from "../src/workspace.ts";
 
@@ -96,6 +97,12 @@ Episode: 1
     updatedAt: "2026-08-09T10:00:00.000Z",
     inFlight: [{ agent: "reviewer", pid: process.pid, model: "gpt-5", effort: "high", startedAt: "2026-08-09T10:00:00.000Z", capSeconds: 600, logFile: "logs/reviewer.log" }],
   }));
+  fileSystemProposal(tmp, {
+    version: 1, kind: "framework-improvement", title: "系统建议不进入剧本看板",
+    summary: "来自 reflect 的框架维护事项。", evidence: ["project=demo"],
+    proposedChange: "路由到 workspace 系统收件箱。",
+    source: { project: "demo", agent: "reflect", projectTicket: null },
+  }, { now: () => new Date("2026-08-11T20:30:00.000Z") });
 
   const viewWorkspace = loadConfig(tmp);
   const viewSnapshot = buildWorkspaceSnapshot(viewWorkspace);
@@ -121,6 +128,18 @@ Episode: 1
   const root = await fetch(`${base}/`);
   const html = await root.text();
   ok(root.status === 200 && html.includes("作品书架") && html.includes("故事从这里继续"), "workspace 首页使用编剧场景信息架构");
+  ok(html.includes("系统改进收件箱") && html.includes("1</b><span>OPEN SYSTEM ITEMS"),
+    "workspace 首页把系统维护入口与作品书架分层展示");
+  const systemPage = await fetch(`${base}/system`);
+  const systemHtml = await systemPage.text();
+  ok(systemPage.status === 200 && systemHtml.includes("系统问题，不混进故事")
+    && systemHtml.includes("系统建议不进入剧本看板") && systemHtml.includes("来源 demo/reflect"),
+  "Studio /system 独立展示 workspace 级框架建议及来源");
+  const systemApi = await fetch(`${base}/api/system/proposals`);
+  const systemProjection = await systemApi.json() as { counts?: { open?: number }; proposals?: Array<{ source?: { project?: string } }> };
+  ok(systemApi.status === 200 && systemProjection.counts?.open === 1
+    && systemProjection.proposals?.[0]?.source?.project === "demo",
+  "系统建议 API 是 project board 之外的独立只读投影");
   ok(html.includes("纸月亮 &lt;script&gt;danger()&lt;/script&gt;") && !html.includes("<script>danger()"), "项目动态文本经过 HTML escaping");
   const csp = root.headers.get("content-security-policy") ?? "";
   const scriptBody = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";

@@ -549,6 +549,8 @@ story/source 内部命令。
 <workspace>/.writing-loop/
   workspace.json          # {version:1,id:"ws_<32 hex>"}；workspace 自有稳定 identity
   config.json             # workspace 项目索引（上文）
+  system/proposals/       # workspace 级 Writing Loop 框架改进收件箱；绝不进入任何项目板
+    WLSYS-<24hex>.json    # content-addressed immutable proposal；Studio /system 只读展示
   .onboarding-transactions/
     <key>.json            # durable create journal（成功发布+verify 后尽力删除）
     <key>.lock            # 每项目 create/recovery lease（PID 所有权）
@@ -574,6 +576,14 @@ story/source 内部命令。
     logs/                 # 调度器每 fire 全量输出（<UTC时间戳>-<agent>.log）
     wl-run.lock           # 调度器防重跑锁（运行中在位；退出释放；锁名 0.4.0 连续性保留）
 ```
+
+`writing-loop system proposal file --input proposal.json` 是系统建议的唯一新建入口；
+`writing-loop system proposal list [--json]` 与 `writing-loop system proposal show WLSYS-ID`
+负责观察，`writing-loop system proposal migrate-ticket --project K --ticket ID` 仅用于把旧版误落项目板的
+`[reflect-proposal]` 先完整归档再移除。系统记录严格绑定来源 project/agent、证据、建议改动、
+状态与可选处理结论，单条上限 256 KiB，O_EXCL + fsync 发布，内容漂移 fail closed。
+项目 scheduler、项目 snapshot 与 `needs-showrunner` 扫描都不读取该目录；Studio 的
+`[/w/<workspace-id>]/system` 和 `/api/system/proposals` 是独立只读投影。
 
 ### Studio workspace 命名空间、详情 registry 与持久有界 activity
 

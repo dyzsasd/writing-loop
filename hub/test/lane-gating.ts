@@ -315,7 +315,8 @@ type IoOver = { nowMs?: number; lastCleanEndMs?: number | null; marketDataPath?:
   sweepIntervalMs?: number | null;
   showrunnerBaseline?: { board: string; northStar: string } | null;
   gitSha?: (r: string, ...p: string[]) => string | null;
-  gitDiff?: (r: string, base: string, paths: readonly string[]) => boolean | null };
+  gitDiff?: (r: string, base: string, paths: readonly string[]) => boolean | null;
+  episodeScripts?: (r: string) => boolean | null };
 
 function gateWorld(): { ws: string; boardDir: string; projData: string; repo: string; io: (o?: IoOver) => Parameters<typeof evalLaneGate>[1] } {
   const ws = tmp();
@@ -407,12 +408,20 @@ function testStateAndGitSeams(): void {
     evalLaneGate("reviewer", w.io({ gitSha: () => "abc" })).open);
 
   // doctor：失败开 + 前缀互认
-  check("doctor：state 缺失 ⇒ 失败开 open", evalLaneGate("script-doctor", w.io({ gitSha: () => "abc" })).open);
+  check("doctor：state 缺失且已有正文 ⇒ 失败开 open",
+    evalLaneGate("script-doctor", w.io({ gitSha: () => "abc", episodeScripts: () => true })).open);
+  check("doctor：只有 scaffold、无 ep-*.md ⇒ state 缺失也在 spawn 前 gated",
+    !evalLaneGate("script-doctor", w.io({ gitSha: () => "abc", episodeScripts: () => false })).open);
+  check("doctor：episodes 目录不可判 ⇒ 保守 open",
+    evalLaneGate("script-doctor", w.io({ gitSha: () => "abc", episodeScripts: () => null })).open);
   writeFileSync(join(w.projData, "state", "doctor-state.json"), JSON.stringify({ lastAuditSha: "abc123", cursor: 3 }));
-  check("doctor：sha 前缀互认 ⇒ gated", !evalLaneGate("script-doctor", w.io({ gitSha: () => "abc123def456" })).open);
-  check("doctor：sha 变 ⇒ open", evalLaneGate("script-doctor", w.io({ gitSha: () => "fff" })).open);
+  check("doctor：sha 前缀互认 ⇒ gated",
+    !evalLaneGate("script-doctor", w.io({ gitSha: () => "abc123def456", episodeScripts: () => true })).open);
+  check("doctor：sha 变 ⇒ open",
+    evalLaneGate("script-doctor", w.io({ gitSha: () => "fff", episodeScripts: () => true })).open);
   writeFileSync(join(w.projData, "state", "doctor-state.json"), JSON.stringify({ lastAuditSha: null, cursor: 0 }));
-  check("doctor：lastAuditSha 为 null 首跑 ⇒ 失败开 open", evalLaneGate("script-doctor", w.io({ gitSha: () => "abc" })).open);
+  check("doctor：lastAuditSha 为 null 且已有正文的首跑 ⇒ 失败开 open",
+    evalLaneGate("script-doctor", w.io({ gitSha: () => "abc", episodeScripts: () => true })).open);
 
   // market：真实投喂文件 mtime × lastRun
   writeFileSync(join(w.projData, "state", "market-state.json"),

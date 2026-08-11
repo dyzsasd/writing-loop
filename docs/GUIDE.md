@@ -260,6 +260,9 @@ producing. This is your main control lever.
   directory). On its next run the agent distills your notes into its own lessons
   role file (`lessons/<role>.md`), changing its behavior durably.
 - **Evaluation reports**: under the script repo's `evaluation/`.
+- **System improvements**: framework, scheduler, and reusable-skill proposals live in
+  the workspace-level `/system` inbox (CLI: `writing-loop system proposal list`).
+  They never become tickets on a drama board; only story-product decisions are parked there.
 
 ---
 

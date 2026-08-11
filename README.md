@@ -96,6 +96,7 @@ writing-loop studio               # http://127.0.0.1:8791/
 writing-loop workspace list       # machine-local workspace registry
 writing-loop snapshot             # the same multi-project read model as JSON
 writing-loop project list         # includes paused dramas
+writing-loop system proposal list # workspace-level framework proposals; never drama tickets
 writing-loop production status    # local authoritative take/QC ledger; no remote calls
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
@@ -164,6 +165,11 @@ explicit `planId` confirmation, atomic reservation of the final directories,
 journaled creation, and write-after-read verification.
 The CLI commands above expose that same plan/create/verify boundary. Creation is
 limited to a brand-new repo; Studio additionally keeps it inside the workspace.
+
+Framework and scheduler improvements live in the workspace-level **System improvement
+inbox** at `/system`, not on any drama's creative board. `writing-loop system proposal
+list` exposes the same immutable `WLSYS-*` records from the terminal; project tickets are
+reserved for work whose destination is the story product itself.
 
 Inside a project, Studio is organized by creative responsibility: **Overview / Source
 analysis / Story architecture / Timeline / Story assets / Characters / Art assets / Episodes & quality**. The source

@@ -17,9 +17,10 @@ import { listProjectEvaluations, listProjectReports, readProjectResource, type P
 import { buildWorkspaceSnapshot, snapshotFingerprint, type WorkspaceSnapshot } from "./project-read-model.ts";
 import { buildStoryStudioReadModel, type StoryStudioReadModel } from "./story-design.ts";
 import { setProjectEnabled } from "./workspace-store.ts";
+import { listSystemProposals, type SystemProposalList } from "./system-inbox.ts";
 import {
   LIVE_SCRIPT, fleetPage, newProjectPage, notFoundPage, onboardingPlanPage, operationErrorPage, projectPage, projectStoryPage,
-  resourcePage, workspacePage, type FleetWorkspaceView, type StoryStudioSection,
+  resourcePage, systemInboxPage, workspacePage, type FleetWorkspaceView, type StoryStudioSection,
 } from "./studio-view.ts";
 import { findWorkspaceRoot, loadConfig, PROJECT_KEY_PATTERN, WsError } from "./workspace.ts";
 import {
@@ -47,6 +48,8 @@ export type StudioOptions = {
   productionControlProvider?: (root: string, workspaceId: string, project: string) => ProductionCoordinatorReadModel;
   /** Local-only creative projection; never reads raw source contents or invokes a model. */
   storyProvider?: (root: string, project: string) => StoryStudioReadModel;
+  /** Workspace-scoped framework maintenance projection; never reads a project ticket as one. */
+  systemProposalProvider?: (root: string) => SystemProposalList;
 };
 
 export type StudioWorkspaceEntry = {
@@ -368,7 +371,7 @@ function temporaryRedirect(res: ServerResponse, location: string): void {
 }
 
 function allowedMethods(pathname: string): string[] | null {
-  if (["/", "/api/health", "/api/snapshot", "/projects/new"].includes(pathname)
+  if (["/", "/api/health", "/api/snapshot", "/api/system/proposals", "/projects/new", "/system"].includes(pathname)
     || /^\/api\/projects\/[^/]+\/(?:activity|production|production-control|story|resources\/(?:ticket|document|episode|report|evaluation)\/[^/]+)$/.test(pathname)
     || /^\/p\/[^/]+(?:\/(?:source|story|timeline|assets|characters|art|quality)|\/(?:ticket|document|episode|report|evaluation)\/[^/]+)?$/.test(pathname)) return ["GET", "HEAD"];
   if (pathname === "/api/stream") return ["GET"];
@@ -397,6 +400,7 @@ export function createStudioServer(options: StudioOptions): Server {
   const storyNow = options.storyProvider ?? ((root: string, project: string): StoryStudioReadModel => {
     const ws = loadConfig(root); return buildStoryStudioReadModel(root, project, ws.config);
   });
+  const systemProposalNow = options.systemProposalProvider ?? listSystemProposals;
   const productionFor = (root: string, workspaceId: string, project: string): ProductionReadModel => {
     const value = productionNow(root, workspaceId, project);
     if (value.version !== 1 || value.workspaceId !== workspaceId || value.project !== project) {
@@ -443,6 +447,10 @@ export function createStudioServer(options: StudioOptions): Server {
     // move must still invalidate the browser view.
     const digest = createHash("sha256").update(snapshotFingerprint(snapshot))
       .update("\0root\0").update(row.root);
+    const systemInbox = systemProposalNow(row.root);
+    digest.update("\0system-proposals\0").update(JSON.stringify(systemInbox.proposals.map((proposal) => [
+      proposal.id, proposal.status, proposal.createdAt,
+    ])));
     for (const project of snapshot.projects) {
       const indexed = indexer.buildPage(row.id, project.key, { limit: 1 });
       digest.update("\0").update(project.key).update("\0").update(indexed.sseCursor);
@@ -674,6 +682,11 @@ export function createStudioServer(options: StudioOptions): Server {
         return;
       }
 
+      if ((method === "GET" || head) && routedPath === "/api/system/proposals") {
+        sendJson(res, 200, systemProposalNow(requestScope!.root), head);
+        return;
+      }
+
       const activityMatch = /^\/api\/projects\/([^/]+)\/activity$/.exec(routedPath);
       if ((method === "GET" || head) && activityMatch) {
         const key = decodeProject(activityMatch[1]);
@@ -781,7 +794,13 @@ export function createStudioServer(options: StudioOptions): Server {
           return;
         }
         const snapshot = snapshotNow(requestScope!.root);
-        sendHtml(res, 200, workspacePage(snapshot, requestScope!.base), head);
+        sendHtml(res, 200, workspacePage(snapshot, requestScope!.base, systemProposalNow(requestScope!.root)), head);
+        return;
+      }
+
+      if ((method === "GET" || head) && routedPath === "/system") {
+        const snapshot = snapshotNow(requestScope!.root);
+        sendHtml(res, 200, systemInboxPage(snapshot, systemProposalNow(requestScope!.root), requestScope!.base), head);
         return;
       }
 

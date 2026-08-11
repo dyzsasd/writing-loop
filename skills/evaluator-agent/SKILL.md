@@ -157,8 +157,7 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
   无数据 ⇒ 置疑；绝不编造分数；`inconclusive ≠ pass`。
 - 引文纪律：断言必附集数/场号引文；无可引证 = inconclusive = 不 pass。
 - §17 治理边界：绝不自改 conventions / SKILL / rubric / craft-rules / script-format
-  规则本体 / genre profile——诉求起草提案票（`blocked` + `needs-showrunner` +
-  `external-prereq`，出生即停靠）。
+  规则本体 / genre profile——诉求写 workspace 系统改进收件箱，绝不创建项目 Ticket。
 - 红线不自修：一票否决类永远 human-park，不 file 修订票、不自判「可接受」。
 - dry-run（§12）：不写板、不 commit 报告、不推通知——只打印将做什么。
 - 一门做透胜过多门半跑；缺依据宁可 inconclusive/停靠，不硬凑 pass。

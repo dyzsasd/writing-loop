@@ -26,14 +26,16 @@ description: >-
 ### Step 0 —— 廉价车道探针（lane 谓词本体；动机/判定语义/单向安全铁律见 §0 Step 0）
 
 **本 agent 的 lane 谓词 = SHA change-gate**：只读 config 定位本项目条目（§11）取
-`repoPath` → 读 `state/doctor-state.json.lastAuditSha` → 在剧本 repo 跑
+`repoPath` → 先有界枚举 `episodes/ep-*.md`；一个都没有则谓词为空 → 有正文才读
+`state/doctor-state.json.lastAuditSha` → 在剧本 repo 跑
 `git log -1 --format=%H -- episodes/` 取当前 SHA；两者相等 ⇒ 谓词为空。全程**不读
 conventions/craft-rules/lessons/其他 references**。逃逸口并入：**②孤儿**——
 `∃ In Progress` + doctor tier + assignee 陈旧（>60min，§7）（探针只 glob 本项目板
 `tickets/*.md` 解析 §18 稳定字段）；**③报告结算**——`reports/` 有未分发 `*.review.md`
 或到期 weekly/monthly 汇总 ⇒ 即使 SHA 未变也命中（§22 义务不落板）。（①不存在
 needs-doctor（§4 闭集）；④仅 showrunner。）失败开：任一读取失败/不确定（`lastAuditSha`
-为 null 首跑、git/state/config 读不到）⇒ 当作命中走全 boot。
+为 null 首跑、git/state/config/正文目录读不到）⇒ 当作命中走全 boot。注意 scaffold 的
+`episodes/.gitkeep` 不算正文，必须在调度器 spawn 前直接关门，不能先付模型 boot 再 no-op。
 
 谓词为空 ⇒ 打印一行「`episodes/` 自 `<sha>` 未动——探针 no-op」退出，不落标准 boot；
 命中 ⇒ 正常全 boot。`dry-run` 下照跑（只读）。
@@ -62,7 +64,8 @@ Sections: §0 §0a §2 §3 §4 §5 §5a §6 §7 §8 §10 §11 §12 §14 §15 §1
 ## 1. 按序做这些 Job
 
 ### Job 0 — change-gate 预检（没动过的树立即 no-op）
-取 `episodes/` 末次 commit SHA 与 `lastAuditSha` 比对：未变 ⇒ 本 fire no-op 一行
+先确认至少存在一个 `episodes/ep-*.md`；不存在 ⇒ 本 fire no-op 一行退出且不写状态。
+存在正文才取 `episodes/` 末次 commit SHA 与 `lastAuditSha` 比对：未变 ⇒ 本 fire no-op 一行
 退出（不写票/状态/daily，§22）；变了 ⇒ 继续。`episodes/` 空/无 commit 也视为 no-op
 （无正文可审），不是错误。
 > 诚实边界：高频出集时 `episodes/` 几乎每 fire 都动，change-gate 很少短路——那里真正
@@ -142,8 +145,8 @@ file）；查现实（确认问题在当前 HEAD 仍在）。
   自检清单/交付评论只用于定位，永不作为证据。
 - 待在自己车道（§21）：剧级叙事健康是你的；产品缺口/市场/板卫生/里程碑评估/单集
   验收都不是——越界发现写进报告提示对应角色。
-- 不自改治理文件（§17）：结构性诉求起草提案票（`blocked` + `needs-showrunner` +
-  `external-prereq`，出生即停靠）；产品文档也不由你改（经 §19/§21a 门禁流转）。
+- 不自改治理文件（§17）：结构性诉求写 workspace 系统改进收件箱，绝不创建项目 Ticket；
+  产品文档也不由你改（经 §19/§21a 门禁流转）。
 - §2 安全边界：每查询 项目 + `writing-loop` 双限定；一次一票；labels REPLACE（§10）
   重传全集。§16 内容红线：票里不放真人真名/隐私；正文混入真实人物身份 = 停下上报。
 - dry-run（§12）：不写板、不写 `doctor-state.json`、不写报告——只打印将 file 什么。

@@ -81,6 +81,7 @@ writing-loop studio               # http://127.0.0.1:8791/
 writing-loop workspace list       # 本机 workspace 索引
 writing-loop snapshot             # 输出与 UI 相同的多项目 JSON 投影
 writing-loop project list         # 包含已暂停剧本
+writing-loop system proposal list # workspace 级系统改进；绝不进入剧集看板
 writing-loop production status    # 本地权威 take/QC 账本；不会连接远端服务
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
@@ -114,6 +115,10 @@ Studio 只监听本机，以服务端渲染呈现作品书架、故事成熟度�
 才原子预留最终目录、在 journal 下创建并写后回读验证。上面的 CLI 暴露同一套
 plan/create/verify 边界。自动立项只
 创建全新 repo；Studio 还把目标限制在当前 workspace 内。
+
+框架、scheduler 与通用 skill 的改进进入 workspace 级 **系统改进收件箱** `/system`，
+不会混入任何剧集的创作看板。终端可用 `writing-loop system proposal list` 查看同一批
+不可变 `WLSYS-*` 记录；项目 Ticket 只承载目的地确实属于该故事产品的工作。
 
 项目内部现在按创作职责分为 **概览 / 原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量**。
 原著页只显示本地指纹、选中窗口和逐块 checkpoint，不回显正文；故事页读取 Story Designer

@@ -20,6 +20,8 @@ const showrunner = read("skills", "showrunner-agent", "SKILL.md");
 const evaluator = read("skills", "evaluator-agent", "SKILL.md");
 const episodeWriter = read("skills", "episode-writer-agent", "SKILL.md");
 const reviewer = read("skills", "reviewer-agent", "SKILL.md");
+const reflect = read("skills", "reflect-agent", "SKILL.md");
+const scriptDoctor = read("skills", "script-doctor-agent", "SKILL.md");
 
 for (const [index, doc] of harnessDocs.entries()) {
   ok(doc.includes("writing-loop run --cli claude")
@@ -107,6 +109,17 @@ const design = read("docs", "DESIGN.md");
 ok(design.includes("三 Harness 可移植性（Claude/Codex/OpenCode）")
   && !design.includes("§25 第二 CLI 可移植性"),
 "设计文档不再把 Harness 合同限制为第二 CLI");
+ok(reflect.includes("writing-loop system proposal file --input")
+  && reflect.includes("`[reflect-proposal]` 项目 Ticket")
+  && reflect.includes("**严禁**")
+  && scriptDoctor.includes("episodes/.gitkeep")
+  && scriptDoctor.includes("不能先付模型 boot 再 no-op"),
+"Reflect 把框架提案送往系统收件箱，Script Doctor 在无分集时模型启动前机械门控");
+ok(read("references", "conventions.md").includes(".writing-loop/system/proposals/WLSYS-")
+  && read("references", "config-schema.md").includes("writing-loop system proposal list")
+  && read("hub", "README.md").includes("/system")
+  && guides.every((guide) => guide.includes("writing-loop system proposal list")),
+"规范、schema、Studio 与三语指南固定 workspace 系统收件箱，不把机制改进伪装为剧集 Ticket");
 
 console.log(fails === 0 ? "\nHARNESS_CONTRACT_DOCS_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

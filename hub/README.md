@@ -121,6 +121,7 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 | `story status --project K [--json]` | inspect the strict story companion, derived assets and shared Studio quality model; read-only |
 | `story validate --project K [--stage skeleton\|beats\|full] [--json]` | run deterministic story gates; scheduler agents call this automatically |
 | `story context --project K --ticket ID --agent A [--max-bytes N] [--json]` | build a deterministic ticket/agent/episode-scoped Context Pack from structured assets; never reads raw novel text |
+| `system proposal list\|show\|file\|migrate-ticket …` | maintain the immutable workspace-level system-improvement inbox; framework proposals never enter a drama board |
 | `production status [--project K] [--json]` | inspect the scoped, durable render/take/QC ledger, including paused projects; never contacts a backend |
 | `production enqueue --plan --project K --input FILE [--json]` | validate an immutable production intent and return a deterministic zero-write/zero-network plan |
 | `production enqueue --confirm PLAN_ID --project K --input FILE [--json]` | persist that exact intent/task/dispatch request; endpoint/profile/token fields are rejected and no provider is contacted |
@@ -188,6 +189,10 @@ either one workspace or the fleet and aggregate stable snapshot + index revision
 `Last-Event-ID` resumes across Studio restarts without replaying an unchanged cursor, while
 foreign or malformed cursors are rejected. Unknown token usage or cost remains explicitly
 unknown/not recorded.
+
+The workspace page also exposes a separate `/system` improvement inbox backed by immutable
+`WLSYS-*` proposal records. It is deliberately outside every project board: framework,
+scheduler, and cross-project skill work cannot inherit creative labels or block a drama.
 
 The project workbench has dedicated overview, source, story, dual-order timeline, typed story-asset, character,
 art and quality surfaces. Source pages expose fingerprints/checkpoints but never raw novel

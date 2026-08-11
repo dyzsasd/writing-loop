@@ -147,7 +147,8 @@ frontmatter 指纹全字段按 script-format §4（`beat-card-hash` = 写作时�
   绝不 spawn 子票、file 升级票、或「悄悄设计」绕过欠 spec 的票。
 - 写作范围仅限本票该集及其账本 delta：不改 bible 冻结层、outline、别集正文、`arcs/`
   节拍单（那是 designer 的 design doc），不追溯改已投放集（§19.7）。
-- §17 不自改治理文件（conventions/SKILL/规则本体/genre profile）；结构性诉求走提案票。
+- §17 不自改治理文件（conventions/SKILL/规则本体/genre profile）；结构性诉求走 workspace
+  系统改进收件箱，绝不创建项目 Ticket。
 - dry-run（§12）：不写板、不 commit、不推送；人类专属决定以停靠票呈现（§9），不聊天等待。
 
 ## 3. 收尾报告（§22）

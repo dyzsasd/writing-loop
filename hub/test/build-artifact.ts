@@ -62,6 +62,8 @@ try {
   ok(existsSync(join(distDir, "story.js")) && existsSync(join(distDir, "story-design.js"))
     && existsSync(join(distDir, "story-assets.js")),
   "dist emit story quality CLI / strict companion + asset graph/context resolver");
+  ok(existsSync(join(distDir, "system.js")) && existsSync(join(distDir, "system-inbox.js")),
+  "dist emit workspace-level system proposal CLI / immutable inbox");
   ok(existsSync(join(distDir, "production-intent.js"))
     && existsSync(join(distDir, "production-enqueue.js"))
     && existsSync(join(distDir, "production-recovery.js"))
@@ -112,6 +114,7 @@ try {
     && packed.has("dist/workspace-registry-cli.js") && packed.has("dist/studio-view.js")
     && packed.has("dist/source.js") && packed.has("dist/source-intake.js")
     && packed.has("dist/story.js") && packed.has("dist/story-design.js") && packed.has("dist/story-assets.js")
+    && packed.has("dist/system.js") && packed.has("dist/system-inbox.js")
     && packed.has("dist/production.js") && packed.has("dist/production-domain.js")
     && packed.has("dist/production-store.js") && packed.has("dist/production-read-model.js")
     && packed.has("dist/production-adapter.js")
@@ -155,6 +158,7 @@ try {
     && help.out.includes("story status --project K [--json]")
     && help.out.includes("story validate --project K [--stage skeleton|beats|full]")
     && help.out.includes("story context --project K --ticket ID --agent A")
+    && help.out.includes("system proposal list [--json]")
     && help.out.includes("production status [--project K] [--json]")
     && help.out.includes("production enqueue --plan --project K --input FILE")
     && help.out.includes("--confirm PLAN_ID")

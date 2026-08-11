@@ -758,14 +758,18 @@ export function laneMarketWatch(nowMs: number, lastRunMs: number | null, dataNew
   return hits;
 }
 
-// script-doctor（SKILL §0 SHA change-gate）：episodes/ 末次 commit SHA ≠ doctor-state
-// lastAuditSha。失败开（SKILL 逐字）：state 缺失/字段 null 首跑/git 读不到 ⇒ 一律命中。
+// script-doctor（SKILL §0 SHA change-gate）：没有 ep-*.md ⇒ 可证明无正文，直接关门；否则
+// episodes/ 末次 commit SHA ≠ doctor-state lastAuditSha。目录/SHA 不可判时仍失败开。
 // ∪ Ⅱ孤儿（In Progress+script-doctor——observe-and-file 角色常态不认领，空集无害）。
-export function laneScriptDoctor(tickets: LaneTicket[], nowMs: number, curSha: string | null, lastSha: string | null): string[] {
+export function laneScriptDoctor(tickets: LaneTicket[], nowMs: number, curSha: string | null, lastSha: string | null,
+  hasEpisodes: boolean | null = true): string[] {
   const hits: string[] = [];
-  if (lastSha === null) hits.push("doctor-state 缺失/lastAuditSha 为 null（首跑）——失败开");
-  else if (curSha === null) hits.push("episodes/ HEAD 读不到——失败开");
-  else if (!shaEq(curSha, lastSha)) hits.push("episodes/ SHA 变化（change-gate 命中）");
+  if (hasEpisodes === null) hits.push("episodes/ 正文目录不可判——失败开");
+  else if (hasEpisodes) {
+    if (lastSha === null) hits.push("doctor-state 缺失/lastAuditSha 为 null（首跑）——失败开");
+    else if (curSha === null) hits.push("episodes/ HEAD 读不到——失败开");
+    else if (!shaEq(curSha, lastSha)) hits.push("episodes/ SHA 变化（change-gate 命中）");
+  }
   const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("script-doctor") && orphaned(t, nowMs));
   if (orphan) hits.push(fmtHit("孤儿 In Progress（§7 认领陈旧）", orphan));
   return hits;
@@ -889,6 +893,18 @@ export function gitLastSha(repo: string, ...pathspecs: string[]): string | null 
   } catch { return null; }
 }
 
+// A scaffold commit commonly touches episodes/.gitkeep, so a non-empty path SHA does not prove
+// there is a script to audit. Directory unreadable/symlink/edge-shape => null (fail open).
+export function hasEpisodeScripts(repo: string): boolean | null {
+  const dir = join(repo, "episodes");
+  try {
+    const info = lstatSync(dir);
+    if (!info.isDirectory() || info.isSymbolicLink()) return null;
+    return readdirSync(dir, { withFileTypes: true }).some((entry) =>
+      entry.isFile() && /^ep-(?:00[1-9]|0[1-9]\d|[1-9]\d{2,5})\.md$/.test(entry.name));
+  } catch { return null; }
+}
+
 // reviewer Job C 现行判据本体（gateNote 现场版）：`git diff --quiet <base>..HEAD -- <paths>`。
 // exit 1 ⇒ true（有改动，开门）；exit 0 ⇒ false（可关）；base 无效/非 git 仓库/git 失败/
 // 超时 ⇒ null（不可判，保守开）。两 commit 形只比已提交树——与 agent 侧 state 备忘一致。
@@ -934,6 +950,7 @@ export type GateIo = {
   sweepIntervalMs?: number | null; // sweep 配置节律（cadence 枝取 min(此值, 30min)；缺省按 30min）
   showrunnerBaseline?: { board: string; northStar: string } | null;
   gitSha?: (repo: string, ...pathspecs: string[]) => string | null;   // 测试接缝
+  episodeScripts?: (repo: string) => boolean | null; // 无正文可证实时 doctor 可在 spawn 前关门
   gitDiff?: (repo: string, baseSha: string, pathspecs: readonly string[]) => boolean | null; // 测试接缝
 };
 
@@ -1003,7 +1020,8 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
     }
     case "script-doctor": {
       const lastSha = stateStr(readStateJson(statePath("doctor-state.json")), "lastAuditSha");
-      reasons.push(...laneScriptDoctor(snap.tickets, nowMs, git(io.repoPath, "episodes/"), lastSha));
+      const scripts = (io.episodeScripts ?? hasEpisodeScripts)(io.repoPath);
+      reasons.push(...laneScriptDoctor(snap.tickets, nowMs, git(io.repoPath, "episodes/"), lastSha, scripts));
       break;
     }
     case "reflect": {

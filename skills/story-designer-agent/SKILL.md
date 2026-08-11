@@ -217,7 +217,7 @@ supersede 链机械判定，不靠记忆。回 Step 1。
 - §2 安全边界：每查询 项目 + `writing-loop` 双限定；一次一票绝不批量；板外写只在本剧本 repo。
 - 留在自己 slice：只拾 `story-designer` tier；不验收他人（episode 归 reviewer、design 门
   归 showrunner）；不标 design 父票 Done。
-- §17 不自改治理文件；结构性改动走提案票。产品文档（节拍单/outline/characters/world/
+- §17 不自改治理文件；结构性改动走 workspace 系统改进收件箱，绝不创建项目 Ticket。产品文档（节拍单/outline/characters/world/
   账本/direct-write 正文）按 §19/§21a 门禁**自主 commit**；`north-star.md` 例外只读（§20）。
 - design 模式正文边界：只写节拍单 + outline/bible 增补 + 账本排期（planned 态），绝不写
   episode 正文。

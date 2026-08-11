@@ -196,6 +196,9 @@ baseUrl、authTokenEnv、models——见 references/config-schema.md），跑一
 - **门后等待**：一卡门后系统停下等你决策，不会自行续产（见第 4 步）。
 - **给某个 agent 反馈**：对它的某份报告写一个 `<报告名>.review.md` **兄弟文件**（与被点评的报告同在 `~/dramas/.writing-loop/my-drama/reports/` 目录）。该 agent 下次运行会把你的点评蒸馏进自己的 lessons 角色文件（`lessons/<角色>.md`），长期改变行为。
 - **评估报告**：在剧本 repo 的 `evaluation/` 里。
+- **系统改进**：框架、scheduler 与通用 skill 的提案进入 workspace 级 `/system`
+  收件箱（CLI：`writing-loop system proposal list`），绝不变成某部剧的项目 Ticket；
+  只有目的地属于故事产品、确实需要人工创作决策的事项才停靠在剧集看板。
 
 ---
 

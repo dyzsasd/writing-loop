@@ -269,6 +269,9 @@ réelles, ou continuer à produire. C'est votre principal levier de contrôle.
   vos remarques dans son propre fichier de lessons (`lessons/<rôle>.md`) et change
   durablement de comportement.
 - **Rapports d'évaluation** : sous `evaluation/` du repo de scénario.
+- **Améliorations système** : les propositions concernant le framework, le scheduler
+  ou les skills réutilisables vont dans la boîte workspace `/system` (CLI :
+  `writing-loop system proposal list`). Elles ne deviennent jamais des tickets d'un drame.
 
 ---
 

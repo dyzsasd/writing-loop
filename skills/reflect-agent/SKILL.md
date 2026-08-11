@@ -23,7 +23,7 @@ per-operator 的 `lessons/` 目录（§14：`shared.md` + 九个角色文件—�
 > 会复利放大错误。你**可以**自主改 `lessons/` 各文件（受作用域限定、可逆、
 > per-operator，§14）；你**绝不可以**自动改写 `conventions.md`、任何 `SKILL.md`、`craft-rules.md`
 > / `script-format.md` 规则本体、或 genre profile 参数表——结构性改动一律**在报告里
-> 起草为提案**（可选落成提案票，Job 3），永不自动应用。这是 decide-and-act（§12a）
+> 起草为提案**（可选落入 workspace 系统改进收件箱，Job 3），永不自动应用。这是 decide-and-act（§12a）
 > 唯一的原则性例外：对核心指令集的自我修改是**呈现，不是执行**。
 
 ## 0. boot
@@ -118,12 +118,14 @@ direct-commit 单 repo）有无新 commit；有无工单被 created/closed/block
 ### Job 3 — 起草结构性提案（绝不自动应用）
 证据指向 lessons 承载不了的 fix（SKILL/conventions/工艺规则本体/genre profile/
 config schema/增删 agent）⇒ 报告里起草：复现证据、精确改动（文件+分节）、预期效果。
-**不改那些文件**。可选 file **一张**交接票，防火墙机械化：`Improvement` +
-owner=`showrunner` + `writing-loop` + **`blocked` + `needs-showrunner` +
-`external-prereq`**（§17 提案票三件套），priority Low，标题
-`[reflect-proposal] <一句话>`，**首条评论首行** `Bail-shape: external-prereq`
-（§4/§9 机读行）。`blocked` 使它不进任何拾取序（§5/§9）；`external-prereq` 告诉
-showrunner 替你停靠给操作者——只有人类该 action 它。这是你唯一被允许的产品侧写。
+**不改那些文件**。可选 file **一条** workspace 级系统建议：按 §17 exact JSON 写临时
+输入，调用 `writing-loop system proposal file --input <proposal.json>`，记录返回的
+`WLSYS-*` ID 后删除临时输入。`source.project` = 当前项目、`source.agent` = `reflect`、
+`source.projectTicket` = `null`；evidence 必须引用本窗票 ID/commit/fire，proposedChange
+精确指向文件+分节。**严禁**创建 `[reflect-proposal]` 项目 Ticket，严禁把框架事项打成
+`blocked`/`needs-showrunner`/`external-prereq`：那三者属于剧集自身的人类停靠，系统建议
+由 Studio `/system` 和 `writing-loop system proposal list` 进入维护者视野。这是你唯一
+被允许的系统侧写。
 
 ### Job 4 — retrospective 摘要（仅报告）
 一屏纯信号：本窗产出（按 Type 计数、成集/修订、过了哪些门）；吞吐（Job 1 指标）；
@@ -138,7 +140,7 @@ no-op churn）；质量趋势（evaluator/doctor/punch-up 指标）；本 fire �
 ## 2. Guardrails（护栏）
 - 只观察 + 策展，绝不生产：绝不 file 产品票、写正文/账本/大纲/节拍单、commit 剧本
   repo、验收、改标签或重排工单；唯一写 = `lessons/` 目录（含 §14 一次性迁移改名）+
-  可选提案票 + `reports/` 的
+  可选 workspace 系统建议 + `reports/` 的
   §22 结算与保鲜清理。你比 §21 观察型三角色还克制——连产品 Bug 都不 file。
 - 硬安全边界不可违背（§17）：结构性改动永远提案、永不应用。
 - 默认保守：lesson 需复现证据（≥2 次）+ 内联引用；一次性现象是报告不是编码；添加前

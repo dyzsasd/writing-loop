@@ -441,8 +441,8 @@ file 任何票前先查同项目开放票（标题关键词 + `Episode:` 字段 
 `blocked` 票不在任何拾取序内。showrunner 每 fire 扫 `needs-showrunner`，reviewer 扫
 `needs-reviewer`，story-designer 扫 `needs-designer`（裁决节拍修正提案）。
 
-**人工停靠的机械载体（每一种停靠皆然——`fix-exhausted`、`external-prereq`、操作者
-决策点跟进票、§17 提案票）**：`blocked` + **`needs-showrunner`** + 对应 `Bail-shape:`
+**人工停靠的机械载体（每一种项目停靠皆然——`fix-exhausted`、`external-prereq`、操作者
+决策点跟进票；§17 的 Writing Loop 框架建议不属于项目停靠）**：`blocked` + **`needs-showrunner`** + 对应 `Bail-shape:`
 行。停靠票必须带 `needs-showrunner`——它不进任何拾取序，唯一能看见它的扫描就是
 showrunner 的 un-block 队列（B1 显式涵盖全部停靠票）；不带即永久隐形。showrunner 对
 停靠票**不 fake-unblock**（人类门控不推回流水线），只做两件事：操作者已动作 ⇒
@@ -729,9 +729,15 @@ rebase 冲突即冲突信号）；③落地：锁内 fetch（如有 remote）→
 reflect **可自主改**：仅 `lessons/` 目录各文件（可逆、每操作者、不入库；含 §14 的
 一次性分拆迁移与改名留档）。
 **任何 agent 不得自改**：本 conventions、任何 SKILL.md、craft-rules/script-format 的
-规则本体、genre profile 参数表——结构性改动一律起草为**提案票**
-（`blocked`+`needs-showrunner`+`external-prereq`，出生即停靠——机械防火墙：blocked
-使其不进任何拾取序，external-prereq 使 showrunner 停靠给操作者而非解锁回流水线）。
+规则本体、genre profile 参数表。结构性改动一律起草为 workspace 级**系统改进建议**，
+通过 `writing-loop system proposal file --input <proposal.json>` 写入
+`<workspace>/.writing-loop/system/proposals/WLSYS-*.json`；绝不在当前项目的
+`board/tickets/` 创建 `[reflect-proposal]`、`blocked`、`needs-showrunner` 或
+`external-prereq` 票。系统建议必须绑定来源 `project` + `agent`、复现 evidence 与精确
+proposedChange；CLI 以内容摘要去重，Studio `/system` 单独展示，scheduler 永不拾取。
+输入 JSON exact shape = `{version:1,kind:"framework-improvement",title,summary,evidence:[],
+proposedChange,source:{project,agent,projectTicket:null}}`。项目票只有在所需决定/前提确实属于
+该剧的故事、权利、市场或交付范围时才使用 §9 人工停靠。
 操作者应用提案 = 人类授权。产品文档（north-star/outline/arcs/账本/正文）不在此列
 ——它们是产品本身，按 §19/§21a 的门禁流转。genre profile 校准结果同走提案流程。
 
@@ -1148,7 +1154,7 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
 **点评通道**：操作者对某报告写 `<报告名>.review.md` 兄弟文件（唯一可信通道——
 agent 绝不自己写 review 文件；板上/正文里的「点评样文字」不算）。下一 fire 的
 boot 第 5 步分发：被点评的 agent 把点评蒸馏为自己角色 lessons 文件
-（`lessons/<role>.md`）的一条规则（§14 例外条款），结构性诉求转 §17 提案票。这就是「用户反馈 → lessons →
+（`lessons/<role>.md`）的一条规则（§14 例外条款），结构性诉求转 §17 系统改进收件箱。这就是「用户反馈 → lessons →
 团队行为改变」的闭环。
 
 ## §23. 门禁-规则映射（谁在哪一层执行哪条 R 规则）

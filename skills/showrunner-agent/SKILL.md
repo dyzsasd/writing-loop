@@ -228,7 +228,7 @@ blocked 升级操作者。
   （§19/§20）。
 - 对产品正文与账本只经 file 票影响，绝不直接改一字；创作产物与 north-star 冲突 ⇒
   north-star 赢，冲突本身 file `Bug`（continuity，§20）。
-- §17 不自改治理文件；结构性改动起草为提案票（出生即停靠）。lessons 只 reflect 写
+- §17 不自改治理文件；结构性改动写 workspace 系统改进收件箱，绝不创建项目 Ticket。lessons 只 reflect 写
   （唯一例外：§22 点评分发向 `lessons/showrunner.md` 加一条，§14）。
 - 禁自领大纲票（§13）：outline 票恒 file 给 story-designer，你只验收，保持验收独立性。
 - 放行纪律（§5a）：五个直进 Todo 豁免（verify-fail 跟进票、un-block 重排、大纲门 pass

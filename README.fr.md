@@ -102,6 +102,7 @@ writing-loop studio               # http://127.0.0.1:8791/
 writing-loop workspace list       # registre local des workspaces
 writing-loop snapshot             # projection JSON multi-projets
 writing-loop project list         # inclut les projets en pause
+writing-loop system proposal list # améliorations système du workspace, jamais tickets narratifs
 writing-loop production status    # registre local take/QC ; aucun appel distant
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
@@ -141,6 +142,11 @@ l'opérateur, puis délèguent au même cœur d'accueil : plan déterministe **s
 finaux, création journalisée et vérification après relecture. Les commandes ci-dessus exposent la même frontière
 plan/create/verify. La création exige un nouveau repo ; Studio le limite en plus
 au workspace courant.
+
+Les améliorations du framework, du scheduler et des skills communs vont dans la
+**boîte système** du workspace à `/system`, jamais dans le board créatif d'un drame.
+`writing-loop system proposal list` expose les mêmes enregistrements immuables `WLSYS-*` ;
+un ticket projet reste réservé à un travail dont la destination est le produit narratif.
 
 Dans un projet, Studio suit les responsabilités créatives : **Vue d'ensemble / Analyse de
 la source / Architecture / Timeline / Assets narratifs / Personnages / Assets visuels / Épisodes et qualité**. La vue source

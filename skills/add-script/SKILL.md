@@ -130,8 +130,8 @@ source-analysis 票 owner 均为 showrunner、执行层为 story-designer；本 
   source 元数据、模板骨架与 config 制作上限，绝不写分集正文或擅造剧情/账本事实（§15/§21a）。
   未明确同意原著分块由所选 Harness 处理时，改编 plan 必须零写拒绝。
 - §17 不自改治理文件：绝不改 conventions/SKILL/规则本体/**genre profile 参数表**；
-  UNCALIBRATED 只警告不定参（校准走 §17 提案票：`blocked` + `needs-showrunner` +
-  `external-prereq`）。north-star/outline 是产品文档（只建空骨架）；立项后维护权归
+  UNCALIBRATED 只警告不定参（校准走 §17 workspace 系统改进收件箱，绝不创建项目
+  Ticket）。north-star/outline 是产品文档（只建空骨架）；立项后维护权归
   showrunner（§20），本 skill 不再触碰。
 - audience 硬门 / 合规预筛：缺性别或年龄 ⇒ 回问不放行；合规结论必须落 Non-goals
   （§16）；一票否决级题材如实告知。

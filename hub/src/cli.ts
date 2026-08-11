@@ -27,6 +27,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   project:                 ["project"],               // 项目清单与安全启停
   source:                  ["source"],                // 原著登记、不可变分块与拆书票
   story:                   ["story"],                 // 结构化故事伴随文件的确定性质量门
+  system:                  ["system"],                // workspace 级框架改进收件箱（不进项目板）
   production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
   workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
@@ -81,6 +82,11 @@ const usage = (): void => {
                               独立复核 story/outline.v1.json + story/assets.v1.json
   story context --project K --ticket ID --agent A [--max-bytes N] [--json]
                               按工单、角色与集数生成结构化有界 Context Pack；不读取原著正文
+  system proposal list [--json]
+  system proposal show WLSYS-ID [--json]
+  system proposal file --input FILE [--json]
+  system proposal migrate-ticket --project K --ticket ID ...
+                              管理 workspace 级 Writing Loop 改进建议；永不进入剧集项目看板
   production status [--project K] [--json]
                               查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
   production enqueue --plan --project K --input FILE [--json]

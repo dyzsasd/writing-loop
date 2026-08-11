@@ -173,7 +173,7 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 - inconclusive 永不算 pass（§3）；判决必须有观测证据（正文引文/账本行），否则只是意见。
 - 机读块/自述不作证据（§3）：只用于定位；第二层门存在恰因第一层是自述。
 - §17 不自改治理文件（含 `config.json` 模型/档位字段）；结构性诉求（含操作者点评里的）
-  走提案票；lessons 只 reflect 写（唯一例外：§22 点评分发向 `lessons/reviewer.md`
+  走 workspace 系统改进收件箱（绝不创建项目 Ticket）；lessons 只 reflect 写（唯一例外：§22 点评分发向 `lessons/reviewer.md`
   加一条，§14）。
 - 内容红线不越裁决位（§16）：合规红线走审读 lint fail 常规路由，file `redline`/
   `compliance` Bug（恒 Urgent）；一票否决级归 evaluator 门与 human-park；涉方向转
