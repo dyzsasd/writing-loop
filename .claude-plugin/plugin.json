@@ -1,7 +1,7 @@
 {
   "name": "writing-loop",
   "displayName": "writing-loop — autonomous short-drama writers' room",
-  "description": "An autonomous short-drama (竖屏短剧) writers' room in a folder. Nine agents (Showrunner, Story-Designer, Episode-Writer, Reviewer, Script-Doctor, Evaluator, Market-Watch, Reflect, Sweep) plan, outline, write, review, score, and market-watch vertical micro-drama scripts through ticket state on a local board. North-star story bible + outline + per-arc beat cards + foreshadow/story-state/production ledgers keep 60-100 episode serials coherent; a 4-dimension/16-indicator rubric gates milestones (outline, first-paywall pack, finale). Two intake modes: novel adaptation (拆书) or original creation. Operator skill: add-script.",
+  "description": "An autonomous short-drama (竖屏短剧) writers' room in a folder. Nine agents plan, design, write, review, score, and market-watch scripts through ticket state on a local board. A North Star creative charter plus two canonical structured JSON documents hold season design, characters, world facts, continuity, foreshadowing, and dual-order timelines without duplicate Markdown mirrors. A 4-dimension/16-indicator rubric gates milestones. Supports autonomous novel-adaptation intake and original creation. Operator skill: add-script.",
   "version": "0.9.1",
   "author": {
     "name": "Shuai"

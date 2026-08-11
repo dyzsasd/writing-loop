@@ -22,6 +22,11 @@ const episodeWriter = read("skills", "episode-writer-agent", "SKILL.md");
 const reviewer = read("skills", "reviewer-agent", "SKILL.md");
 const reflect = read("skills", "reflect-agent", "SKILL.md");
 const scriptDoctor = read("skills", "script-doctor-agent", "SKILL.md");
+const pluginDescriptions = [
+  read(".claude-plugin", "plugin.json"),
+  read(".claude-plugin", "marketplace.json"),
+  read(".codex-plugin", "plugin.json"),
+];
 
 for (const [index, doc] of harnessDocs.entries()) {
   ok(doc.includes("writing-loop run --cli claude")
@@ -52,6 +57,11 @@ ok(read("README.md").includes("docs/HARNESS.md")
   && read("README.zh-CN.md").includes("docs/HARNESS.zh-CN.md")
   && read("README.fr.md").includes("docs/HARNESS.fr.md"),
 "三语根 README 均链接对应 Harness 合同");
+ok(pluginDescriptions.every((manifest) => manifest.includes("structured")
+  && !manifest.includes("foreshadow/story-state/production ledgers")
+  && !manifest.includes("master outline")
+  && !manifest.includes("per-arc beat cards")),
+"Claude/Codex 插件元数据不再宣传已删除的 Markdown 剧情镜像");
 ok(read("hub", "README.md").includes("github.com/dyzsasd/writing-loop/blob/main/docs/HARNESS.md"),
 "npm README 提供安装包外 canonical Harness 文档链接");
 ok(read("references", "config-schema.md").includes("Harness 契约只有 `claude | codex | opencode` 三个一级 ID")

@@ -3,13 +3,13 @@
   "owner": {
     "name": "Shuai"
   },
-  "description": "Autonomous short-drama writers' room: Showrunner/Story-Designer/Episode-Writer/Reviewer plus Script-Doctor, Evaluator, Market-Watch, Reflect and Sweep — nine agents coordinated through ticket state on a local board, with a story bible + beat-card + ledger document system built to keep 60-100 episode vertical micro-dramas coherent.",
+  "description": "Autonomous short-drama writers' room: nine agents coordinated through ticket state, with a North Star charter and canonical structured story design/assets that keep 60-100 episode vertical micro-dramas coherent without duplicate Markdown mirrors.",
   "plugins": [
     {
       "name": "writing-loop",
       "source": "./",
       "version": "0.9.1",
-      "description": "Runs a script-writing loop coordinated through ticket state on a local file board. Each project is one drama: north-star bible, master outline, per-arc beat cards, foreshadow + story-state ledgers, episode scripts, and rubric-scored milestone evaluations (outline gate, first-paywall pack, finale). Supports novel-adaptation and original-creation intake."
+      "description": "Runs a script-writing loop coordinated through ticket state on a local file board. Each project keeps its creative charter in the North Star and all reusable season, character, world, continuity, foreshadowing, and timeline facts in two canonical structured JSON documents. Supports autonomous novel-adaptation intake and original creation."
     }
   ]
 }
