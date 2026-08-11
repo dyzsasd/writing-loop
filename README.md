@@ -166,10 +166,12 @@ The CLI commands above expose that same plan/create/verify boundary. Creation is
 limited to a brand-new repo; Studio additionally keeps it inside the workspace.
 
 Inside a project, Studio is organized by creative responsibility: **Overview / Source
-analysis / Story architecture / Characters / Art assets / Episodes & quality**. The source
+analysis / Story architecture / Timeline / Story assets / Characters / Art assets / Episodes & quality**. The source
 workbench shows only local fingerprints, the selected season window, and chunk checkpoints—
-never raw novel text. Story Designer owns the strict `story/outline.v1.json` companion;
-characters and scenes are deterministically derived from it. The quality page keeps pass,
+never raw novel text. Story Designer owns `story/outline.v1.json` for season structure and
+`story/assets.v1.json` for typed characters, world facts, locations, objects, foreshadowing,
+continuity, and chronology-versus-reveal timeline events. Harnesses receive deterministic,
+ticket-scoped Context Packs rather than scanning whole bibles and ledgers. The quality page keeps pass,
 fail, skipped, and not-applicable distinct and preserves Showrunner's editorial veto even
 when every machine gate is green. Studio still cannot edit story assets or start H3/GPU.
 Before config makes the project visible, a durable per-project journal lets the

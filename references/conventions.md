@@ -350,7 +350,7 @@ arc-02 节拍单 ep-012。承接 ep-011 末帧。
 reviewer 按 §21a 审读门清单。
 ```
 
-**Context-pack（票载上下文包——2026-07-19 操作者裁定，三类创作票必备节）**：
+**Context-pack（票载预览 + 确定性结构化包）**：
 episode / arc-design / outline 三类创作票的描述必含 `## Context-pack` 节，由**建票方**
 （spawn 子票的 story-designer §21a-design.3、file 设计/大纲票的 showrunner/add-script）
 必填三件：①**需读清单**（≤8 个指针）——本票所需 文件+行区间/节锚点；②**关键事实
@@ -364,6 +364,11 @@ notes / doctor 审计条目 / evaluator 红线），`Episode: N` 必带，AC 写
 +「§19 涟漪分析完成」。
 
 **arc 设计票（Feature + arc-design + story-designer，owner=showrunner）**：本票建票方
+这段 Markdown 只供人读。实际 Harness context 必须由 `writing-loop story context --project
+<project> --ticket <ID> --agent <role> --json` 从 `story/assets.v1.json` 确定性生成：ticket 自动
+绑定 episode/agent，默认 64 KiB，返回选择原因、omitted、字节数与 digest。resolver fail 时禁止
+回退成扫整份 bible/ledger；pack 是定位器而非正文/账本证据，也绝不含原著全文。
+
 （showrunner）同样必填 `## Context-pack`；AC =
 节拍单完整（每集全字段）+ 候选竞争弃案记录 + 伏笔排期入账本 + 预算增量合规 +
 子票已 spawn（Backlog 暂存，每张含 Context-pack，§21a-design.3）。

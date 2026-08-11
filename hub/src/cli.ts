@@ -78,7 +78,9 @@ const usage = (): void => {
   story status --project K [--json]
                               查看结构化故事、派生资产与质量门（只读；通常由 Studio 使用）
   story validate --project K [--stage skeleton|beats|full] [--json]
-                              独立复核 story/outline.v1.json；scheduler agents 自动调用
+                              独立复核 story/outline.v1.json + story/assets.v1.json
+  story context --project K --ticket ID --agent A [--max-bytes N] [--json]
+                              按工单、角色与集数生成结构化有界 Context Pack；不读取原著正文
   production status [--project K] [--json]
                               查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
   production enqueue --plan --project K --input FILE [--json]

@@ -59,8 +59,9 @@ try {
   "dist emit production CLI / authoritative store / read model / remote adapter");
   ok(existsSync(join(distDir, "source.js")) && existsSync(join(distDir, "source-intake.js")),
   "dist emit source intake CLI / immutable chunking core");
-  ok(existsSync(join(distDir, "story.js")) && existsSync(join(distDir, "story-design.js")),
-  "dist emit story quality CLI / strict companion read model");
+  ok(existsSync(join(distDir, "story.js")) && existsSync(join(distDir, "story-design.js"))
+    && existsSync(join(distDir, "story-assets.js")),
+  "dist emit story quality CLI / strict companion + asset graph/context resolver");
   ok(existsSync(join(distDir, "production-intent.js"))
     && existsSync(join(distDir, "production-enqueue.js"))
     && existsSync(join(distDir, "production-recovery.js"))
@@ -110,7 +111,7 @@ try {
     && packed.has("dist/project-detail.js") && packed.has("dist/workspace-registry.js")
     && packed.has("dist/workspace-registry-cli.js") && packed.has("dist/studio-view.js")
     && packed.has("dist/source.js") && packed.has("dist/source-intake.js")
-    && packed.has("dist/story.js") && packed.has("dist/story-design.js")
+    && packed.has("dist/story.js") && packed.has("dist/story-design.js") && packed.has("dist/story-assets.js")
     && packed.has("dist/production.js") && packed.has("dist/production-domain.js")
     && packed.has("dist/production-store.js") && packed.has("dist/production-read-model.js")
     && packed.has("dist/production-adapter.js")
@@ -135,7 +136,7 @@ try {
     && packed.has("examples/production/representative-h3/workflows/h3-fl2va-portrait.json")
     && packed.has(packagedH3SmokePath)
     && packed.has("skills/showrunner-agent/SKILL.md")
-    && packed.has("references/story-design-schema.md")
+    && packed.has("references/story-design-schema.md") && packed.has("references/story-assets-schema.md")
     && packed.has("scripts/board-lock.sh")
     && packed.has(".claude-plugin/plugin.json")
     && ![...packed].some((p) => p.endsWith("wl-run.py")),
@@ -153,6 +154,7 @@ try {
     && help.out.includes("source status --project K [--json]")
     && help.out.includes("story status --project K [--json]")
     && help.out.includes("story validate --project K [--stage skeleton|beats|full]")
+    && help.out.includes("story context --project K --ticket ID --agent A")
     && help.out.includes("production status [--project K] [--json]")
     && help.out.includes("production enqueue --plan --project K --input FILE")
     && help.out.includes("--confirm PLAN_ID")

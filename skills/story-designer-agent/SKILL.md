@@ -151,11 +151,15 @@ writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其�
    门；stage+commit 包在 repo 写锁内 §15.6）——绝不 commit 正文。
 
 **结构化伴随文件（所有 design/outline 都必须同步）**：人读的 `outline.md` / arc beat card 是
-创作正文；同时维护 `story/outline.v1.json`，严格契约见
-`references/story-design-schema.md`。它不是第二份模型散文，而是同一设计的机读投影：改编
-保留/删除/合并/风险及 source refs、角色 tier、场景与复用、季级 beats、逐集 hook/agency/
-资产引用。人物与场景清单只能由该文件派生，不另写一份会漂移的“资产报告”。
+创作正文；同时维护 `story/outline.v1.json` 与 `story/assets.v1.json`，严格契约见
+`references/story-design-schema.md` 和 `references/story-assets-schema.md`。前者是季结构与逐集
+引用，后者是单一剧情资产图：人物、场景、世界规则、地点/组织/道具、伏笔、连续性事实，
+以及同时保存 `chronologyIndex`（实际发生顺序）与 `reveal`（观众看到顺序）的 timeline。
+Markdown 仍供人读，但每个资产指针必须用 SHA-256 绑定对应字节，不能再另写会漂移的资产报告。
 
+- 人物与场景 ID/名称/集数范围必须与 outline companion 精确一致；timeline 的 `assetIds` 必须
+  闭合，每一集至少一条 reveal event；事实冲突用 `disputed` 显式建模，不能并存两条不同的
+  current/planned 值。
 - outline 初稿先运行 `writing-loop story validate --project <project> --stage skeleton`；节拍
   与伏笔齐备后运行 `--stage beats`；60 集逐集结构齐备后运行 `--stage full`。
 - 任一 deterministic gate fail，不得 spawn 子票或交 In Review；按 gate ID 修复同一产物。
@@ -172,6 +176,10 @@ spawn 后再改节拍单 ⇒ 重 stamp 全部子票）；**每张必填 `## Cont
 `writing-loop`+`Feature`+`episode`+owner=`reviewer`（§4）+ tier（keystone 集按
 §21a-design.3 定义标 `keystone`+tier=`story-designer`，其余 episode-writer）；AC = 逐项
 符合节拍单（三分类、EXTRA 收窄）+ §15 交付义务 + script-format 机读块实符。
+票落盘后必须运行 `writing-loop story context --project <project> --ticket <ID> --agent
+<该票 tier> --json`；把返回的 digest、字节预算和 omitted 数写入建票评论。resolver fail、required
+资产被裁剪或本集 timeline 缺失 ⇒ 不得交门；手写 `## Context-pack` 只是人读预览，不能替代
+这个确定性 pack。
 **回链 + 交门**：父票 `relatedTo:[子票…]` + 评论 `Designed into: <IDs>` → 父票移
 In Review 交 showrunner 大纲门。你**不标 Done**（§21a-design.5：pass 由 showrunner 走
 崩溃安全序放行；fail ⇒ close+follow-up，子票连坐 Canceled）。回 Step 1。

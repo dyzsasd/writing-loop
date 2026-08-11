@@ -1,10 +1,15 @@
 // Canonical story-design companion for writing-loop. Markdown remains the human-readable
 // screenplay asset; this strict JSON file gives the scheduler, quality gates and Studio one
 // shared, deterministic view of structure, provenance and production constraints.
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readRegularTextExact } from "./bounded-fs.ts";
 import { readSourceIntakeStatus } from "./source-intake.ts";
+import {
+  readStoryAssetCatalog, validateStoryAssetCatalog, STORY_ASSETS_RELATIVE_PATH,
+  type StoryAssetCatalog, type StoryAssetCatalogRead,
+} from "./story-assets.ts";
 import { projectEntries, resolveRepoPath, type WlConfig, WsError } from "./workspace.ts";
 
 export const STORY_DESIGN_RELATIVE_PATH = "story/outline.v1.json";
@@ -83,7 +88,8 @@ export type StoryStudioReadModel = {
     allowedHarnesses: string[]; updatedAt: string;
     chunks: Array<{ id: string; headings: string[]; selected: boolean; completed: boolean }>;
   };
-  story: null | { path: string; manifest: StoryDesignManifest; assets: StoryAssetPlan };
+  story: null | { path: string; sha256: string; manifest: StoryDesignManifest; assets: StoryAssetPlan;
+    catalog: null | { path: string; digest: string; manifest: StoryAssetCatalog } };
   gates: StoryGate[];
   summary: { stage: "source" | StoryDesignStage; passed: number; failed: number; skipped: number; readyForEpisodes: boolean };
   warnings: string[];
@@ -296,7 +302,7 @@ function projectPolicy(root: string, key: string, config: WlConfig): { repo: str
     sourcePlanId: source?.manifest.planId ?? null } };
 }
 
-export function readStoryDesign(root: string, key: string, config: WlConfig): { path: string; manifest: StoryDesignManifest; policy: StoryDesignPolicy } | null {
+export function readStoryDesign(root: string, key: string, config: WlConfig): { path: string; sha256: string; manifest: StoryDesignManifest; policy: StoryDesignPolicy } | null {
   const entry = projectEntries(config).find(([candidate]) => candidate === key);
   if (!entry) throw new StoryDesignError(`config.json 无项目 '${key}'`);
   const repo = resolveRepoPath(root, entry[1]);
@@ -306,7 +312,7 @@ export function readStoryDesign(root: string, key: string, config: WlConfig): { 
   const raw = readRegularTextExact(path, MAX_STORY_DESIGN_BYTES);
   if (raw === null) throw new StoryDesignError(`${STORY_DESIGN_RELATIVE_PATH} 必须是未变化、单链接、<=${MAX_STORY_DESIGN_BYTES} bytes 的 UTF-8 普通文件`);
   let value: unknown; try { value = JSON.parse(raw); } catch { throw new StoryDesignError(`${STORY_DESIGN_RELATIVE_PATH} 不是有效 JSON`); }
-  return { path, manifest: parseStoryDesignManifest(value), policy };
+  return { path, sha256: createHash("sha256").update(raw, "utf8").digest("hex"), manifest: parseStoryDesignManifest(value), policy };
 }
 
 export function buildStoryStudioReadModel(root: string, key: string, config: WlConfig): StoryStudioReadModel {
@@ -327,8 +333,38 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
   let gates: StoryGate[] = [];
   try {
     const read = readStoryDesign(root, key, config);
-    if (read) { gates = validateStoryDesign(read.manifest, read.policy, "full");
-      story = { path: STORY_DESIGN_RELATIVE_PATH, manifest: read.manifest, assets: deriveStoryAssets(read.manifest) }; }
+    if (read) {
+      gates = validateStoryDesign(read.manifest, read.policy, "full");
+      const repo = projectPolicy(root, key, config).repo;
+      let catalog: StoryAssetCatalogRead | null = null; let catalogError: string | null = null;
+      try { catalog = readStoryAssetCatalog(repo); }
+      catch (error) { catalogError = error instanceof Error ? error.message : String(error); }
+      if (catalogError) gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "fail", catalogError));
+      else if (!catalog) gates.push(gate("A00", "结构化剧情资产图已建立", "skeleton", "fail", `等待 story-designer 创建 ${STORY_ASSETS_RELATIVE_PATH}`));
+      else {
+        try {
+          validateStoryAssetCatalog(catalog.manifest, { project: key, repo, sourcePlanId: read.policy.sourcePlanId,
+            storyDesignSha256: read.sha256, totalEpisodes: read.policy.totalEpisodes,
+            characters: read.manifest.characters.map((row) => ({ id: row.id, name: row.name,
+              firstEpisode: row.firstEpisode, lastEpisode: row.lastEpisode })),
+            scenes: read.manifest.scenes.map((row) => ({ id: row.id, name: row.name })),
+            episodes: read.manifest.episodes.map((row) => ({ number: row.number,
+              characterIds: [...row.characterIds], sceneIds: [...row.sceneIds] })) });
+          gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "pass",
+            `${catalog.manifest.assets.length} assets · revision ${catalog.manifest.revision}`));
+          const covered = new Set(catalog.manifest.timeline.map((row) => row.reveal.episode));
+          gates.push(gate("A02", "叙事揭示时间线覆盖全部分集", "full",
+            covered.size === read.policy.totalEpisodes ? "pass" : "fail",
+            `${covered.size}/${read.policy.totalEpisodes} 集有结构化 timeline event`));
+        } catch (error) {
+          gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "fail",
+            error instanceof Error ? error.message : String(error)));
+        }
+      }
+      story = { path: STORY_DESIGN_RELATIVE_PATH, sha256: read.sha256, manifest: read.manifest,
+        assets: deriveStoryAssets(read.manifest), catalog: catalog ? { path: STORY_ASSETS_RELATIVE_PATH,
+          digest: catalog.digest, manifest: catalog.manifest } : null };
+    }
     else gates = [gate("S00", "结构化故事资产已建立", "skeleton", "fail", `等待 story-designer 创建 ${STORY_DESIGN_RELATIVE_PATH}`)];
   } catch (error) { gates = [gate("S00", "结构化故事资产可解析", "skeleton", "fail", error instanceof Error ? error.message : String(error))]; }
   const passed = gates.filter((row) => row.state === "pass").length;

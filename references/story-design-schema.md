@@ -4,6 +4,10 @@
 JSON 供 Story Designer、Showrunner、Evaluator、Studio 与确定性质量门共享同一事实。它不是第二份
 模型报告，也不能含原著正文或对白草稿。
 
+可复用剧情事实、双轨时间线与选择性 Harness context 不放在本文件，统一进入
+[`story/assets.v1.json`](story-assets-schema.md)。outline 是结构权威，assets 是事实/路由权威；
+人物与场景身份必须精确一致，二者以 `storyDesignSha256` 绑定。
+
 正常操作者不手工创建或维护它。Story Designer 在 source-analysis 通过后写入，并在同一个 Git
 commit 中同步人读大纲；Showrunner 和 Evaluator 用 `writing-loop story validate` 独立重验。
 
@@ -93,3 +97,6 @@ writing-loop story validate --project KEY --stage full --json
 
 `writing-loop story status --project KEY --json` 和 Studio `/api/projects/KEY/story` 使用同一个
 本地只读模型。它们不会调用模型、读取原著正文或启动 GPU/H3。
+
+`writing-loop story validate` 同时验证 outline 与 assets；`writing-loop story context --project
+KEY --ticket ID --agent AGENT --json` 生成有界、可复现、ticket-scoped Context Pack。

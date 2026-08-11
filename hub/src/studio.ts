@@ -370,7 +370,7 @@ function temporaryRedirect(res: ServerResponse, location: string): void {
 function allowedMethods(pathname: string): string[] | null {
   if (["/", "/api/health", "/api/snapshot", "/projects/new"].includes(pathname)
     || /^\/api\/projects\/[^/]+\/(?:activity|production|production-control|story|resources\/(?:ticket|document|episode|report|evaluation)\/[^/]+)$/.test(pathname)
-    || /^\/p\/[^/]+(?:\/(?:source|story|characters|art|quality)|\/(?:ticket|document|episode|report|evaluation)\/[^/]+)?$/.test(pathname)) return ["GET", "HEAD"];
+    || /^\/p\/[^/]+(?:\/(?:source|story|timeline|assets|characters|art|quality)|\/(?:ticket|document|episode|report|evaluation)\/[^/]+)?$/.test(pathname)) return ["GET", "HEAD"];
   if (pathname === "/api/stream") return ["GET"];
   if (pathname === "/projects/plan" || pathname === "/projects/create" || /^\/p\/[^/]+\/toggle$/.test(pathname)) return ["POST"];
   return null;
@@ -805,7 +805,7 @@ export function createStudioServer(options: StudioOptions): Server {
         return;
       }
 
-      const storyPageMatch = /^\/p\/([^/]+)\/(source|story|characters|art|quality)$/.exec(routedPath);
+      const storyPageMatch = /^\/p\/([^/]+)\/(source|story|timeline|assets|characters|art|quality)$/.exec(routedPath);
       if ((method === "GET" || head) && storyPageMatch) {
         const snapshot = snapshotNow(requestScope!.root);
         const key = decodeProject(storyPageMatch[1]);

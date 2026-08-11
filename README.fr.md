@@ -143,10 +143,12 @@ plan/create/verify. La création exige un nouveau repo ; Studio le limite en plu
 au workspace courant.
 
 Dans un projet, Studio suit les responsabilités créatives : **Vue d'ensemble / Analyse de
-la source / Architecture / Personnages / Assets visuels / Épisodes et qualité**. La vue source
+la source / Architecture / Timeline / Assets narratifs / Personnages / Assets visuels / Épisodes et qualité**. La vue source
 n'affiche que les empreintes locales, la fenêtre de saison et les checkpoints des chunks —
 jamais le texte brut du roman. Story Designer maintient le compagnon strict
-`story/outline.v1.json`, dont les personnages et scènes sont dérivés de façon déterministe.
+`story/outline.v1.json` pour la structure et `story/assets.v1.json` pour les personnages, règles du
+monde, lieux, objets, promesses, continuité et le double ordre chronologie/révélation. Chaque Harness
+reçoit un Context Pack déterministe borné par ticket, agent et épisode au lieu de scanner tous les bibles.
 La qualité distingue pass, fail, skipped et not-applicable, tout en gardant le veto éditorial
 du Showrunner. Studio ne modifie pas ces assets et ne démarre pas H3/GPU.
 Avant que la config rende le projet visible, un journal durable par projet permet

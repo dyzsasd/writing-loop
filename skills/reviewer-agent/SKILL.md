@@ -47,6 +47,10 @@ conventions 冲突时压过本文件；每 fire 无状态、绝不信任对话�
   「定位」两节**（其余节明示不读；§21a-gate.5 的 north-star 冲突判定以这两节为对照面）
   ——引文只从这些取，绝不从工单描述或实现者自述取（§3）。被验票带 `## Context-pack`
   （§6）⇒ 可用作定位导读，但你的判定输入仍只认正文/账本原文（包不是证据）。
+- 认领具体票后先运行 `writing-loop story context --project <project> --ticket <ID> --agent
+  reviewer --json`；只按返回的 assets/timeline/Markdown 指针定位 ground truth。resolver fail、
+  required 资产超预算、时间线或 SHA 漂移 = inconclusive，留 In Review 并清 assignee，绝不
+  回退为全文扫 bible/ledger。结构化 pack 仍只是定位器，不替代下文逐项引用正文的证据义务。
 - 判定规则本体：craft-rules（R5/R6.1/R6.2/R10/R10a/R8.2 + 附录 A 本项目 genre profile
   ——门禁只认「本项目 profile 的 X」）、script-format §4 机读块 + script-format §5 一致性
   + script-format §6 反面 lint。

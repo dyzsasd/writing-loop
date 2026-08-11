@@ -115,9 +115,11 @@ Studio 只监听本机，以服务端渲染呈现作品书架、故事成熟度�
 plan/create/verify 边界。自动立项只
 创建全新 repo；Studio 还把目标限制在当前 workspace 内。
 
-项目内部现在按创作职责分为 **概览 / 原著分析 / 故事结构 / 人物设定 / 美术资产 / 分集与质量**。
+项目内部现在按创作职责分为 **概览 / 原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量**。
 原著页只显示本地指纹、选中窗口和逐块 checkpoint，不回显正文；故事页读取 Story Designer
-维护的 `story/outline.v1.json`，人物与场景资产从它确定性派生。质量页区分 pass / fail /
+维护的 `story/outline.v1.json` 与 `story/assets.v1.json`：前者管季结构，后者把人物、世界规则、
+地点、道具、伏笔、连续性及“真实发生顺序 × 观众揭示顺序”变成结构化资产。Harness 按 ticket、
+agent、集数和字节预算取得确定性 Context Pack，不再扫描整份 bible/ledger。质量页区分 pass / fail /
 skipped / not-applicable，并保留 Showrunner 的“机器全绿但创作平庸”否决位。Studio 仍不直接
 改剧情资产，也不会在剧本阶段启动 H3/GPU。
 config 让项目可见前，durable 每项目 journal 允许在完整 commit/manifest 已落盘时，以

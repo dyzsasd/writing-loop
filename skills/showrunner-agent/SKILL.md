@@ -102,7 +102,9 @@ source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张
 fire 已判 pass、崩于放行途中 ⇒ **不重判**，直接补完「promote 全部子票 → 父票 Done」
 （§21a-design.5——重判可能翻案、连坐已放行子票）。否则按 §23「细纲（大纲门）」行逐项判：
 - **机器项先独立执行**：运行 `writing-loop story validate --project <project> --stage beats`
-  并把 gate ID/状态写进验收评论；任何 fail 或本阶段应执行却被 skipped = fail。随后才核：
+  并把 gate ID/状态写进验收评论；它同时验证 outline、资产图、Markdown SHA 与 timeline。
+  再运行 `writing-loop story context --project <project> --ticket <ID> --agent showrunner --json`
+  复核 pack digest/预算/omitted；任何 fail 或本阶段应执行却被 skipped = fail。随后才核：
   钩型序列（R1.1-R1.3，对照 genre profile）、R2.1 伏笔配额与排期 + 季级到期
   已排入、R3.2 五拍、禁写清单对邻集完备、制作预算余量、被动率预算、切片候选 ≥3（前 10
   集）；**子票版本锚**：全部子票带 `Design-hash:` 且 == 节拍单当前内容哈希

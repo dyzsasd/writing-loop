@@ -18,6 +18,8 @@ const harnessDocs = [
 const storyDesigner = read("skills", "story-designer-agent", "SKILL.md");
 const showrunner = read("skills", "showrunner-agent", "SKILL.md");
 const evaluator = read("skills", "evaluator-agent", "SKILL.md");
+const episodeWriter = read("skills", "episode-writer-agent", "SKILL.md");
+const reviewer = read("skills", "reviewer-agent", "SKILL.md");
 
 for (const [index, doc] of harnessDocs.entries()) {
   ok(doc.includes("writing-loop run --cli claude")
@@ -69,6 +71,14 @@ ok(storyDesigner.includes("story/outline.v1.json")
   && read("references", "story-design-schema.md").includes("skipped` 表示阶段未到")
   && read("references", "config-schema.md").includes("结构化故事伴随文件与质量门"),
 "Story Designer 写严格 companion，Showrunner/Evaluator 独立重验，阶段未到不伪绿");
+ok(storyDesigner.includes("story/assets.v1.json") && storyDesigner.includes("chronologyIndex")
+  && episodeWriter.includes("story context --project <project> --ticket <ID> --agent episode-writer")
+  && reviewer.includes("story context --project <project> --ticket <ID> --agent")
+  && showrunner.includes("story context --project <project> --ticket <ID> --agent showrunner")
+  && evaluator.includes("story context --project <project> --ticket <ID> --agent")
+  && read("references", "story-assets-schema.md").includes("观众揭示顺序")
+  && read("references", "story-assets-schema.md").includes("绝不回退成全文扫 bible/ledger"),
+"剧情资产、双轨时间线与 ticket-scoped Context Pack 是写作/审读/评估共同硬契约");
 
 const guides = [read("docs", "GUIDE.md"), read("docs", "GUIDE.zh-CN.md"), read("docs", "GUIDE.fr.md")];
 const automaticSourcePhrases = [
@@ -83,7 +93,8 @@ for (const [index, guide] of guides.entries()) {
   ok(guide.includes(automaticSourcePhrases[index]!) && guide.includes("source-analysis")
     && guide.includes("source status --project my-drama") && !guide.includes("my-drama/source/novel.txt"),
   `指南 ${index + 1} 把原著交给立项后自动 source-analysis，而非要求第二次手工登记或外部拆书`);
-  ok(guide.includes("story/outline.v1.json") && guide.includes("skeleton") && guide.includes("beats") && guide.includes("full"),
+  ok(guide.includes("story/outline.v1.json") && guide.includes("story/assets.v1.json")
+    && guide.includes("Context Pack") && guide.includes("skeleton") && guide.includes("beats") && guide.includes("full"),
   `指南 ${index + 1} 同步结构伴随文件与三阶段质量门`);
 }
 ok(read("skills", "add-script", "SKILL.md").includes("不是正常立项步骤")

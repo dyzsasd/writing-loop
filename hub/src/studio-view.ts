@@ -183,11 +183,13 @@ a{color:inherit}button,input{font:inherit}
 .atlas-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.38fr);gap:18px}.source-progress{height:9px;background:var(--paper-low);overflow:hidden;margin:15px 0}.source-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--jade),var(--gold))}.chunk-map{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:7px}.chunk{min-height:70px;padding:9px;border:1px solid var(--line);background:var(--paper-hi)}.chunk b{font:10px var(--mono)}.chunk span{display:block;margin-top:6px;color:var(--muted);font-size:9px;line-height:1.35}.chunk.selected{border-color:var(--gold)}.chunk.done{background:color-mix(in srgb,var(--jade) 10%,var(--paper-hi));border-color:var(--jade)}
 .episode-atlas{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}.episode-beat{min-height:180px;padding:16px;border:1px solid var(--line);background:var(--paper-hi);position:relative}.episode-beat:before{content:attr(data-episode);position:absolute;right:10px;top:4px;color:color-mix(in srgb,var(--ink) 8%,transparent);font:700 52px var(--display)}.episode-beat h3{position:relative;margin:0 0 22px;font:600 17px var(--display)}.episode-beat p{position:relative;color:var(--ink-2);font-size:12px}.episode-beat small{position:relative;color:var(--accent);font:10px var(--mono)}
 .decision-grid,.cast-grid,.art-grid,.gate-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.dossier{padding:18px;border:1px solid var(--line);background:var(--paper-hi)}.dossier h3{font:600 20px var(--display);margin:0 0 8px}.dossier p{color:var(--ink-2);margin:7px 0}.dossier small{color:var(--muted);font:10px var(--mono)}.dossier .tier{float:right;color:var(--accent);font:700 9px var(--mono);letter-spacing:.08em}.dossier.inferred{border-style:dashed}.dossier.primary{border-top:5px solid var(--accent)}
+.timeline-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.timeline-rail{border-left:2px solid var(--ink);padding-left:16px}.timeline-rail h2{margin:0 0 14px;font:600 20px var(--display)}.timeline-event{position:relative;margin:0 0 12px;padding:14px;border:1px solid var(--line);background:var(--paper-hi)}.timeline-event:before{content:"";position:absolute;left:-22px;top:19px;width:9px;height:9px;border-radius:50%;background:var(--accent);border:2px solid var(--paper)}.timeline-event h3{margin:2px 0 6px;font:600 17px var(--display)}.timeline-event p{margin:6px 0;color:var(--ink-2);font-size:12px}.timeline-event small{font:10px var(--mono);color:var(--muted)}.asset-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:9px}.asset-tags span{padding:3px 6px;background:var(--paper);border:1px solid var(--line);font:9px var(--mono)}
 .gate{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;padding:15px;border:1px solid var(--line);background:var(--paper-hi)}.gate-state{width:70px;text-align:center;padding:5px 7px;align-self:start;font:700 9px var(--mono);letter-spacing:.08em;border:1px solid var(--line)}.gate.pass .gate-state{color:var(--jade);border-color:var(--jade)}.gate.fail .gate-state{color:var(--accent);border-color:var(--accent)}.gate.skipped .gate-state{color:var(--gold);border-color:var(--gold)}.gate h3{font:600 15px var(--display);margin:0}.gate p{color:var(--muted);margin:4px 0 0;font-size:11px}
 .section-hero{padding:42px 0 26px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:25px;align-items:end}.section-hero h1{font:600 clamp(38px,5vw,66px)/1 var(--display);margin:8px 0}.section-hero p{max-width:720px;color:var(--ink-2)}.section-kpi{text-align:right}.section-kpi b{display:block;font:600 54px var(--display);color:var(--accent)}.section-kpi span{color:var(--muted);font:10px var(--mono)}
 .reveal{animation:reveal .55s cubic-bezier(.2,.75,.2,1) both}.reveal:nth-child(2){animation-delay:.06s}.reveal:nth-child(3){animation-delay:.12s}.reveal:nth-child(4){animation-delay:.18s}@keyframes reveal{from{opacity:0;transform:translateY(10px)}}
 @media(max-width:1050px){.project-card,.workspace-card{grid-column:span 6}.workspace-grid,.atlas-grid{grid-template-columns:1fr}.project-hero{grid-template-columns:1fr 200px}.spine{grid-template-columns:repeat(2,1fr)}.creative-cockpit{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:720px){body:before{left:12px}.shell{width:calc(100% - 32px);padding-top:10px}.topbar{gap:10px}.brand small,.crumb{display:none}.hero{grid-template-columns:1fr;padding-top:40px}.hero-stamp{display:none}.stats{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.section-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:8px 12px}.section-head h2,.section-head p{grid-column:1}.section-head .count{display:none}.section-head .btn{grid-column:2;grid-row:1/3;margin:0}.project-card,.workspace-card{grid-column:1/-1}.workspace-card{grid-template-columns:1fr}.workspace-card .workspace-folio{text-align:left}.project-hero,.section-hero{grid-template-columns:1fr}.section-kpi{text-align:left}.folio{text-align:left;border-left:0;border-top:1px solid var(--line);padding:22px 0 0}.folio strong{font-size:60px}.lanes{grid-template-columns:repeat(4,245px)}.episode-strip{grid-template-columns:repeat(2,1fr)}.spine,.creative-cockpit,.decision-grid,.cast-grid,.art-grid,.gate-grid,.onboarding-contract{grid-template-columns:1fr}.onboarding-contract article+article{border-left:0;border-top:1px solid var(--line)}.form-grid,.detail-sections,.plan-grid{grid-template-columns:1fr}.field.wide,.form-section{grid-column:auto}.event{grid-template-columns:70px 10px minmax(0,1fr)}.usage-strip{grid-template-columns:1fr}.production-summary{grid-template-columns:repeat(2,1fr)}.production-facts{grid-template-columns:1fr}.footer{display:block}.footer .path{text-align:left;margin-top:8px}}
+@media(max-width:720px){.timeline-grid{grid-template-columns:1fr}}
 @media(prefers-color-scheme:dark){:root{--paper:#171714;--paper-hi:#22211d;--paper-low:#11110f;--ink:#eee8da;--ink-2:#c5bcac;--muted:#968e80;--line:#3d3931;--line-strong:#61594c;--accent:#e45b4e;--accent-deep:#ff8175;--jade:#62a99a;--gold:#d8a44e;--blue:#6d9cc0;--shadow:0 18px 50px rgba(0,0,0,.28)}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 `;
@@ -373,13 +375,15 @@ function reportsPanel(project: ProjectSnapshot, reports: ReportSummary[] = [], e
   return `<section class="panel"><div class="panel-head"><h2>报告与评估</h2><span class="aside">${reports.length + evaluations.length}</span></div>${rows.length ? `<div class="report-list">${rows.map((row) => `<a class="report-link" href="${esc(at(base, `/p/${enc(project.key)}/${row.kind}/${enc(row.id)}`))}"><b>${row.review ? "操作者点评 · " : row.kind === "evaluation" ? "里程碑 · " : ""}${esc(row.label)}</b><small>${esc(relTime(row.updatedAt))}</small></a>`).join("")}</div>` : `<div class="empty">尚无报告或里程碑评估。</div>`}</section>`;
 }
 
-export type StoryStudioSection = "source" | "story" | "characters" | "art" | "quality";
+export type StoryStudioSection = "source" | "story" | "timeline" | "assets" | "characters" | "art" | "quality";
 
 function projectNav(project: ProjectSnapshot, active: "overview" | StoryStudioSection, base: string): string {
   const items: Array<["overview" | StoryStudioSection, string, string]> = [
     ["overview", "概览", `/p/${enc(project.key)}`],
     ["source", "原著分析", `/p/${enc(project.key)}/source`],
     ["story", "故事结构", `/p/${enc(project.key)}/story`],
+    ["timeline", "时间线", `/p/${enc(project.key)}/timeline`],
+    ["assets", "剧情资产", `/p/${enc(project.key)}/assets`],
     ["characters", "人物设定", `/p/${enc(project.key)}/characters`],
     ["art", "美术资产", `/p/${enc(project.key)}/art`],
     ["quality", "分集与质量", `/p/${enc(project.key)}/quality`],
@@ -393,7 +397,7 @@ function storyCockpit(model: StoryStudioReadModel | undefined): string {
   const sourceLabel = !source ? "原创" : source.phase === "review-ready" ? "已验收" : source.phase === "analyzing" ? `${source.completed}/${source.selected}` : "待选范围";
   const next = model.summary.failed > 0 ? `${model.summary.failed} 个质量门待修复`
     : model.summary.readyForEpisodes ? "结构已可进入分集生产" : model.summary.stage === "source" ? "先完成原著分析票" : "继续完善结构伴随文件";
-  return `<section class="creative-cockpit"><div class="next"><b>${esc(next)}</b><span>NEXT VERIFIED ACTION</span></div><div><b>${esc(sourceLabel)}</b><span>原著分析</span></div><div><b>${esc(model.story?.assets.counts.characters ?? 0)}</b><span>具名角色资产</span></div><div><b>${model.summary.passed}/${model.gates.length}</b><span>质量门通过</span></div></section>`;
+  return `<section class="creative-cockpit"><div class="next"><b>${esc(next)}</b><span>NEXT VERIFIED ACTION</span></div><div><b>${esc(sourceLabel)}</b><span>原著分析</span></div><div><b>${esc(model.story?.catalog?.manifest.assets.length ?? 0)}</b><span>结构化剧情资产</span></div><div><b>${model.summary.passed}/${model.gates.length}</b><span>质量门通过</span></div></section>`;
 }
 
 export function projectPage(snapshot: WorkspaceSnapshot, project: ProjectSnapshot, notice?: string, extras: ProjectPageExtras = {}, base = ""): string {
@@ -448,8 +452,25 @@ function storySection(model: StoryStudioReadModel): string {
 function charactersSection(model: StoryStudioReadModel): string {
   const story = model.story;
   const characters = story?.manifest.characters ?? [];
+  const catalog = new Map((story?.catalog?.manifest.assets ?? []).map((row) => [row.id, row] as const));
   return `${sectionHeader("Character workbench", "人物设定", "按角色工作，而不是在卡片墙里找信息；source refs 与推断内容始终可见。", String(characters.length), "NAMED CHARACTERS")}
-  <section class="panel"><div class="cast-grid">${characters.map((row) => `<article class="dossier${row.sourceRefs.length ? "" : " inferred"}"><span class="tier">${esc(row.tier)}</span><h3>${esc(row.name)}</h3><small>${esc(row.id)} · EP ${row.firstEpisode}–${row.lastEpisode}</small><p><b>戏剧功能：</b>${esc(row.role)}</p><p><b>人物弧：</b>${esc(row.arc ?? "功能角色，不虚构强行成长弧")}</p><small>${row.sourceRefs.length ? `来源 ${esc(row.sourceRefs.join(" · "))}` : "推断/原创：无原著 source ref"}</small></article>`).join("") || `<div class="empty">等待人物分级与角色功能表。</div>`}</div></section>`;
+  <section class="panel"><div class="cast-grid">${characters.map((row) => { const asset = catalog.get(row.id); return `<article class="dossier${row.sourceRefs.length ? "" : " inferred"}"><span class="tier">${esc(row.tier)}</span><h3>${esc(row.name)}</h3><small>${esc(row.id)} · EP ${row.firstEpisode}–${row.lastEpisode} · ${asset?.facts.length ?? 0} FACTS</small><p><b>戏剧功能：</b>${esc(row.role)}</p><p><b>人物弧：</b>${esc(row.arc ?? "功能角色，不虚构强行成长弧")}</p><p><b>当前事实：</b>${esc(asset?.facts.filter((fact) => fact.state === "current").map((fact) => `${fact.key}=${fact.value}`).join("；") || "等待 assets.v1.json")}</p><small>${asset?.sourceRefs.length ? `来源 ${esc(asset.sourceRefs.join(" · "))}` : "推断/原创：无结构化 source ref"}</small></article>`; }).join("") || `<div class="empty">等待人物分级与角色功能表。</div>`}</div></section>`;
+}
+
+function timelineSection(model: StoryStudioReadModel): string {
+  const events = model.story?.catalog?.manifest.timeline ?? [];
+  const byStory = [...events].sort((a, b) => a.chronologyIndex - b.chronologyIndex);
+  const byReveal = [...events].sort((a, b) => a.reveal.episode - b.reveal.episode || a.reveal.order - b.reveal.order);
+  const cards = (rows: typeof events, order: "story" | "reveal"): string => rows.map((row) => `<article class="timeline-event"><small>${order === "story" ? `#${row.chronologyIndex} · ${esc(row.storyTimeLabel)}` : `EP ${String(row.reveal.episode).padStart(2, "0")} / ${row.reveal.order} · ${esc(row.reveal.mode)}`}</small><h3>${esc(row.label)}</h3><p>${esc(row.summary)}</p><div class="asset-tags">${row.assetIds.map((id) => `<span>${esc(id)}</span>`).join("")}</div></article>`).join("") || `<div class="empty">等待 Story Designer 建立结构化事件。</div>`;
+  return `${sectionHeader("Chronology × reveal order", "双轨时间线", "左侧是真实发生顺序，右侧是观众看到的顺序；回忆、闪回、预示与画外事件不会再埋在散文里。", String(events.length), "TIMELINE EVENTS")}
+  <section class="panel timeline-grid"><div class="timeline-rail"><h2>故事世界时序</h2>${cards(byStory, "story")}</div><div class="timeline-rail"><h2>观众揭示顺序</h2>${cards(byReveal, "reveal")}</div></section>`;
+}
+
+function assetGraphSection(model: StoryStudioReadModel): string {
+  const assets = model.story?.catalog?.manifest.assets ?? [];
+  const cards = assets.map((row) => `<article class="dossier"><span class="tier">${esc(row.type)} · ${esc(row.status)}</span><h3>${esc(row.label)}</h3><small>${esc(row.id)} · ${esc(row.importance)}${row.episodes ? ` · EP ${row.episodes.first}–${row.episodes.last}` : " · GLOBAL"}</small><p>${esc(row.summary)}</p><p><b>Facts</b> ${row.facts.length} · <b>Relations</b> ${row.relations.length}</p><div class="asset-tags">${row.context.agents.map((agent) => `<span>${esc(agent)}</span>`).join("")}</div><small>${esc(row.sourceRefs.join(" · ") || "无 provenance")}</small></article>`).join("");
+  return `${sectionHeader("Typed story graph", "剧情资产图", "人物、世界规则、地点、组织、道具、场景、伏笔与连续性共享稳定 ID、事实、关系、生命周期和上下文策略。", String(assets.length), "STRUCTURED ASSETS")}
+  <section class="panel"><div class="decision-grid">${cards || `<div class="empty">等待 Story Designer 创建 story/assets.v1.json。</div>`}</div></section>`;
 }
 
 function artSection(model: StoryStudioReadModel): string {
@@ -466,7 +487,9 @@ function qualitySection(model: StoryStudioReadModel): string {
 export function projectStoryPage(snapshot: WorkspaceSnapshot, project: ProjectSnapshot, section: StoryStudioSection,
   model: StoryStudioReadModel, base = ""): string {
   const content = section === "source" ? sourceSection(model) : section === "story" ? storySection(model)
-    : section === "characters" ? charactersSection(model) : section === "art" ? artSection(model) : qualitySection(model);
+    : section === "timeline" ? timelineSection(model) : section === "assets" ? assetGraphSection(model)
+      : section === "characters" ? charactersSection(model)
+      : section === "art" ? artSection(model) : qualitySection(model);
   return shell(`${project.title} · ${section}`, `${projectNav(project, section, base)}${content}`, snapshot, project, base);
 }
 

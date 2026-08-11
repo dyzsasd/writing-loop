@@ -73,7 +73,14 @@ try {
   const config = JSON.parse(JSON.stringify({ version: 1, projects: { demo: { title: "测试故事", repoPath: "repo", enabled: true, totalEpisodes: 6, maxPrimaryScenes: 2, maxNamedCharacters: 4 } } }));
   ok(readStoryDesign(tmp, "demo", config)?.manifest.episodes.length === 6, "安全 exact reader 读取项目 companion");
   const studio = buildStoryStudioReadModel(tmp, "demo", config);
-  ok(studio.summary.readyForEpisodes && studio.summary.failed === 0 && studio.story?.assets.counts.episodes === 6, "Studio read model 与 CLI 共用同一质量事实");
+  ok(!studio.summary.readyForEpisodes && studio.gates.some((row) => row.id === "A00" && row.state === "fail")
+    && studio.story?.assets.counts.episodes === 6,
+  "只有大纲、没有结构化剧情资产图时 Studio fail-closed，不把半套事实源伪装成可写分集");
+  writeFileSync(join(tmp, "repo", "story", "assets.v1.json"), "{\"version\":1,\"broken\":true}\n");
+  const corruptAssets = buildStoryStudioReadModel(tmp, "demo", config);
+  ok(corruptAssets.story?.manifest.episodes.length === 6
+    && corruptAssets.gates.some((row) => row.id === "A01" && row.state === "fail"),
+  "资产图损坏时保留可读大纲并单独把 A01 标红，不让整个 Story Studio 消失");
 } finally { rmSync(tmp, { recursive: true, force: true }); }
 
 console.log(fails === 0 ? "\nSTORY_DESIGN_OK" : `\n${fails} 项检查失败`);

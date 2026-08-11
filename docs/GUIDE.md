@@ -139,11 +139,12 @@ analyzes one chunk per fire, aggregates the three worksheets, and hands them to 
 Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
 plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
-After the source gate, Story Designer keeps the human outline and strict
-`story/outline.v1.json` companion in sync, running the deterministic
+After the source gate, Story Designer keeps the human outline, strict
+`story/outline.v1.json`, and typed `story/assets.v1.json` graph in sync, running the deterministic
 `skeleton → beats → full` gates automatically. Operators do not need to run `story
-validate`: Studio exposes the same facts through Source / Story / Characters / Art /
-Episodes & quality. Character and scene registries are derived, skipped is never pass,
+validate`: Studio exposes the same facts through Source / Story / Timeline / Story assets / Characters / Art /
+Episodes & quality. Each creative ticket receives a bounded Context Pack selected from character,
+world, location, prop, foreshadowing, continuity and dual-order timeline assets; skipped is never pass,
 and Showrunner still performs an independent editorial review after machine-green.
 
 ---

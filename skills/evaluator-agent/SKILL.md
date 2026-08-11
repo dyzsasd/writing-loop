@@ -73,6 +73,9 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
    `outline.md`（五锚点/卡点规划/伏笔登记表/名场面规划）、涉及节拍单、`ledgers/`、
    评估范围内正文、以及 **market-watch 的带日期评估**（§21）。
 4. 大纲/结构相关门先运行 `writing-loop story validate --project <project> --stage full --json`，
+   再为当前里程碑票运行 `writing-loop story context --project <project> --ticket <ID> --agent
+   evaluator --json`；评估只加载 pack 选择的资产、双轨 timeline 与精确 Markdown 指针，
+   不扫描无关人物/世界/分集。resolver 或预算失败 = 机器门失败，不以人工摘要绕过。
    把 gate report 作为「机内断言」证据；`fail` 阻断，`skipped` 只表示尚未执行，绝不折算
    通过。报告仍须独立完成判断项与市场/实测项，不能把确定性门当作创作品质总分。
 

@@ -72,12 +72,18 @@ fire 每次转态都写后必读、labels 重传全集（§10）。起草预期�
 认领心跳评论（§7——防 60min 孤儿判据误收割活 fire）。
 
 ### Step 3 — 先读（写字之前，缺一即误写风险）
-⓪ 票面 `## Context-pack`（§6）——建票方给的导读，**优先按包读**（指针清单 + 可直接采信
+⓪ 先运行 `writing-loop story context --project <project> --ticket <ID> --agent episode-writer
+--json`。它按票面 Episode、outline 引用、资产关系、timeline 与字节预算生成唯一结构化
+Context Pack；只从 pack 的 assets/timeline/Markdown 指针取本票上下文。命令失败、digest/
+引用漂移或 required asset 超预算 ⇒ block：`needs-designer` + `Bail-shape: info-needed`，绝不
+退回扫描整份 bible/ledger。随后读票面 `## Context-pack`（§6）——它是建票方的人读导读，
+**优先按包读**（指针清单 + 可直接采信
 的关键事实 + 禁读提示）；越包读大文件不违纪，但须在交付评论说明理由（信号回流建票方）。
 包有误不豁免你对 ground truth 的核对义务（§6）。① `Design:` 指向节拍单的 `#ep-NNN` 节
 ——指针断（行缺/文件缺/节缺）⇒ block：`blocked` +
 `needs-designer`，评论首行 `Bail-shape: info-needed`，清 assignee 回 `Todo`，取下一候选
-（§9 节拍类断针路由 designer）。② 三账本 `ledgers/{foreshadow,story-state,production}.md`。
+（§9 节拍类断针路由 designer）。② 三账本不再整份通读：只读结构化 pack 列出的精确
+Markdown 指针/锚点；`ledgers/{foreshadow,story-state,production}.md` 的未选部分明确禁读。
 ③ `episodes/ep-(N-1).md` 末帧（重叠帧原料，script-format §5）。④ bible 冻结层相关节
 （characters **声纹卡**——本集在场主要角色的语域/禁忌语/样句/表演提示锚，节拍卡
 「声纹锚」字段引用它——+ 弧光、world 战力与数字锚点）；north-star **只读「创作红线

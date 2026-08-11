@@ -354,6 +354,14 @@ Episode: 1
   const qualityWorkbench = await fetch(`${base}/p/adapted-drama/quality`);
   ok(qualityWorkbench.status === 200 && (await qualityWorkbench.text()).includes("S00 · 结构化故事资产已建立"),
   "质量页在 companion 尚未建立时诚实显示 fail，而不是伪绿或空白");
+  const timelineWorkbench = await fetch(`${base}/p/adapted-drama/timeline`);
+  const timelineHtml = await timelineWorkbench.text();
+  ok(timelineWorkbench.status === 200 && timelineHtml.includes("双轨时间线")
+    && timelineHtml.includes("故事世界时序") && timelineHtml.includes("观众揭示顺序"),
+  "Studio 时间线页面始终可访问，并明确区分 chronology 与 reveal order");
+  const assetWorkbench = await fetch(`${base}/p/adapted-drama/assets`);
+  ok(assetWorkbench.status === 200 && (await assetWorkbench.text()).includes("剧情资产图"),
+  "Studio 提供独立的结构化剧情资产工作台，而非把全部事实藏在人物或美术页");
   const wrongStoryMethod = await fetch(`${base}/api/projects/adapted-drama/story`, { method: "POST", headers: { origin: base } });
   ok(wrongStoryMethod.status === 405 && wrongStoryMethod.headers.get("allow") === "GET, HEAD",
   "story API 保持只读，Studio 不能绕过 agent/票据直接改故事资产");

@@ -106,10 +106,12 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 聚合三清单后交 Showrunner 验收。`writing-loop source status --project my-drama` 是只读状态面；
 `source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
-拆书门通过后，Story Designer 会同时写人读大纲和严格的 `story/outline.v1.json`，并按
+拆书门通过后，Story Designer 会同时写人读大纲、严格的 `story/outline.v1.json` 和
+`story/assets.v1.json` 资产图，并按
 `skeleton → beats → full` 自动运行确定性质量门。你不需要手工执行 `story validate`：打开
-Studio 项目页即可在“原著分析 / 故事结构 / 人物设定 / 美术资产 / 分集与质量”中查看同一事实。
-人物、场景清单从结构文件派生，skipped 不会被当作 pass；机器全绿仍须 Showrunner 独立验收。
+Studio 项目页即可在“原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量”中查看同一事实。
+人物、世界、地点、道具、伏笔、连续性和双轨时间线按 ticket/agent/集数生成有界 Context Pack；
+skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 
 ---
 
