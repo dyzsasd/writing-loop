@@ -44,7 +44,7 @@ run the nine agent skills with `writing-loop run --cli opencode`.
 
 ---
 
-## Step 1 — Make the script project folder, drop in the novel
+## Step 1 — Initialize the workspace and place the novel outside Git
 
 **Workspace vs. script repo**: a **workspace** is a plain folder holding one or more
 **script repos** (each drama is its own git repo — “documents *are* the code”) plus a
@@ -52,21 +52,19 @@ run the nine agent skills with `writing-loop run --cli opencode`.
 `add-script`). **Copying this one workspace folder = migrating every drama + its
 in-flight tickets** (see "Migration" at the end).
 
-Below, `~/dramas/` is your workspace and `my-drama/` is one drama's repo:
+Below, `~/dramas/` is the workspace. Onboarding creates the drama repo; do not pre-create it:
 
 ```bash
-mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace, my-drama = script repo
-git -C ~/dramas/my-drama init
-cp /path/to/your-novel.txt ~/dramas/my-drama/source/novel.txt
+mkdir -p ~/dramas
+writing-loop init --dir ~/dramas
+cp /path/to/your-novel.txt ~/dramas/novel.txt
 ```
 
-> Key point: the novel text must live under the script repo's `source/` — the
-> adaptation teardown works from it.
+> Keep the novel under the workspace but outside the script Git repo. `source register`
+> makes local 0600 immutable chunks; Git receives fingerprints, the adaptation brief,
+> and structured analysis—not the raw novel.
 
-In Claude Code, change the working directory to this project folder
-(`cd ~/dramas/my-drama`), then go to Step 2. (`add-script` treats `~/dramas/` as the
-workspace root and creates `.writing-loop/` under it; for the first drama it confirms
-that root with you.)
+Change the working directory to the workspace (`cd ~/dramas`), then go to Step 2.
 
 ---
 
@@ -100,15 +98,12 @@ placeholders into config). For the adaptation track, be ready to answer:
 - **Scale**: `totalEpisodes`, `paywall` (backup card numbers; card 1 ⊂ episodes
   8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
-**Adaptation-only (runs automatically)**
+**Adaptation-only (onboarding records constraints only)**
 
-- The novel text is already in `source/` → it runs the **book-selection checklist**
-  (can the mainline compress ≥10:1? set-piece density? character compressibility?)
-  and flags risk if it falls short.
-- It produces the **three teardown worksheets** into `source/`: `mainline.md`
-  (mainline skeleton), `highlights.md` (set-piece / thrill-beat list — the IP's core
-  asset), `characters-function.md` (character function table, compressed to 3–5 core
-  / ≤20 named).
+- It records compression/set-piece/character thresholds and flags risk, but does not
+  read or deconstruct the novel.
+- It creates three blank worksheets. A later writing-loop `source-analysis` ticket
+  fills them from durable, individually checkpointed chunks.
 - **Fidelity tier**: defaults to **close-adaptation (贴改)**; **shell-borrowing is
   disabled by default** and written into Non-goals.
 - **Rights boundary**: bounded by the license (recorded in north-star); no
@@ -122,14 +117,31 @@ Then `add-script` automatically:
 - **REGISTER**: registers the project in `~/dramas/.writing-loop/config.json`, creates the
   board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds the `lessons/` dir
   (one shared file + one per role).
-- **First outline ticket**: files one outline ticket (owner=showrunner,
-  tier=story-designer).
+- **First outline ticket**: Todo for original projects; `Backlog+source-pending` for
+  adaptations, so a blank worksheet can never race ahead into an outline.
 - **VERIFY**: re-reads, validates, and tells you the next step.
 
 > The `add-script` interview asks for the mode — answer `dry-run` the first time:
 > it only prints what it *would* do, writing nothing and committing nothing. Once
 > you've confirmed the interview conclusions, run `/writing-loop:add-script` again
 > and answer `live` to onboard for real.
+
+### Step 2.5 — Register the novel and your adaptation design
+
+Create a JSON request with the workspace-local `sourcePath`, your `adaptationBrief`,
+the rights scope, and explicit consent naming the Harnesses allowed to process raw
+chunks. Then run:
+
+```bash
+writing-loop source plan --project my-drama --input source-intake.json
+writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
+writing-loop source status --project my-drama
+```
+
+The plan is zero-write and zero-network. Register only copies/chunks locally, commits
+the brief, and files the source-analysis ticket. The Story-Designer then selects the
+season range, analyzes one chunk per fire, aggregates the three worksheets, and hands
+them to the Showrunner gate.
 
 ---
 
@@ -143,8 +155,9 @@ no-ops. Agents hand off **only through tickets** — you never pass work by hand
 **First cycle (the natural order for adaptation):**
 
 ```
-/writing-loop:showrunner-agent       # owns direction, gates, milestones and later releases (the outline ticket was filed straight to Todo by add-script — §5a exemption — so the story-designer can pick it up directly)
-/writing-loop:story-designer-agent    # reads the teardown worksheets → writes outline.md + bible; then per-arc beat cards
+/writing-loop:story-designer-agent    # first runs source-analysis: season range, chunks, three worksheets
+/writing-loop:showrunner-agent       # accepts the source gate and only then unlocks the outline
+/writing-loop:story-designer-agent    # writes outline.md + bible; then per-arc beat cards
 /writing-loop:market-watch-agent      # dated genre-window assessment — the outline-lock gate's market layer depends on it; missing data makes that item inconclusive, and red-line cases park for you to supply it
 /writing-loop:evaluator-agent         # outline-lock gate (market + content pre-score + compliance)
 /writing-loop:episode-writer-agent    # writes episodes in order; keystone episodes are written by the Story-Designer

@@ -15,7 +15,7 @@ description: >-
 
 ## 使命
 
-验收你 owner 的 In Review 票（大纲门/定稿门/eval/punch-up）、解锁 needs-showrunner 队列
+验收你 owner 的 In Review 票（原著拆解/大纲门/定稿门/eval/punch-up）、解锁 needs-showrunner 队列
 与通用 Blocked-by resolver、梳理并放行 Backlog、（仅 autonomous）监测里程碑并 file
 eval/设计/punch-up 票、回写 north-star。你与其他 agent 只经工单 state + label + comment +
 机读行协作（§0）；outline 写者是 story-designer（§19），你绝不写正文与账本。
@@ -81,8 +81,21 @@ fire 就 file，服从 §8 去重），方向落 `Decisions log` + 更新 `当�
 
 ### Job A — 验收你 owner 的 In Review 票（先清终点线）
 
-查 `In Review` + `owner:showrunner`（outline/arc-design/milestone-eval/立项/punch-up/
+查 `In Review` + `owner:showrunner`（source-analysis/outline/arc-design/milestone-eval/立项/punch-up/
 其余 Improvement，§4），最旧优先，先评论认领（§7），按子类型走门：
+
+**A0 · source-analysis ⇒ 原著拆解门**。这张票证明拆书是 writing-loop 的内生工作，而不是
+操作者或外部 skill 填好的答案。先运行 `writing-loop source status --project <project> --json`，
+只有 control.phase=`review-ready` 才审：
+- selected chunk 全部 completed；每个摘要的 `Source-intake/Source-chunk/Source-sha256` 与 manifest
+  精确匹配，repo clean；未选范围在 `analysis-plan.md` 中被明确标成「未分析」，不能冒充全书结论。
+- `mainline.md`、`highlights.md`、`characters-function.md` 都绑定同一 planId，并区分原著功能、
+  操作者设计和重构提案；没有长段原文/对白，换名之外确实改变身份、目标、关系、方法和结局。
+- 季范围、集数、改编方向、权利范围与 `adaptation-brief.md` 一致；真实历史人物另列史料核验边界，
+  海外发行不被误写成免版权/免平台合规。
+pass ⇒ 评论记录 manifest/selected/聚合 commit，source-analysis 票 Done；随后 B3 才能解除 outline 的
+`Blocked-by` 与 `source-pending`。fail ⇒ 附逐项证据，把同票退回 Todo（清 assignee，保留
+source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张清单，也不得调用外部拆书 skill。
 
 **A1 · arc-design ⇒ 大纲门（§21a-design.5 + §23 清单）**。读节拍单 + 父票
 `Designed into:` 子票清单。**幂等入口**：父票已带 `Approved-hash:` 评论行 = 上

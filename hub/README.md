@@ -41,9 +41,11 @@ writing-loop production handoff --project demo --input handoff.json  # approved 
 writing-loop project plan --input request.json
 writing-loop project create --input request.json --confirm wlplan_...
 writing-loop project verify my-drama
+writing-loop source plan --project my-drama --input source-intake.json
+writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
 
 writing-loop install-claude-plugin   # let Claude Code install the plugin from npm (then /plugin …)
-# in Claude Code: /writing-loop:add-script   ← the onboarding interview (拆书 or original)
+# in Claude Code: /writing-loop:add-script   ← onboarding (adaptation creates source-pending scaffolds)
 writing-loop doctor                  # read-only health check (ends with DOCTOR_OK/FAILED + NEXT:)
 writing-loop run --dry-run           # print every agent command wl-run would fire
 writing-loop run                     # drive the whole writers' room (Ctrl-C = graceful stop)
@@ -112,6 +114,9 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 | `project plan --input FILE` | validate an onboarding request and return a deterministic, strictly zero-write plan plus `planId` |
 | `project create --input FILE --confirm PLAN_ID [--json]` | confirm that exact plan, atomically reserve its final paths, publish, and verify a new project |
 | `project verify K [--json]` | independently verify config, repo/Git scaffold, first ticket, and runtime layout |
+| `source plan --project K --input FILE` | pin a workspace-local novel, adaptation brief, rights and Harness consent into a deterministic zero-write plan |
+| `source register --project K --input FILE --confirm PLAN_ID [--json]` | copy/chunk the novel into local 0600 runtime, commit only provenance/brief, and file writing-loop's source-analysis ticket |
+| `source status --project K [--json]` | inspect selected/completed chunks and the source-analysis phase |
 | `production status [--project K] [--json]` | inspect the scoped, durable render/take/QC ledger, including paused projects; never contacts a backend |
 | `production enqueue --plan --project K --input FILE [--json]` | validate an immutable production intent and return a deterministic zero-write/zero-network plan |
 | `production enqueue --confirm PLAN_ID --project K --input FILE [--json]` | persist that exact intent/task/dispatch request; endpoint/profile/token fields are rejected and no provider is contacted |

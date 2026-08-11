@@ -56,7 +56,9 @@ try {
   ok(existsSync(join(distDir, "production.js")) && existsSync(join(distDir, "production-domain.js"))
     && existsSync(join(distDir, "production-store.js")) && existsSync(join(distDir, "production-read-model.js"))
     && existsSync(join(distDir, "production-adapter.js")),
-    "dist emit production CLI / authoritative store / read model / remote adapter");
+  "dist emit production CLI / authoritative store / read model / remote adapter");
+  ok(existsSync(join(distDir, "source.js")) && existsSync(join(distDir, "source-intake.js")),
+  "dist emit source intake CLI / immutable chunking core");
   ok(existsSync(join(distDir, "production-intent.js"))
     && existsSync(join(distDir, "production-enqueue.js"))
     && existsSync(join(distDir, "production-recovery.js"))
@@ -105,6 +107,7 @@ try {
     && packed.has("dist/onboarding.js") && packed.has("dist/activity.js") && packed.has("dist/activity-index.js")
     && packed.has("dist/project-detail.js") && packed.has("dist/workspace-registry.js")
     && packed.has("dist/workspace-registry-cli.js") && packed.has("dist/studio-view.js")
+    && packed.has("dist/source.js") && packed.has("dist/source-intake.js")
     && packed.has("dist/production.js") && packed.has("dist/production-domain.js")
     && packed.has("dist/production-store.js") && packed.has("dist/production-read-model.js")
     && packed.has("dist/production-adapter.js")
@@ -141,11 +144,14 @@ try {
   ok(help.code === 0 && help.out.includes("project plan --input request.json")
     && help.out.includes("project create --input request.json --confirm PLAN_ID")
     && help.out.includes("project verify KEY") && help.out.includes("workspace add [DIR]")
+    && help.out.includes("source plan --project K --input FILE")
+    && help.out.includes("source register --project K --input FILE --confirm PLAN_ID")
+    && help.out.includes("source status --project K [--json]")
     && help.out.includes("production status [--project K] [--json]")
     && help.out.includes("production enqueue --plan --project K --input FILE")
     && help.out.includes("--confirm PLAN_ID")
     && help.out.includes("production handoff --project K --input FILE"),
-  "编译 cli.js help → 立项、workspace registry 与 production 命令可发现");
+  "编译 cli.js help → 立项、原著登记、workspace registry 与 production 命令可发现");
   const runHelp = run(process.execPath, [join(distDir, "cli.js"), "run", "--help"]);
   ok(runHelp.code === 0 && runHelp.out.includes("--cli claude|codex|opencode"), "编译 cli.js run --help → 调度器用法可读");
   const studioHelp = run(process.execPath, [join(distDir, "cli.js"), "studio", "--help"]);

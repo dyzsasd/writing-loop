@@ -25,6 +25,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   studio:                  ["studio"],                // loopback-only 本地编剧工作台
   ui:                      ["studio"],                // studio 的短别名
   project:                 ["project"],               // 项目清单与安全启停
+  source:                  ["source"],                // 原著登记、不可变分块与拆书票
   production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
   workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
@@ -67,6 +68,12 @@ const usage = (): void => {
   project create --input request.json --confirm PLAN_ID [--json]
                               以匹配的确认指纹原子发布 repo、运行态板与 config
   project verify KEY [--json] 独立核验立项后的 repo、首票与运行态布局
+  source plan --project K --input FILE
+                              零写入预览原著指纹、分块与处理授权
+  source register --project K --input FILE --confirm PLAN_ID [--json]
+                              本地登记原著与改编设计，并创建 writing-loop 拆书票
+  source status --project K [--json]
+                              查看原著登记及 source-analysis 进度
   production status [--project K] [--json]
                               查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
   production enqueue --plan --project K --input FILE [--json]

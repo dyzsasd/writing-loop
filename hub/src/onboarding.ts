@@ -714,6 +714,7 @@ function scaffoldRepo(stage: string, plan: OnboardingPlan): void {
 
 function outlineTicket(plan: OnboardingPlan, createdAt: string): string {
   const input = plan.input;
+  const needsSource = input.kind === "adaptation";
   const facts = [
     `- genre=${input.genre}（config.json）`,
     `- monetization=${input.monetization}；paywall=${JSON.stringify(input.paywall)}（config.json）`,
@@ -723,14 +724,17 @@ function outlineTicket(plan: OnboardingPlan, createdAt: string): string {
   const adaptation = input.kind === "adaptation"
     ? "\n- 对照 source/highlights.md 完成名场面-卡点对齐表；只读拆书三清单，不读/复制原著全文。"
     : "\n- 对照 source/benchmarks.md 的结构与差异化证据。";
+  const intakeNote = needsSource
+    ? "立项服务创建空白大纲票并停在 Backlog；先用 writing-loop source register 登记原著与改编设计，待 source-analysis 门通过后再放行大纲。"
+    : "立项服务创建首张大纲票；下一步运行 /showrunner-agent。";
   return `---
 id: ${plan.outlineTicket.id}
 title: ${JSON.stringify(plan.outlineTicket.title)}
 type: Feature
-state: Todo
+state: ${needsSource ? "Backlog" : "Todo"}
 owner: showrunner
 assignee: null
-labels: [writing-loop, Feature, outline, showrunner, story-designer]
+labels: [writing-loop, Feature, outline, showrunner, story-designer${needsSource ? ", source-pending" : ""}]
 priority: 1
 relatedTo: []
 duplicateOf: null
@@ -741,6 +745,7 @@ updated: ${createdAt}
 
 北极星与空白创作骨架已由立项服务建立。第一步是完成 \`outline.md\`，并补齐
 \`bible/characters.md\` 与 \`bible/world.md\` 的冻结层；showrunner 只验收，不自领起草。
+${needsSource ? "\n改编项目在原著登记和 source-analysis 票通过前不得起草大纲；空白三清单不是分析结果。" : ""}
 
 ## Context-pack
 
@@ -764,7 +769,7 @@ showrunner 做结构预审；evaluator 通过大纲定稿门后才能进入分�
 ---
 ## Comments
 ### ${createdAt} — add-script
-立项服务创建首张大纲票；下一步运行 /showrunner-agent。
+${intakeNote}
 `;
 }
 

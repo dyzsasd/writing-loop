@@ -44,7 +44,7 @@ neuf skills d'agents avec `writing-loop run --cli opencode`.
 
 ---
 
-## Étape 1 — Créer le dossier du projet et y déposer le roman
+## Étape 1 — Initialiser le workspace et garder le roman hors de Git
 
 **Workspace vs. repo de scénario** : un **workspace** est un dossier ordinaire
 contenant un ou plusieurs **repos de scénario** (chaque drame est son propre repo git
@@ -56,18 +56,16 @@ contenant un ou plusieurs **repos de scénario** (chaque drame est son propre re
 Ci-dessous, `~/dramas/` est votre workspace et `my-drama/` le repo d'un drame :
 
 ```bash
-mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace, my-drama = repo de scénario
-git -C ~/dramas/my-drama init
-cp /chemin/vers/votre-roman.txt ~/dramas/my-drama/source/novel.txt
+mkdir -p ~/dramas
+writing-loop init --dir ~/dramas
+cp /chemin/vers/votre-roman.txt ~/dramas/novel.txt
 ```
 
-> Point clé : le texte du roman doit se trouver sous `source/` du repo — le
-> décorticage d'adaptation travaille à partir de lui.
+> Gardez le roman dans le workspace mais hors du repo Git. `source register` crée des
+> chunks locaux immuables en mode 0600 ; Git ne reçoit que l'empreinte, le brief et
+> l'analyse structurée, jamais le roman brut.
 
-Dans Claude Code, placez le répertoire de travail sur ce dossier de projet
-(`cd ~/dramas/my-drama`), puis passez à l'étape 2. (`add-script` considère `~/dramas/`
-comme la racine du workspace et y crée `.writing-loop/` ; pour le premier drame, il
-confirme cette racine avec vous.)
+Placez le répertoire de travail sur le workspace (`cd ~/dramas`), puis passez à l'étape 2.
 
 ---
 
@@ -103,16 +101,12 @@ répondre :
 - **Échelle** : `totalEpisodes`, `paywall` (numéros de cartes de secours ; carte 1 ⊂
   épisodes 8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
-**Spécifique à l'adaptation (automatique)**
+**Spécifique à l'adaptation (l'accueil ne consigne que les contraintes)**
 
-- Le texte du roman est déjà dans `source/` → elle exécute la **checklist de
-  sélection du livre** (la trame peut-elle se compresser ≥10:1 ? densité des
-  morceaux de bravoure ? compressibilité des personnages ?) et signale le risque le
-  cas échéant.
-- Elle produit les **trois fiches de décorticage** dans `source/` : `mainline.md`
-  (squelette de la trame), `highlights.md` (liste des morceaux de bravoure / beats à
-  sensation — l'atout central de l'IP), `characters-function.md` (table des fonctions
-  des personnages, compressée à 3–5 principaux / ≤20 nommés).
+- Elle consigne les seuils de compression, de scènes fortes et de personnages, sans
+  lire ni décortiquer le roman.
+- Elle crée trois fiches vides. Le ticket writing-loop `source-analysis` les remplit
+  ensuite à partir de chunks durables et vérifiés un par un.
 - **Palier de fidélité** : par défaut **adaptation fidèle (贴改)** ; le
   **placage-de-coquille est désactivé par défaut** et inscrit dans les Non-goals.
 - **Limite de droits** : bornée par la licence (consignée dans north-star) ; aucun
@@ -126,14 +120,31 @@ Ensuite `add-script` automatiquement :
 - **REGISTER** : enregistre le projet dans `~/dramas/.writing-loop/config.json`, crée le
   répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude le
   répertoire `lessons/` (un fichier partagé + un par rôle).
-- **Premier ticket de plan** : crée un ticket outline (owner=showrunner,
-  tier=story-designer).
+- **Premier ticket de plan** : Todo pour un original ; `Backlog+source-pending` pour
+  une adaptation, afin que le plan ne devance jamais le décorticage.
 - **VERIFY** : relit, valide et vous indique l'étape suivante.
 
 > L'entretien d'`add-script` demande le mode — répondez `dry-run` la première fois :
 > elle imprime seulement ce qu'elle *ferait*, sans rien écrire ni committer. Une fois
 > les conclusions de l'entretien confirmées, relancez `/writing-loop:add-script` et
 > répondez `live` pour l'accueil réel du projet.
+
+### Étape 2.5 — Enregistrer le roman et votre design d'adaptation
+
+Créez un JSON indiquant le `sourcePath` local au workspace, l'`adaptationBrief`, la
+portée des droits et le consentement explicite nommant les Harnesses autorisés à lire
+les chunks bruts, puis lancez :
+
+```bash
+writing-loop source plan --project my-drama --input source-intake.json
+writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
+writing-loop source status --project my-drama
+```
+
+Le plan n'écrit rien et n'appelle aucun modèle. Register ne fait que copier/chunker
+localement, committer le brief et créer le ticket source-analysis. Writing-loop choisit
+ensuite la fenêtre de saison, traite un chunk par fire, agrège les trois fiches et les
+soumet à la porte du Showrunner.
 
 ---
 
@@ -148,8 +159,9 @@ rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les
 **Premier cycle (l'ordre naturel pour l'adaptation) :**
 
 ```
-/writing-loop:showrunner-agent       # dirige direction, portes, jalons et libérations ultérieures (le ticket de plan a été créé directement en Todo par add-script — exemption §5a — le story-designer peut le prendre directement)
-/writing-loop:story-designer-agent    # lit les fiches de décorticage → écrit outline.md + la bible ; puis les fiches de beats par arc
+/writing-loop:story-designer-agent    # source-analysis : fenêtre de saison, chunks, trois fiches
+/writing-loop:showrunner-agent       # accepte la porte source, puis seulement déverrouille outline
+/writing-loop:story-designer-agent    # écrit outline.md + bible, puis les fiches de beats par arc
 /writing-loop:market-watch-agent      # évaluation datée de la fenêtre de genre — la couche marché de la porte de verrou du plan en dépend ; données manquantes = item inconclusive, et les cas ligne-rouge se garent en attendant que vous les fournissiez
 /writing-loop:evaluator-agent         # porte de verrou du plan (marché + pré-notation contenu + conformité)
 /writing-loop:episode-writer-agent    # écrit les épisodes dans l'ordre ; les épisodes pivots sont écrits par le Story-Designer

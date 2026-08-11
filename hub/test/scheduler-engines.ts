@@ -19,8 +19,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  AGENT_SPECS, buildInlinePrompt, buildSched, buildTrimSettingsJson, fireArgv,
-  OPENCODE_PERMISSION_DEFAULT, readEnabledPlugins, resolveTrimPlugins,
+  AGENT_SPECS, buildInlinePrompt, buildSched, buildTrimSettingsJson, fireArgv, fireEnv,
+  OPENCODE_PERMISSION_DEFAULT, readEnabledPlugins, resolveTrimPlugins, sourceAnalysisHarnessGate,
 } from "../src/scheduler.ts";
 import { pluginRoot } from "../src/paths.ts";
 
@@ -179,6 +179,39 @@ writeFileSync(process.argv[2], process.env.OPENCODE_PERMISSION ?? "MISSING");
   rmSync(ws, { recursive: true, force: true });
 }
 
+function testSourceHarnessAuthorization(): void {
+  const ws = makeWs({ "story-designer": { enabled: true } });
+  const projData = join(ws, ".writing-loop", "t1");
+  const tickets = join(projData, "board", "tickets");
+  mkdirSync(tickets, { recursive: true });
+  writeFileSync(join(tickets, "WL-1.md"), `---\nid: WL-1\ntitle: source\ntype: Feature\nstate: Todo\nowner: showrunner\nassignee: null\nlabels: [writing-loop, source-analysis, story-designer]\npriority: 1\nupdated: 2026-08-11T00:00:00.000Z\n---\n`);
+  const sourceDir = join(projData, "source-intake.v1");
+  mkdirSync(sourceDir, { recursive: true });
+  const manifest = { kind: "writing-loop/source-intake", adaptation: {
+    processingConsent: { allowedHarnesses: ["claude"], rawNovelContentMayBeSent: true,
+      confirmedAt: "2026-08-11T00:00:00.000Z" },
+  } };
+  writeFileSync(join(sourceDir, "manifest.v1.json"), JSON.stringify(manifest));
+  check("source consent：授权 Harness 可启动 story-designer source-analysis",
+    sourceAnalysisHarnessGate(projData, tickets, "claude").allowed);
+  const denied = sourceAnalysisHarnessGate(projData, tickets, "codex");
+  check("source consent：未授权 Harness 在 spawn 前 fail closed",
+    !denied.allowed && denied.reason.includes("未授权"));
+  writeFileSync(join(sourceDir, "manifest.v1.json"), JSON.stringify({ ...manifest, adaptation: {
+    processingConsent: { ...manifest.adaptation.processingConsent, rawNovelContentMayBeSent: false },
+  } }));
+  check("source consent：仅列 Harness 但未明确允许原文发送仍在 spawn 前拒绝",
+    !sourceAnalysisHarnessGate(projData, tickets, "claude").allowed);
+  writeFileSync(join(sourceDir, "manifest.v1.json"), "{}");
+  check("source consent：缺失/漂移 manifest 不能依赖 skill 自觉读取原著",
+    !sourceAnalysisHarnessGate(projData, tickets, "claude").allowed);
+  const sched = buildSched({ projects: { t1: { repoPath: "t1" } } }, "t1", { repoPath: "t1" });
+  sched.cli = "opencode";
+  check("source consent：child env 显式携带实际 Harness identity",
+    fireEnv(sched, ws).WRITING_LOOP_HARNESS === "opencode");
+  rmSync(ws, { recursive: true, force: true });
+}
+
 // ---------------------------------------------------------------------------
 // 4. inline promptMode（单元三断言 + claude 车道 E2E）
 // ---------------------------------------------------------------------------
@@ -332,6 +365,7 @@ for (const [name, fn] of [
   ["testArgvParity040", testArgvParity040],
   ["testOpencodeDryRun", testOpencodeDryRun],
   ["testOpencodePermissionEnv", testOpencodePermissionEnv],
+  ["testSourceHarnessAuthorization", testSourceHarnessAuthorization],
   ["testInlinePrompt", testInlinePrompt],
   ["testCliFlagOverride", testCliFlagOverride],
   ["testSpecs060Defaults", testSpecs060Defaults],

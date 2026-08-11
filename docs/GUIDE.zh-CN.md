@@ -38,26 +38,25 @@ Codex 提供同样的 plugin/slash 立项入口。如果只使用 OpenCode，请
 
 ---
 
-## 第 1 步：建剧本工程目录，放进小说
+## 第 1 步：初始化 workspace，把小说放在 workspace 根
 
 **workspace 与剧本 repo 的关系**：一个 **workspace** 是一个普通文件夹，里面放若干
 **剧本 repo**（每部剧一个独立 git 仓库，“文档即代码”）+ 一个 `.writing-loop/` 运行时
 状态目录（config + 看板 + lessons，由 `add-script` 自动创建）。**复制这一个 workspace
 文件夹 = 整体迁移全部剧本 + 在制工单**（见文末「迁移」）。
 
-下面 `~/dramas/` 就是你的 workspace，`my-drama/` 是其中一部剧的仓库：
+下面 `~/dramas/` 是 workspace。剧本 repo 由立项 core 创建；不要预建，也不要把原著放进 Git：
 
 ```bash
-mkdir -p ~/dramas/my-drama/source          # ~/dramas = workspace，my-drama = 剧本 repo
-git -C ~/dramas/my-drama init
-cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
+mkdir -p ~/dramas
+writing-loop init --dir ~/dramas
+cp /path/to/你的小说.txt ~/dramas/novel.txt
 ```
 
-> 关键：小说文本必须落在剧本仓库的 `source/` 里——改编线的拆书就基于它。
+> 关键：原著留在 workspace、剧本 repo 之外。`writing-loop source register` 会复制成
+> 本地 `0600` 不可变分块；Git 只接收指纹、改编设计和结构化分析，不接收小说全文。
 
-在 Claude Code 里把工作目录切到这个剧本目录（`cd ~/dramas/my-drama`），再进入第 2 步。
-（`add-script` 会把 `~/dramas/` 认作 workspace 根，并在其下建 `.writing-loop/`；首剧时会
-先跟你确认这个根。）
+把工作目录切到 workspace（`cd ~/dramas`），再进入第 2 步。
 
 ---
 
@@ -80,10 +79,10 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 - **format**：`live-action` / `ai-anime` / `reelshort-en`（决定字数带与制作层预算；ai-anime 特效近乎免费是形态优势）。
 - **规模**：`totalEpisodes`、`paywall`（备卡集号，一卡 ⊂ 第 8–12 集）、`maxPrimaryScenes`、`maxNamedCharacters`。
 
-**改编线专属（自动进行）**
+**改编线专属（立项时只登记约束）**
 
-- 原著文本已在 `source/` → 它做**选书检查表评估**（主线能否压到 ≥10:1、名场面密度、角色可压缩性），不达标会提示风险。
-- 产出**拆书三清单**到 `source/`：`mainline.md`（主线骨架）、`highlights.md`（爽点名场面清单，IP 核心资产）、`characters-function.md`（人物功能表，压到核心 3–5 人 / 具名 ≤20）。
+- 它收集压缩比、名场面数、角色数阈值并提示风险，但**不读取原著、不做拆书**。
+- 它只创建三张空白工作表；真正的三清单由后续 writing-loop `source-analysis` 票逐块生成。
 - **忠实度档位**：默认「贴改」；「借壳」默认禁用并写进 Non-goals。
 - **版权边界**：以授权范围为准（记入 north-star），不混入其他 IP 可识别元素。
 
@@ -91,10 +90,39 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 
 - **SCAFFOLD**：生成 `bible/`（north-star / characters / world）、`outline.md`、`ledgers/`（foreshadow / story-state / production + archive/）、`episodes/`、`evaluation/`；`git commit`。
 - **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons/` 目录骨架（全队共享一份 + 每角色一份）。
-- **首张大纲票**：file 一张 outline 工单（owner=showrunner，tier=story-designer）。
+- **首张大纲票**：原创为 Todo；改编为 `Backlog+source-pending`，原著拆解门通过前不会抢跑。
 - **VERIFY**：回读校验并告诉你下一步。
 
 > `add-script` 采访时会问 mode——首次回答 `dry-run`，它只打印“会做什么”、不写盘不 commit。确认采访结论无误后，再跑一次 `/writing-loop:add-script` 回答 `live` 正式立项。
+
+### 第 2.5 步：登记原著与改编设计
+
+准备一个 intake JSON，其中 `sourcePath` 指向 workspace 内的原著，`adaptationBrief` 是你的改编
+设计。`processingConsent` 明确哪些 Harness 可以逐块处理原著；未明确允许时，core 会拒绝模型读取：
+
+```json
+{
+  "version": 1,
+  "sourceTitle": "原著名",
+  "sourcePath": "/Users/you/dramas/novel.txt",
+  "adaptationBrief": "第一季范围、核心钩子、改名与重构要求……",
+  "rightsScope": "已确认的内部开发/改编权范围",
+  "processingConsent": {
+    "allowedHarnesses": ["claude"],
+    "rawNovelContentMayBeSent": true,
+    "confirmedAt": "2026-08-11T12:00:00.000Z"
+  }
+}
+```
+
+```bash
+writing-loop source plan --project my-drama --input source-intake.json
+writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
+writing-loop source status --project my-drama
+```
+
+plan 严格零写、零模型调用。register 只做本地复制/分块、提交改编设计并 file `source-analysis`
+票；之后才由 writing-loop 自己选择本季范围、每 fire 分析一块、聚合三清单并交 showrunner。
 
 ---
 
@@ -107,8 +135,9 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 **第一轮（改编线的自然顺序）：**
 
 ```
-/writing-loop:showrunner-agent       # 管方向、门禁、里程碑与后续放行（大纲票已由 add-script 直接 file 进 Todo——§5a 豁免，story-designer 直接可拾）
-/writing-loop:story-designer-agent    # 读拆书三清单 → 写 outline.md + bible；再逐个 arc 写「逐集节拍单」
+/writing-loop:story-designer-agent    # 先拾 source-analysis：选季范围、逐块拆书、聚合三清单
+/writing-loop:showrunner-agent       # 验收拆书门；通过后才解锁 outline
+/writing-loop:story-designer-agent    # 再写 outline.md + bible；随后逐 arc 写「逐集节拍单」
 /writing-loop:market-watch-agent      # 带日期的题材窗口评估——大纲定稿门的市场层评分依赖它；缺数据时该项 inconclusive，红线类会人工停靠等你补
 /writing-loop:evaluator-agent         # 大纲定稿门（市场层+内容层预评+合规）
 /writing-loop:episode-writer-agent    # 按集号顺序写正文；keystone 集由 story-designer 亲写

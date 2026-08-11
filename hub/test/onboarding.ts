@@ -611,6 +611,18 @@ updated: 2026-08-10T10:10:00.000Z
   writeFileSync(configFile, JSON.stringify(changed, null, "\t") + "\n");
   ok(throwsWith(() => commitOnboarding(tmp, staleInput, stalePlan.planId), "确认指纹不匹配"), "config 变化使旧 plan 确认失效");
   ok(!existsSync(join(tmp, "stale-plan")) && !existsSync(join(data, "stale-plan")), "陈旧 plan 不留下半项目");
+
+  const adaptationInput = {
+    ...input("source-gated"), kind: "adaptation", ticketPrefix: "SG",
+    comparables: undefined, differentiation: undefined,
+    adaptation: { rightsScope: "已授权内部改编开发", compressionRatio: 10, highlightCount: 8, namedCharacterCount: 18, riskAcknowledged: true },
+  };
+  const adaptationPlan = planOnboarding(tmp, adaptationInput);
+  commitOnboarding(tmp, adaptationInput, adaptationPlan.planId, { now: () => new Date("2026-08-11T02:00:00.000Z") });
+  const adaptationTicket = readFileSync(join(data, "source-gated", "board", "tickets", "SG-1.md"), "utf8");
+  ok(adaptationTicket.includes("state: Backlog") && adaptationTicket.includes("source-pending")
+    && adaptationTicket.includes("writing-loop source register") && !adaptationTicket.includes("state: Todo"),
+  "改编立项的空白大纲票默认停在 source-pending，不会抢跑原著拆解");
 } finally {
   if (recoveryProcessA?.exitCode === null) recoveryProcessA.kill();
   rmSync(tmp, { recursive: true, force: true });

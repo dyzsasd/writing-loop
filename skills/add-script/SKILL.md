@@ -83,7 +83,9 @@ differ 点，写入 north-star `定位` 节）；对 1-2 部对标剧做轻量�
 **分叉 B · 小说改编**（§13/R11）：采集授权范围、主线压缩比、S 级名场面数、具名角色数。
 三阈值 ≥10:1 / ≥3 / ≤20 任一未过，逐项说明风险并要求 `riskAcknowledged:true`；忠实度
 默认贴改，借壳禁用写 Non-goals。core 只建 `source/mainline.md`、`highlights.md`、
-`characters-function.md` 工作表，不把未授权原文猜进 repo。
+`characters-function.md` **空白工作表**，不读取原著、不替 story-designer 填拆书答案，也不把
+原文放进 repo。立项后由操作者另走 `writing-loop source plan/register` 登记 workspace 内原著、
+改编设计和明确的 Harness 处理授权；该命令才创建 source-analysis 票。
 
 ### Job 2 — PLAN + OPERATOR CONFIRM（严格零写）
 把完整答案编码为 config-schema「立项 request」JSON，调用
@@ -96,7 +98,8 @@ differ 点，写入 north-star `定位` 节）；对 1-2 部对标剧做轻量�
 用**同一 request**调用
 `writing-loop project create --input request.json --confirm <planId> --json`（或 `--input -`）。core 会重算
 指纹、拒绝 config/template 漂移，以原子方式预留最终 repo/data 名称并在 journal 下生成 scaffold Git commit、运行态、lessons、
-唯一 Todo outline 首票与 receipt，再经 §11 config 锁发布并自动 verify。不要手写 config、
+唯一 outline 首票与 receipt，再经 §11 config 锁发布并自动 verify。原创首票为 Todo；改编首票
+为 `Backlog+source-pending`，直到 source-analysis 验收通过。不要手写 config、
 复制 templates、分配票号、追加 report 或补失败的半项目；core 报错就原样呈现，无安全 NEXT
 就停。进程被
 强杀/断电后，用同一 request + 原 `planId` 重跑本命令：core 从 durable journal 验证 marker、
@@ -108,8 +111,9 @@ data 被修改/加项或含 symlink 会拒绝；崩溃在摘要持久化前则�
 ### Job 4 — VERIFY + 交接
 即使 create 已自动验证，也运行 `writing-loop project verify <key> --json` 并展示结果：
 config-entry / repo-scaffold / git-head / outline-ticket / runtime-layout 必须全 PASS。输出立项摘要
-（key/立项式/genre 警告/monetization/门表/scaffold SHA/首票 ID）和下一步
-`/showrunner-agent`。首票恒 owner=showrunner、tier=story-designer；本 skill 不领票、不写 outline。
+（key/立项式/genre 警告/monetization/门表/scaffold SHA/首票 ID）。原创下一步为
+`/showrunner-agent`；改编下一步为准备 source intake JSON 并执行 `writing-loop source plan`，
+不是手工拆书。首票恒 owner=showrunner、tier=story-designer；本 skill 不领票、不写 outline。
 
 ## 2. Guardrails
 - §2 安全边界：只授权 core 创建一个新 repo、本项目数据目录及索引内本剧条目；绝不碰

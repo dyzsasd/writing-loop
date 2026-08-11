@@ -467,6 +467,41 @@ repo 已修改、final 与 stage 同时存在等情况都要求人工审计；co
 人工审计，恢复流程拒绝自动删除/重建。此流程只创建尚不存在的新 repo，不是已有 repo import
 或常驻多实例协调器。
 
+### 改编原著 source intake 与拆书门
+
+`add-script` / onboarding core 对改编项目只创建空白三清单，并把 outline 票置为
+`Backlog+source-pending`；它不读取原著。原著必须是 workspace 内、剧本 Git repo 外的单链接
+普通 UTF-8 文件。后续使用两阶段命令：
+
+```bash
+writing-loop source plan --project KEY --input source-intake.json
+writing-loop source register --project KEY --input source-intake.json --confirm wlsrc_...
+```
+
+intake v1 顶层 exact keys 为 `version/sourceTitle/sourcePath/adaptationBrief/rightsScope/
+processingConsent`。`processingConsent` exact keys 为：
+
+```json
+{
+  "allowedHarnesses": ["claude"],
+  "rawNovelContentMayBeSent": true,
+  "confirmedAt": "2026-08-11T12:00:00.000Z"
+}
+```
+
+`allowedHarnesses` 只能从 `claude|codex|opencode` 选择、去重且非空；没有显式
+`rawNovelContentMayBeSent:true` 时 plan 即 fail closed。plan 读取并固定源文件 identity、SHA-256、
+规范化 UTF-8 与确定性 `heading-line-v1` 分块，但严格零写、零 provider 网络。planId 绑定原著
+bytes、改编设计、权利范围、授权 Harness、repo/runtime 路径与全部 chunk metadata。
+
+register 将原始 bytes 与 chunks 以 mode 0600 发布到
+`.writing-loop/<key>/source-intake.v1/`，原著不进 Git；repo 只 commit
+`source/adaptation-brief.md` 与指纹。它创建 `source-analysis+story-designer` Todo 票，并给 outline
+写入 `Blocked-by`。story-designer 先用 `source select` 冻结本季范围，再每 fire 恰处理一块，
+单独 commit 带 provenance 的摘要并用 `source checkpoint` 核验；全部完成后聚合三清单并调用
+`source finalize`。只有 control.phase=`review-ready` 且 showrunner 将 source-analysis 票 Done，
+通用 Blocked-by resolver 才能解锁 outline。任何外部拆书 skill 产物都不能替代这条证据链。
+
 ## 数据目录布局 — `<workspace>/.writing-loop/<project-key>/`
 
 ```
@@ -479,6 +514,11 @@ repo 已修改、final 与 stage 同时存在等情况都要求人工审计；co
   <project-key>/
     activity-index.v2.json # 可删除重建的持久 activity cache（不是真相源）
     .activity-index.v2.lock # ActivityIndexer 独立 O_EXCL 刷新锁（正常结束即释放）
+    source-intake.v1/      # 改编原著本地运行态；全目录不进剧本 Git
+      manifest.v1.json     # 原著指纹、处理授权与确定性 chunk registry
+      control.v1.json      # selected/completed chunks + registered/analyzing/review-ready
+      original/source.txt  # 0600 immutable 原始 bytes
+      chunks/chunk-*.txt   # 0600、逐块 provider 输入
     board/
       counter.json        # { "prefix": "WL", "next": 42 }（hint；真相是 O_EXCL 独占创建）
       tickets/WL-1.md …   # 一票一文件：YAML frontmatter + 模板正文 + append-only 评论区（§18）

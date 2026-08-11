@@ -210,14 +210,21 @@ ticket, and verifies all three ground truths:
 /writing-loop:add-script
 ```
 
+For an adaptation, the outline starts as `source-pending`. Keep the novel in the
+workspace but outside the repo, then use `writing-loop source plan/register` to
+record the novel, your adaptation design, rights scope, and explicit Harness consent.
+Writing-loop's own `source-analysis` ticket processes durable chunks and aggregates
+the three worksheets; the Showrunner unlocks the outline only after that gate.
+`add-script` itself never reads or analyzes the novel.
+
 **3. Run the room.** Each agent is a stateless skill: Claude Code and Codex can
 invoke it as a slash command, while the OpenCode Harness receives the same nine
 agent skills inline. Every fire re-reads ground truth from the board + repo. Drive
 them in the natural order, or point external `cron` at them:
 
 ```
-/writing-loop:showrunner-agent        # files the outline ticket, gates designs, promotes the queue
-/writing-loop:story-designer-agent     # writes outline + bible, then per-arc beat cards, spawns episode tickets
+/writing-loop:story-designer-agent     # adaptations: chunked source-analysis; then outline and beat cards
+/writing-loop:showrunner-agent        # accepts source/outline gates and promotes the queue
 /writing-loop:episode-writer-agent     # pulls episode tickets in order, writes drafts, declares ledger deltas
 /writing-loop:reviewer-agent           # independent per-episode verification (three-way classification, cited assertions)
 /writing-loop:evaluator-agent          # runs milestone-eval gates (outline lock, first-paywall pack, finale …)
@@ -275,7 +282,7 @@ Every project is a git repo where documents *are* the code:
     archive/arc-NN.md                      #   per-arc rollup
   episodes/ep-NNN.md                       # frontmatter fingerprint (beat-card hash / model / rules-version) + script
   evaluation/                              # milestone reports + clip lists
-  source/                                  # adaptation: source text + three teardown worksheets
+  source/                                  # adaptation: source fingerprint/brief + worksheets (no raw novel)
                                            #   original: light teardown of comparison dramas
 ```
 

@@ -146,13 +146,18 @@ file 第一张大纲票，并验证三处 ground truth：
 /writing-loop:add-script
 ```
 
+改编项目的大纲票先停在 `source-pending`。把原著留在 workspace、repo 之外；用
+`writing-loop source plan/register` 登记原著、你的改编设计、权利范围和明确的 Harness
+处理授权。writing-loop 随后通过 `source-analysis` 票逐块拆解并聚合三清单，showrunner
+验收后才解锁大纲；`add-script` 本身不读取或分析小说。
+
 **3. 运行团队。** 每个 agent 都是无状态 skill：Claude Code/Codex 可把它作为 slash
 命令调用；OpenCode Harness 则内联同一组 9 个 agent skill。每次 fire 都从板 + repo
 重读 ground truth。按自然顺序依次驱动，或用外部 `cron` 调度：
 
 ```
-/writing-loop:showrunner-agent         # file 大纲票、把大纲门、放行队列
-/writing-loop:story-designer-agent      # 写 outline+bible，再写逐集节拍单、spawn 单集票
+/writing-loop:story-designer-agent      # 改编先逐块 source-analysis；之后写 outline/节拍单
+/writing-loop:showrunner-agent         # 验收原著拆解与大纲门，放行队列
 /writing-loop:episode-writer-agent      # 按集序拾取单集票、写正文、声明账本 delta
 /writing-loop:reviewer-agent            # 逐集独立验收（三分类、断言带正文引文）
 /writing-loop:evaluator-agent           # 执行里程碑门（大纲定稿、一卡包、完本…）
@@ -206,7 +211,7 @@ file 第一张大纲票，并验证三处 ground truth：
     archive/arc-NN.md                      #   每 arc 滚存
   episodes/ep-NNN.md                       # frontmatter 指纹（节拍单哈希 / model / 规则版本）+ 正文
   evaluation/                              # 里程碑报告 + 切片清单
-  source/                                  # 改编：原著文本 + 拆书三清单
+  source/                                  # 改编：原著指纹/设计 + 三清单（原文不进 Git）
                                            #   原创：对标剧轻量拆解
 ```
 

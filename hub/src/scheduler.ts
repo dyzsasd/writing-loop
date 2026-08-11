@@ -527,6 +527,63 @@ export function readBoardTickets(ticketsDir: string): BoardSnap {
   return { tickets, unreadable: false, anyMalformed };
 }
 
+export type SourceHarnessGate = { allowed: true } | { allowed: false; reason: string };
+
+// Raw novel chunks are a stronger boundary than ordinary repo documents. An adaptation
+// intake names the exact Harnesses allowed to receive them, so the scheduler refuses to
+// launch the story-designer lane on an open source-analysis ticket with any other CLI.
+export function sourceAnalysisHarnessGate(projData: string, ticketsDir: string,
+  cli: Sched["cli"]): SourceHarnessGate {
+  const board = readBoardTickets(ticketsDir);
+  if (board.unreadable || board.anyMalformed) return { allowed: false, reason: "无法安全判定 source-analysis 板状态" };
+  const open = board.tickets.some((ticket) => (ticket.state === "Todo" || ticket.state === "In Progress")
+    && ticket.labels.includes("source-analysis") && ticket.labels.includes("story-designer"));
+  if (!open) return { allowed: true };
+  const file = join(projData, "source-intake.v1", "manifest.v1.json");
+  let fd: number | undefined;
+  try {
+    const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
+    fd = openSync(file, fsConstants.O_RDONLY | noFollow);
+    const before = fstatSync(fd, { bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.size <= 0n || before.size > 4n * 1024n * 1024n) {
+      return { allowed: false, reason: "source manifest 不是安全的有界普通文件" };
+    }
+    const bytes = Buffer.alloc(Number(before.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count <= 0) return { allowed: false, reason: "source manifest 读取中途截断" };
+      offset += count;
+    }
+    const after = fstatSync(fd, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
+      || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
+      return { allowed: false, reason: "source manifest 在授权判定期间发生变化" };
+    }
+    const manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as {
+      kind?: unknown; adaptation?: { processingConsent?: {
+        allowedHarnesses?: unknown; rawNovelContentMayBeSent?: unknown; confirmedAt?: unknown;
+      } };
+    };
+    const consent = manifest?.adaptation?.processingConsent;
+    const allowed = consent?.allowedHarnesses;
+    const confirmed = typeof consent?.confirmedAt === "string" ? Date.parse(consent.confirmedAt) : NaN;
+    if (manifest.kind !== "writing-loop/source-intake" || !Array.isArray(allowed)
+      || allowed.length < 1 || allowed.length > 3 || new Set(allowed).size !== allowed.length
+      || allowed.some((item) => item !== "claude" && item !== "codex" && item !== "opencode")
+      || consent?.rawNovelContentMayBeSent !== true || !Number.isFinite(confirmed)
+      || new Date(confirmed).toISOString() !== consent?.confirmedAt) {
+      return { allowed: false, reason: "source manifest 的 Harness 授权无效" };
+    }
+    return allowed.includes(cli) ? { allowed: true }
+      : { allowed: false, reason: `source intake 未授权 Harness '${cli}'` };
+  } catch {
+    return { allowed: false, reason: "source manifest 缺失或无法解析" };
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 // showrunner 板快照哈希——沿用其 SKILL §0 定义：按 ID 排序、拼 id+state+labels+assignee+
 // updated+mtime 后求哈希（`updated` 承载评论交接 §18；`mtime` 承载人类手写留言 §0——缺一即假退出）。
 export function boardSnapshotHash(tickets: LaneTicket[]): string {
@@ -1143,6 +1200,7 @@ export function fireEnv(
   providers: Record<string, ProviderEntry> = {},
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+  env.WRITING_LOOP_HARNESS = sched.cli;
   const homeBin = join(homedir(), ".local", "bin");
   env.PATH = homeBin + delimiter + (env.PATH ?? "");
   if (sched.cli === "opencode") {
@@ -1756,6 +1814,19 @@ export class Scheduler {
   //（spawnError 的「下 tick 立即重试」语义有意保留：二进制装好即恢复，与 guard 不同）。
   launch(agent: string, gate: GateEval | null = null): boolean {
     const { model, effort, escalated } = resolveTier(this.sched, agent, this.boardDir);
+    const sourceGate: SourceHarnessGate = agent === "story-designer"
+      ? sourceAnalysisHarnessGate(this.projData, this.boardDir, this.sched.cli) : { allowed: true };
+    if (!sourceGate.allowed) {
+      const nowIso = utcIso();
+      console.log(`[${nowIso}] FAIL ${agent}：${sourceGate.reason} —— 修改 source intake 授权或改用已授权 --cli；零进程、零原著读取`);
+      this.ledgerAppend({
+        agent, model, effort, startedAt: nowIso, endedAt: nowIso, durationSeconds: 0,
+        exitCode: null, timedOut: false, noop: false, keystoneEscalated: escalated,
+        provider: providerOf(this.sched.cli, model), sourceHarnessDenied: this.sched.cli,
+      });
+      this.firedOnce.add(agent);
+      return false;
+    }
     // pre-spawn 认证 guard（dev-loop run-agents.ts:883-936 移植）：cli=opencode 且 model 的
     // provider 前缀命中注册表条目、但 authTokenEnv 环境变量不可解析 ⇒ 不 spawn，仍记账
     // （同现有 spawnError 分支的「不 spawn 但仍记账」模式），不进 inflight。

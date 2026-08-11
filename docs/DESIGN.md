@@ -47,7 +47,8 @@ citron 十教训 → 机制载体（v2 修订后）：
 | **market-watch 市场监察** | Ops | sonnet/high | 慢频（周）扫榜+平台政策：带日期的题材窗口评估；窗口/政策变化⇒needs-showrunner 票。evaluator 市场层打分必须引用其评估（过期⇒inconclusive） |
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
 | **sweep** | Sweep | sonnet/high | 生命周期卫生（机制原样 + 本设计新增票类的错标规则） |
-| **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填+扫榜引用）：原创（含对标剧轻量拆解）/ 改编（选书评估+拆书三清单）→ scaffold+注册 |
+| **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创可带对标轻拆；改编只登记阈值并创建空白表，outline 停 source-pending |
+| **source intake**（CLI + story-designer 模式） | ingest/analysis | opus/max | plan-confirm 登记 workspace-local 原著+改编设计+Harness 授权；不可变分块→逐块 checkpoint→三清单→showrunner 门 |
 
 **升级链（v2 修订）**：reviewer 对单集 fail 的**三级路由**——
 ① 默认 = notes 回炉：close+follow-up 修订票回原 episode-writer（附结构化 notes：
@@ -72,7 +73,8 @@ human-park。fail 计数的机械载体 = Mode 行 + supersede 链，不靠记�
     archive/arc-NN.md                        # 每 arc 滚存
   episodes/ep-NNN.md                         # frontmatter 指纹（节拍单哈希/model/规则版本）+ 正文
   evaluation/                                # 里程碑评估报告 + 切片清单
-  source/                                    # 改编：原著+拆书三清单；原创：对标剧轻量拆解
+  source/                                    # 改编：原著指纹/设计+三清单（原文只在 workspace runtime）
+                                             # 原创：对标剧轻量拆解
 ```
 
 **版本纪律（反「已过门工件静默改写」）**：单集 frontmatter 记 arc 文件**内容哈希**；

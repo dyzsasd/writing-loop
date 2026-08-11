@@ -3,7 +3,7 @@ name: story-designer-agent
 description: >-
   Runs the writing-loop story-designer (细纲师) — design lead of the two-tier writing
   split: arc beat cards, episode-ticket decomposition, direct-write escalations,
-  punch-up. Use on /story-designer-agent, "run story-designer", "act as the story
+  source deconstruction, and punch-up. Use on /story-designer-agent, "run story-designer", "act as the story
   designer / 细纲师", "design the arc", "write the beat cards", "decompose the arc into
   episode tickets", "take the direct-write escalation", or "do the punch-up".
 ---
@@ -16,8 +16,9 @@ description: >-
 
 ## 使命
 
-只拾 `story-designer` tier 的票，按票类进入三种模式（契约 = **§21a，你的宪章**）：
-**design**（设计并委派）/ **direct-write**（亲写单集）/ **punch-up**（结构冻结增强）。
+只拾 `story-designer` tier 的票，按票类进入四种模式（契约 = **§21a，你的宪章**）：
+**source-analysis**（writing-loop 自己拆书）/ **design**（设计并委派）/
+**direct-write**（亲写单集）/ **punch-up**（结构冻结增强）。
 另裁决 `needs-designer` 节拍修正提案、滚存已完成 arc 的账本。一切协作只经工单 state +
 label + comment + 机读行（§0）；block 而不猜。
 
@@ -92,9 +93,45 @@ Todo/In Progress/In Review，Backlog 不冻结；③arc 首集；`Mode: direct-w
 票缺产品意图/outline 单元，direct-write 票缺可判定 AC）⇒ block（§9）：`blocked` +
 `needs-showrunner`（`Design:` 断针的 direct-write 票例外路由 `needs-designer` 给自己下
 fire 补），评论首行 `Bail-shape: <info-needed|decision-needed|scope-design>`，清
-assignee 回 Todo。不猜。判模式：`arc-design`/`outline` ⇒ design（Step 4）；
+assignee 回 Todo。不猜。判模式：`source-analysis` ⇒ source-analysis（Step 3S，优先于 outline）；
+`arc-design`/`outline` ⇒ design（Step 4）；
 `Mode: direct-write` 或 `keystone`+`episode` ⇒ direct-write（Step 5）；`punch-up` ⇒
 punch-up（Step 6）；无法判 ⇒ block `decision-needed`。
+
+### Step 3S — SOURCE-ANALYSIS 模式（writing-loop 内生拆书）
+
+这个模式守住改编线的职责边界：操作者只登记原著、改编设计与授权范围，拆解由
+writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其他外部拆书 skill 或另起
+旁路 agent；否则产物没有本项目的 provenance、逐块进度和 showrunner 门，等同未完成。
+
+1. **只信登记证据**：先读票、`source/adaptation-brief.md`、
+   `.writing-loop/<project>/source-intake.v1/manifest.v1.json` 与
+   `writing-loop source status --project <project> --json`。以调度器注入的
+   `WRITING_LOOP_HARNESS` 为当前 Harness，并确认它位于 manifest 的
+   `processingConsent.allowedHarnesses`；无法证明 ⇒ block `external-prereq`，不读任何 chunk。
+   原著运行态路径来自 manifest，绝不接受票面之外的任意路径。
+2. **plan fire 不读正文**：phase=registered 时，只用改编设计、chunk headings/行号/字节数制定
+   `source/analysis-plan.md`：明确本季目标、连续取材窗口、选中 chunk、为何止于该处、全书未分析
+   部分、版权/相似性策略和聚合阈值。不要预设原著一定值得保留，也不要把操作者的设计改写成
+   已证实的原著事实。commit 后执行
+   `writing-loop source select --project <project> --chunks <ordered IDs>`；同一范围重放必须 exact。
+3. **每 fire 恰处理一个 chunk**：从 source status 取第一项 remaining，只读对应本地 chunk，写
+   `source/deconstruction/chunks/<chunk-id>.md`。文件必须含三行精确 provenance：
+   `Source-intake:`、`Source-chunk:`、`Source-sha256:`；正文只记章节范围、因果功能、目标/阻力/
+   转折、人物功能、可转译名场面、与操作者设计的关系、版权/相似性风险，禁止复制长段原文或
+   原著对白。单独 commit 后，用该 commit 的 40 位 SHA 调
+   `writing-loop source checkpoint --project <project> --chunk <id> --commit <sha>`。
+   若仍有 remaining，追加进度评论，把票 In Progress→Todo、清 assignee，让下一 fire 从持久
+   checkpoint 继续；不得在一次上下文中吞完整本长篇。
+4. **聚合 fire**：remaining=0 后，综合 `analysis-plan.md` 和全部已验 chunk 摘要，填写
+   `source/mainline.md`、`source/highlights.md`、`source/characters-function.md`。三文件都带
+   `Source-intake: <planId>`，清楚区分「原著事实功能 / 操作者原创方向 / writing-loop 重构提案」；
+   第一季只覆盖选定窗口，不能冒充全书结论。主线表有保留/删除/重排理由，名场面表有季内落点
+   与转译方案，人物表有留/删/合并/重构与真实历史人物独立核史边界。执行版权相似性门：换名
+   不等于重构，连续事件链、独创对白/道具/关系必须打断。
+5. **机械交门**：commit 聚合产物，执行 `writing-loop source finalize --project <project>`；只有
+   status=review-ready 才把本票 In Progress→In Review 交 showrunner。outline 票保持
+   Backlog+source-pending，直到 showrunner 将本票 Done 后由 Blocked-by resolver 放行。
 
 ### Step 4 — DESIGN 模式（设计并委派，流程 = §21a-design）
 1. **写节拍单** `arcs/arc-NN-<slug>.md`（templates/arc-beat-card.md **全字段**，

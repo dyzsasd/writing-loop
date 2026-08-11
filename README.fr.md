@@ -186,14 +186,21 @@ les trois vérités-terrain :
 /writing-loop:add-script
 ```
 
+Pour une adaptation, le ticket outline démarre en `source-pending`. Gardez le roman
+dans le workspace mais hors du repo, puis utilisez `writing-loop source plan/register`
+pour consigner roman, design, droits et consentement explicite des Harnesses.
+Le ticket interne `source-analysis` traite les chunks et agrège les trois fiches ; le
+Showrunner ne déverrouille outline qu'après cette porte. `add-script` ne lit ni
+n'analyse lui-même le roman.
+
 **3. Faire tourner la room.** Chaque agent est une skill sans état : Claude Code et
 Codex peuvent l'invoquer comme slash command, tandis que le Harness OpenCode reçoit
 inline les neuf mêmes skills d'agents. Chaque fire relit la vérité-terrain depuis le
 tableau + le repo. Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 
 ```
-/writing-loop:showrunner-agent        # crée le ticket de plan, filtre les designs, promeut la file
-/writing-loop:story-designer-agent     # écrit le plan + la bible, puis les fiches de beats par arc, engendre les tickets d'épisode
+/writing-loop:story-designer-agent     # adaptation : source-analysis par chunks, puis plan et beats
+/writing-loop:showrunner-agent        # accepte les portes source/plan et promeut la file
 /writing-loop:episode-writer-agent     # tire les tickets d'épisode dans l'ordre, écrit les brouillons, déclare les deltas de registre
 /writing-loop:reviewer-agent           # vérification indépendante par épisode (classification à trois voies, assertions citées)
 /writing-loop:evaluator-agent          # exécute les portes milestone-eval (verrou du plan, pack premier-paywall, finale …)
@@ -252,7 +259,7 @@ Chaque projet est un repo git où les documents *sont* le code :
     archive/arc-NN.md                      #   rollup par arc
   episodes/ep-NNN.md                       # empreinte en frontmatter (hash de fiche / modèle / version de règles) + scénario
   evaluation/                              # rapports de jalon + listes de clips
-  source/                                  # adaptation : texte source + trois fiches de décorticage
+  source/                                  # adaptation : empreinte/brief + fiches (jamais le roman brut)
                                            #   original : décorticage léger de drames de comparaison
 ```
 
