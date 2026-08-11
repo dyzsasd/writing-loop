@@ -139,17 +139,19 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 
 **2. 立项**——在已 init 的 workspace 中点 Studio“新建项目”，或运行立项 skill。请选择一个
 **尚不存在**的 repo 路径，不要先建文件夹。attended interview 收题材、受众、monetization、
-合规预筛；改编另收授权与拆书阈值。确认零写入 plan 后，共享 core 才生成文档树、注册项目、
-file 第一张大纲票，并验证三处 ground truth：
+合规预筛；改编只需再给 workspace 内的原著文件、整体改编建议、权利范围，以及你明确允许
+处理原著分块的 Harness，不要求你预先决定本季章节或填写拆书结果。确认零写入 plan 后，
+共享 core 才生成文档树、注册项目并验证三处 ground truth：
 
 ```
 /writing-loop:add-script
 ```
 
-改编项目的大纲票先停在 `source-pending`。把原著留在 workspace、repo 之外；用
-`writing-loop source plan/register` 登记原著、你的改编设计、权利范围和明确的 Harness
-处理授权。writing-loop 随后通过 `source-analysis` 票逐块拆解并聚合三清单，showrunner
-验收后才解锁大纲；`add-script` 本身不读取或分析小说。
+改编项目在同一次确认中绑定原著字节，自动把原著复制/分块到本地运行态并创建
+`source-analysis` 票；大纲票先停在 `source-pending`。writing-loop 随后自主选择本季范围、
+逐块拆解并聚合三清单，showrunner 验收后才解锁大纲。`source plan/register` 只保留给
+已有项目迁移、故障恢复和高级 CLI 管理，**不是正常立项的第二步**；`add-script` 也不会调用
+外部拆书 Skill 代替这条自治工单链。
 
 **3. 运行团队。** 每个 agent 都是无状态 skill：Claude Code/Codex 可把它作为 slash
 命令调用；OpenCode Harness 则内联同一组 9 个 agent skill。每次 fire 都从板 + repo

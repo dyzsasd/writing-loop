@@ -79,10 +79,12 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 - **format**：`live-action` / `ai-anime` / `reelshort-en`（决定字数带与制作层预算；ai-anime 特效近乎免费是形态优势）。
 - **规模**：`totalEpisodes`、`paywall`（备卡集号，一卡 ⊂ 第 8–12 集）、`maxPrimaryScenes`、`maxNamedCharacters`。
 
-**改编线专属（立项时只登记约束）**
+**改编线专属（操作者提供输入，不填写拆书答案）**
 
-- 它收集压缩比、名场面数、角色数阈值并提示风险，但**不读取原著、不做拆书**。
-- 它只创建三张空白工作表；真正的三清单由后续 writing-loop `source-analysis` 票逐块生成。
+- 提供原著名称、workspace 内且剧本 repo 外的本机路径、完整改编/项目开发建议、权利范围，
+  以及明确允许处理原著分块的一个 Harness。
+- 不要预填本季章节范围、压缩结果、名场面或角色映射。立项只创建三张空白工作表，
+  writing-loop 后续通过 `source-analysis` 票逐块提出这些结果。
 - **忠实度档位**：默认「贴改」；「借壳」默认禁用并写进 Non-goals。
 - **版权边界**：以授权范围为准（记入 north-star），不混入其他 IP 可识别元素。
 
@@ -90,39 +92,19 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 
 - **SCAFFOLD**：生成 `bible/`（north-star / characters / world）、`outline.md`、`ledgers/`（foreshadow / story-state / production + archive/）、`episodes/`、`evaluation/`；`git commit`。
 - **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons/` 目录骨架（全队共享一份 + 每角色一份）。
-- **首张大纲票**：原创为 Todo；改编为 `Backlog+source-pending`，原著拆解门通过前不会抢跑。
+- **第一张可执行票**：原创的大纲票为 Todo；改编在同一次确认中登记/分块原著、创建
+  source-analysis Todo 票，并把大纲停在 `Backlog+source-pending`。
 - **VERIFY**：回读校验并告诉你下一步。
 
 > `add-script` 采访时会问 mode——首次回答 `dry-run`，它只打印“会做什么”、不写盘不 commit。确认采访结论无误后，再跑一次 `/writing-loop:add-script` 回答 `live` 正式立项。
 
-### 第 2.5 步：登记原著与改编设计
+### 第 2.5 步：让 writing-loop 自主分析原著
 
-准备一个 intake JSON，其中 `sourcePath` 指向 workspace 内的原著，`adaptationBrief` 是你的改编
-设计。`processingConsent` 明确哪些 Harness 可以逐块处理原著；未明确允许时，core 会拒绝模型读取：
-
-```json
-{
-  "version": 1,
-  "sourceTitle": "原著名",
-  "sourcePath": "/Users/you/dramas/novel.txt",
-  "adaptationBrief": "第一季范围、核心钩子、改名与重构要求……",
-  "rightsScope": "已确认的内部开发/改编权范围",
-  "processingConsent": {
-    "allowedHarnesses": ["claude"],
-    "rawNovelContentMayBeSent": true,
-    "confirmedAt": "2026-08-11T12:00:00.000Z"
-  }
-}
-```
-
-```bash
-writing-loop source plan --project my-drama --input source-intake.json
-writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
-writing-loop source status --project my-drama
-```
-
-plan 严格零写、零模型调用。register 只做本地复制/分块、提交改编设计并 file `source-analysis`
-票；之后才由 writing-loop 自己选择本季范围、每 fire 分析一块、聚合三清单并交 showrunner。
+正常立项没有第二次手工登记。你确认的 project plan 已经绑定原著指纹、改编建议、权利范围
+和 Harness 授权；project create 会自动在本地复制/分块原著、只提交指纹与改编建议，并创建
+`source-analysis` 票。此时直接启动编剧室：Story Designer 自主选择本季范围，每 fire 分析一块，
+聚合三清单后交 Showrunner 验收。`writing-loop source status --project my-drama` 是只读状态面；
+`source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
 ---
 

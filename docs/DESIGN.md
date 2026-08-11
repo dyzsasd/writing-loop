@@ -47,8 +47,8 @@ citron 十教训 → 机制载体（v2 修订后）：
 | **market-watch 市场监察** | Ops | sonnet/high | 慢频（周）扫榜+平台政策：带日期的题材窗口评估；窗口/政策变化⇒needs-showrunner 票。evaluator 市场层打分必须引用其评估（过期⇒inconclusive） |
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
 | **sweep** | Sweep | sonnet/high | 生命周期卫生（机制原样 + 本设计新增票类的错标规则） |
-| **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创可带对标轻拆；改编只登记阈值并创建空白表，outline 停 source-pending |
-| **source intake**（CLI + story-designer 模式） | ingest/analysis | opus/max | plan-confirm 登记 workspace-local 原著+改编设计+Harness 授权；不可变分块→逐块 checkpoint→三清单→showrunner 门 |
+| **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创收定位；改编收原著路径+整体建议+权利+Harness 同意，同一次确认自动 source intake，outline 停 source-pending |
+| **source intake**（onboarding core + story-designer 模式；独立 CLI 仅迁移/恢复） | ingest/analysis | opus/max | onboarding plan 绑定 workspace-local 原著 bytes+改编设计+Harness 授权；create 自动登记/建票；不可变分块→逐块 checkpoint→三清单→showrunner 门 |
 
 **升级链（v2 修订）**：reviewer 对单集 fail 的**三级路由**——
 ① 默认 = notes 回炉：close+follow-up 修订票回原 episode-writer（附结构化 notes：

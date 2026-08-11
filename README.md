@@ -201,21 +201,24 @@ readiness checks, and the separate no-GPU script-writing boundary are documented
 **2. Start a project** — from an initialized workspace, use Studio's “New
 project” or run the intake skill. Choose a path for a repo that does not exist
 yet; do not create the folder first. The attended interview covers genre,
-audience, monetization and compliance (plus rights and teardown thresholds for
-adaptations). It shows a zero-write plan for approval, then the shared core
-creates the document tree, registers the project, files the first outline
-ticket, and verifies all three ground truths:
+audience, monetization and compliance. For an adaptation it asks only for the
+workspace-local novel, your overall adaptation brief, rights scope, and the Harness
+you explicitly allow to process source chunks. It does not ask you to pre-compute a
+season range or teardown tables. It shows a zero-write plan for approval, then the
+shared core creates the document tree, registers the project, and verifies all three
+ground truths:
 
 ```
 /writing-loop:add-script
 ```
 
-For an adaptation, the outline starts as `source-pending`. Keep the novel in the
-workspace but outside the repo, then use `writing-loop source plan/register` to
-record the novel, your adaptation design, rights scope, and explicit Harness consent.
-Writing-loop's own `source-analysis` ticket processes durable chunks and aggregates
-the three worksheets; the Showrunner unlocks the outline only after that gate.
-`add-script` itself never reads or analyzes the novel.
+For an adaptation, the same confirmation binds the novel bytes, copies/chunks them
+into local runtime storage, files the `source-analysis` ticket, and leaves the outline
+as `source-pending`. Writing-loop then chooses the season window, processes durable
+chunks, and aggregates the three worksheets; the Showrunner unlocks the outline only
+after that gate. `source plan/register` remain advanced recovery/migration commands,
+not a second onboarding step. `add-script` itself never substitutes an external
+novel-analysis skill.
 
 **3. Run the room.** Each agent is a stateless skill: Claude Code and Codex can
 invoke it as a slash command, while the OpenCode Harness receives the same nine

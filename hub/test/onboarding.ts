@@ -32,6 +32,7 @@ const waitUntil = async (predicate: () => boolean, timeoutMs = 10_000): Promise<
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "wl-onboarding-")));
 const data = join(tmp, ".writing-loop");
 const configFile = join(data, "config.json");
+const sourceNovel = join(tmp, "source-novel.txt");
 const onboardingModule = new URL("../src/onboarding.ts", import.meta.url).href;
 let recoveryProcessA: ChildProcess | undefined;
 
@@ -59,6 +60,22 @@ const input = (key = "paper-moon", repoPath = key): Record<string, unknown> => (
   differentiation: "女主通过改写戏剧因果反制幕后操盘者",
 });
 
+const adaptation = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+  rightsScope: "已授权内部改编开发",
+  sourceTitle: "测试原著",
+  sourcePath: sourceNovel,
+  adaptationBrief: "保留核心情绪，不照搬事件链；由 writing-loop 自主确定第一季范围并完成拆解。",
+  processingConsent: {
+    allowedHarnesses: ["claude"], rawNovelContentMayBeSent: true,
+    confirmedAt: "2026-08-11T00:00:00.000Z",
+  },
+  compressionRatio: 10,
+  highlightCount: 3,
+  namedCharacterCount: 18,
+  riskAcknowledged: false,
+  ...overrides,
+});
+
 try {
   mkdirSync(data, { recursive: true });
   writeFileSync(configFile, JSON.stringify({
@@ -66,6 +83,7 @@ try {
     futureTopLevel: { preserve: true },
     projects: { legacy: { title: "旧剧", repoPath: "legacy", ticketPrefix: "LG", enabled: false, future: 42 } },
   }, null, "\t") + "\n");
+  writeFileSync(sourceNovel, Array.from({ length: 8 }, (_, index) => `第${index + 1}章 测试\n${"结构内容".repeat(2_000)}\n`).join(""));
 
   const beforePlan = readFileSync(configFile, "utf8");
   let plan = planOnboarding(tmp, input());
@@ -80,9 +98,22 @@ try {
   const riskyAdaptation = {
     ...input("risky-book"), kind: "adaptation", ticketPrefix: "RB",
     comparables: undefined, differentiation: undefined,
-    adaptation: { rightsScope: "已授权第一卷", compressionRatio: 8, highlightCount: 2, namedCharacterCount: 25, riskAcknowledged: false },
+    adaptation: adaptation({ rightsScope: "已授权第一卷", compressionRatio: 8, highlightCount: 2, namedCharacterCount: 25, riskAcknowledged: false }),
   };
   ok(throwsWith(() => planOnboarding(tmp, riskyAdaptation), "riskAcknowledged:true"), "改编三阈值不达标需显式确认");
+
+  const driftNovel = join(tmp, "drift-novel.txt");
+  writeFileSync(driftNovel, "第一章\n计划时的原著字节。\n");
+  const driftInput = {
+    ...input("source-drift"), kind: "adaptation", ticketPrefix: "SD",
+    comparables: undefined, differentiation: undefined,
+    adaptation: adaptation({ sourcePath: driftNovel, highlightCount: 8, riskAcknowledged: true }),
+  };
+  const driftPlan = planOnboarding(tmp, driftInput);
+  writeFileSync(driftNovel, "第一章\n确认前已经变更的原著字节。\n");
+  ok(throwsWith(() => commitOnboarding(tmp, driftInput, driftPlan.planId), "确认指纹不匹配")
+    && !existsSync(join(tmp, "source-drift")) && !existsSync(join(data, "source-drift")),
+  "原著文件在预览与确认之间漂移时 plan 失效且不留下半项目");
 
   const malformedConfig = JSON.parse(beforePlan) as { projects: Record<string, unknown> };
   malformedConfig.projects.bad = null;
@@ -615,14 +646,22 @@ updated: 2026-08-10T10:10:00.000Z
   const adaptationInput = {
     ...input("source-gated"), kind: "adaptation", ticketPrefix: "SG",
     comparables: undefined, differentiation: undefined,
-    adaptation: { rightsScope: "已授权内部改编开发", compressionRatio: 10, highlightCount: 8, namedCharacterCount: 18, riskAcknowledged: true },
+    adaptation: adaptation({ highlightCount: 8, riskAcknowledged: true }),
   };
   const adaptationPlan = planOnboarding(tmp, adaptationInput);
-  commitOnboarding(tmp, adaptationInput, adaptationPlan.planId, { now: () => new Date("2026-08-11T02:00:00.000Z") });
+  const adaptationResult = commitOnboarding(tmp, adaptationInput, adaptationPlan.planId, { now: () => new Date("2026-08-11T02:00:00.000Z") });
   const adaptationTicket = readFileSync(join(data, "source-gated", "board", "tickets", "SG-1.md"), "utf8");
+  const sourceTicket = readFileSync(join(data, "source-gated", "board", "tickets", "SG-2.md"), "utf8");
   ok(adaptationTicket.includes("state: Backlog") && adaptationTicket.includes("source-pending")
-    && adaptationTicket.includes("writing-loop source register") && !adaptationTicket.includes("state: Todo"),
-  "改编立项的空白大纲票默认停在 source-pending，不会抢跑原著拆解");
+    && adaptationTicket.includes("自动登记原著") && !adaptationTicket.includes("state: Todo")
+    && sourceTicket.includes("state: Todo") && sourceTicket.includes("source-analysis")
+    && adaptationResult.sourceAnalysisTicketId === "SG-2"
+    && adaptationPlan.sourceIntake?.source.fileName === "source-novel.txt"
+    && existsSync(join(data, "source-gated", "source-intake.v1", "original", "source.txt")),
+  "改编立项自动登记原著并创建 source-analysis 票，大纲票默认停在 source-pending");
+  ok(readFileSync(join(tmp, "source-gated", "bible", "north-star.md"), "utf8").includes("由 writing-loop 自主确定第一季范围")
+    && readFileSync(join(tmp, "source-gated", "source", "adaptation-brief.md"), "utf8").includes("操作者改编设计"),
+  "改编总建议同时进入 North Star 与 source intake，不要求操作者预填拆书结果");
 } finally {
   if (recoveryProcessA?.exitCode === null) recoveryProcessA.kill();
   rmSync(tmp, { recursive: true, force: true });

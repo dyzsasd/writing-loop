@@ -98,12 +98,14 @@ placeholders into config). For the adaptation track, be ready to answer:
 - **Scale**: `totalEpisodes`, `paywall` (backup card numbers; card 1 ⊂ episodes
   8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
-**Adaptation-only (onboarding records constraints only)**
+**Adaptation-only (the operator supplies inputs, not teardown answers)**
 
-- It records compression/set-piece/character thresholds and flags risk, but does not
-  read or deconstruct the novel.
-- It creates three blank worksheets. A later writing-loop `source-analysis` ticket
-  fills them from durable, individually checkpointed chunks.
+- Supply the novel title, its workspace-local path outside the script repo, your full
+  adaptation/development brief, rights scope, and the one Harness explicitly allowed
+  to process raw chunks.
+- Do not pre-fill a season range, compression result, set pieces, or character map.
+  Onboarding creates three blank worksheets and writing-loop's `source-analysis`
+  ticket proposes those results from durable, individually checkpointed chunks.
 - **Fidelity tier**: defaults to **close-adaptation (贴改)**; **shell-borrowing is
   disabled by default** and written into Non-goals.
 - **Rights boundary**: bounded by the license (recorded in north-star); no
@@ -117,8 +119,9 @@ Then `add-script` automatically:
 - **REGISTER**: registers the project in `~/dramas/.writing-loop/config.json`, creates the
   board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds the `lessons/` dir
   (one shared file + one per role).
-- **First outline ticket**: Todo for original projects; `Backlog+source-pending` for
-  adaptations, so a blank worksheet can never race ahead into an outline.
+- **First actionable ticket**: the outline is Todo for original projects. For an
+  adaptation the same confirmation registers/chunks the novel, files source-analysis
+  as Todo, and parks outline at `Backlog+source-pending`.
 - **VERIFY**: re-reads, validates, and tells you the next step.
 
 > The `add-script` interview asks for the mode — answer `dry-run` the first time:
@@ -126,22 +129,15 @@ Then `add-script` automatically:
 > you've confirmed the interview conclusions, run `/writing-loop:add-script` again
 > and answer `live` to onboard for real.
 
-### Step 2.5 — Register the novel and your adaptation design
+### Step 2.5 — Let writing-loop analyze the novel
 
-Create a JSON request with the workspace-local `sourcePath`, your `adaptationBrief`,
-the rights scope, and explicit consent naming the Harnesses allowed to process raw
-chunks. Then run:
-
-```bash
-writing-loop source plan --project my-drama --input source-intake.json
-writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
-writing-loop source status --project my-drama
-```
-
-The plan is zero-write and zero-network. Register only copies/chunks locally, commits
-the brief, and files the source-analysis ticket. The Story-Designer then selects the
-season range, analyzes one chunk per fire, aggregates the three worksheets, and hands
-them to the Showrunner gate.
+There is no second manual registration step in normal onboarding. The approved project
+plan already binds the novel fingerprint, brief, rights and Harness consent. Project
+creation copies/chunks the novel locally, commits only its provenance and your brief,
+and files source-analysis. Start the room; Story-Designer selects the season range,
+analyzes one chunk per fire, aggregates the three worksheets, and hands them to the
+Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
+plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
 ---
 

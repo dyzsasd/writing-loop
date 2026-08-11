@@ -2,9 +2,9 @@
 name: add-script
 description: >-
   Operator-present onboarding for writing-loop — interviews, scaffolds, and registers a
-  brand-new 短剧 script project (立项), then files the first outline ticket. Use on
+  brand-new 短剧 script project (立项), then files the first actionable ticket. Use on
   /add-script, "run add-script", "act as add-script", "立项", "add a new script", "onboard
-  a script", "start a new drama", "拆一本小说立项", or "set up <剧名> in writing-loop".
+  a script", "start a new drama", "拆一本小说立项", or "set up 某剧名 in writing-loop".
 ---
 
 # add-script（立项操作者 skill）
@@ -80,17 +80,23 @@ Sections: §0 §0a §1 §2 §11 §12a §13 §14 §15 §16 §17 §18 §20 §21 §
 differ 点，写入 north-star `定位` 节）；对 1-2 部对标剧做轻量拆解（结构骨架/爽点
 清单/钩型序列）产出到 `source/`。
 
-**分叉 B · 小说改编**（§13/R11）：采集授权范围、主线压缩比、S 级名场面数、具名角色数。
-三阈值 ≥10:1 / ≥3 / ≤20 任一未过，逐项说明风险并要求 `riskAcknowledged:true`；忠实度
-默认贴改，借壳禁用写 Non-goals。core 只建 `source/mainline.md`、`highlights.md`、
-`characters-function.md` **空白工作表**，不读取原著、不替 story-designer 填拆书答案，也不把
-原文放进 repo。立项后由操作者另走 `writing-loop source plan/register` 登记 workspace 内原著、
-改编设计和明确的 Harness 处理授权；该命令才创建 source-analysis 票。
+**分叉 B · 小说改编**（§13/R11）：只采集操作者真正掌握的输入：原著名称、workspace 内且
+repo 外的本机 UTF-8 文件路径、完整项目开发建议（`adaptationBrief`）、授权/内部开发范围，
+以及允许读取原著分块的 Harness（`claude|codex|opencode`）和明确同意。不要让操作者预填
+压缩比、S 级名场面数、角色拆分或本季章节范围；这些是 writing-loop 应通过 source-analysis
+自主提出并由 Showrunner 验收的结果。兼容 request 中的三项阈值由 onboarding core 写入保守
+分析目标（10:1 / 3 / ≤20），不是操作者声称已经完成的拆书结论。忠实度默认贴改，借壳禁用
+写 Non-goals。core 建空白三清单，但不读取原著、不替 story-designer 填答案，也不把原文放进
+repo；同一次确认会在项目发布后自动登记原著、创建 `source-analysis` Todo 票，并让 outline
+停在 `Backlog+source-pending`。`writing-loop source plan/register` 只保留为已有项目迁移、恢复
+和高级 CLI 管理面，**不是正常立项步骤**。
 
 ### Job 2 — PLAN + OPERATOR CONFIRM（严格零写）
 把完整答案编码为 config-schema「立项 request」JSON，调用
 `writing-loop project plan --input request.json`（或 `--input -`）。不得自己渲染模板或预建目录。向操作者
-展示：repo/data 路径、projectConfig、文件清单、首票、所有 warnings 与 `planId`。路径/规格/
+展示：repo/data 路径、projectConfig、文件清单、首票、所有 warnings 与 `planId`；改编项目还要
+展示原著文件名、字节数、SHA-256、确定性分块数和授权 Harness。planId 同时绑定原著 bytes、
+改编建议与处理授权，因此确认前原著漂移会使旧 plan 失效。路径/规格/
 警告未逐项确认就停在 plan；任何修改都重新 plan，绝不沿用旧指纹。仅当操作者明确确认
 显示的 `planId` 才进入 Job 3。用户只要预览时到此结束，plan 本身不写 daily。
 
@@ -98,8 +104,9 @@ differ 点，写入 north-star `定位` 节）；对 1-2 部对标剧做轻量�
 用**同一 request**调用
 `writing-loop project create --input request.json --confirm <planId> --json`（或 `--input -`）。core 会重算
 指纹、拒绝 config/template 漂移，以原子方式预留最终 repo/data 名称并在 journal 下生成 scaffold Git commit、运行态、lessons、
-唯一 outline 首票与 receipt，再经 §11 config 锁发布并自动 verify。原创首票为 Todo；改编首票
-为 `Backlog+source-pending`，直到 source-analysis 验收通过。不要手写 config、
+唯一 outline 首票与 receipt，再经 §11 config 锁发布并自动 verify。原创首票为 Todo；改编会
+自动把原著复制/分块到本地 mode-0600 runtime、commit 仅含指纹与改编建议、file source-analysis
+Todo 票；outline 为 `Backlog+source-pending`，直到该票验收通过。不要手写 config、
 复制 templates、分配票号、追加 report 或补失败的半项目；core 报错就原样呈现，无安全 NEXT
 就停。进程被
 强杀/断电后，用同一 request + 原 `planId` 重跑本命令：core 从 durable journal 验证 marker、
@@ -112,14 +119,16 @@ data 被修改/加项或含 symlink 会拒绝；崩溃在摘要持久化前则�
 即使 create 已自动验证，也运行 `writing-loop project verify <key> --json` 并展示结果：
 config-entry / repo-scaffold / git-head / outline-ticket / runtime-layout 必须全 PASS。输出立项摘要
 （key/立项式/genre 警告/monetization/门表/scaffold SHA/首票 ID）。原创下一步为
-`/showrunner-agent`；改编下一步为准备 source intake JSON 并执行 `writing-loop source plan`，
-不是手工拆书。首票恒 owner=showrunner、tier=story-designer；本 skill 不领票、不写 outline。
+`/showrunner-agent`；改编下一步是直接启动 scheduler，由 source-analysis 票自主选择本季范围、
+逐块拆解并提交 Showrunner 门，不是准备另一份 intake JSON，也不是手工拆书。outline 与
+source-analysis 票 owner 均为 showrunner、执行层为 story-designer；本 skill 不领票、不写 outline。
 
 ## 2. Guardrails
 - §2 安全边界：只授权 core 创建一个新 repo、本项目数据目录及索引内本剧条目；绝不碰
   他剧。目标已存在/歧义就停，不以手工 fallback 扩权。
 - 边界（对照 §21 观察型）：本 skill 不直接创建文件；core 只落操作者确认的 north-star/
   source 元数据、模板骨架与 config 制作上限，绝不写分集正文或擅造剧情/账本事实（§15/§21a）。
+  未明确同意原著分块由所选 Harness 处理时，改编 plan 必须零写拒绝。
 - §17 不自改治理文件：绝不改 conventions/SKILL/规则本体/**genre profile 参数表**；
   UNCALIBRATED 只警告不定参（校准走 §17 提案票：`blocked` + `needs-showrunner` +
   `external-prereq`）。north-star/outline 是产品文档（只建空骨架）；立项后维护权归
@@ -134,5 +143,5 @@ config-entry / repo-scaffold / git-head / outline-ticket / runtime-layout 必须
 
 ## 3. 收尾报告
 create core 已写唯一 daily 立项行与 `project.created` 事件；本 skill **不得重复追加**。
-只回报 verify 证据、warnings、首票 ID、scaffold SHA 与下一步 `/showrunner-agent`。停在 plan
+只回报 verify 证据、warnings、可执行首票 ID、scaffold SHA 与下一步启动 scheduler。停在 plan
 或失败时不写 report。

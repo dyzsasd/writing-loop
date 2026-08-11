@@ -63,18 +63,25 @@ ok(storyDesigner.includes("SOURCE-ANALYSIS 模式（writing-loop 内生拆书）
 "改编拆书由 writing-loop source-analysis/checkpoint/showrunner 门闭环，明确拒绝外部 skill 旁路");
 
 const guides = [read("docs", "GUIDE.md"), read("docs", "GUIDE.zh-CN.md"), read("docs", "GUIDE.fr.md")];
+const automaticSourcePhrases = [
+  "There is no second manual registration step in normal onboarding",
+  "正常立项没有第二次手工登记",
+  "Le parcours normal n'a pas de seconde inscription manuelle",
+];
 for (const [index, guide] of guides.entries()) {
   ok(guide.includes("OpenCode") && guide.includes("add-script")
     && guide.includes("project plan") && guide.includes("project create"),
   `指南 ${index + 1} 明示 OpenCode-only 的非 slash 立项入口`);
-  ok(guide.includes("writing-loop source plan") && guide.includes("writing-loop source register")
-    && guide.includes("source-analysis") && !guide.includes("my-drama/source/novel.txt"),
-  `指南 ${index + 1} 把原著留在 repo 外并交 writing-loop source-analysis，而非 add-script 外部拆书`);
+  ok(guide.includes(automaticSourcePhrases[index]!) && guide.includes("source-analysis")
+    && guide.includes("source status --project my-drama") && !guide.includes("my-drama/source/novel.txt"),
+  `指南 ${index + 1} 把原著交给立项后自动 source-analysis，而非要求第二次手工登记或外部拆书`);
 }
-ok(read("skills", "add-script", "SKILL.md").includes("不读取原著、不替 story-designer 填拆书答案")
+ok(read("skills", "add-script", "SKILL.md").includes("不是正常立项步骤")
+  && read("skills", "add-script", "SKILL.md").includes("同一次确认会在项目发布后自动登记原著")
   && read("references", "config-schema.md").includes("改编原著 source intake 与拆书门")
-  && read("hub", "README.md").includes("source register --project"),
-"add-script、schema 与 npm README 同步原著登记/内生拆书职责边界");
+  && read("references", "config-schema.md").includes("正常立项之后直接启动 scheduler")
+  && read("hub", "README.md").includes("no second operator command is part of the normal path"),
+"add-script、schema 与 npm README 同步一键原著登记/内生拆书职责边界");
 const design = read("docs", "DESIGN.md");
 ok(design.includes("三 Harness 可移植性（Claude/Codex/OpenCode）")
   && !design.includes("§25 第二 CLI 可移植性"),

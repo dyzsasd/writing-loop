@@ -9,6 +9,10 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { findOnPath, pkgVersion, pluginRoot } from "./paths.ts";
+import {
+  commitSourceIntake, planSourceIntake, planSourceIntakeForTarget,
+  type SourceIntakePlan, type SourceIntakeRequest, type SourceProcessingConsent,
+} from "./source-intake.ts";
 import { parseTicketFrontmatter, TICKET_STATES } from "./status.ts";
 import { withWorkspaceConfigLock } from "./workspace-store.ts";
 import {
@@ -21,6 +25,7 @@ const MONETIZATION = new Set(["paid-app", "free-hongguo", "reelshort-sub"]);
 const GENRES = new Set(["brain-hole", "revenge-slap", "profession-unit", "sweet-pet", "angst"]);
 const INTAKE_MODES = new Set(["autonomous", "passive"]);
 const PROJECT_MODES = new Set(["live", "dry-run"]);
+const SOURCE_HARNESSES = new Set(["claude", "codex", "opencode"]);
 const TICKET_PREFIX = /^[A-Z][A-Z0-9]{0,7}$/;
 const UNCALIBRATED = new Set(["sweet-pet", "angst"]);
 const AGENTS = [
@@ -59,6 +64,10 @@ export type OnboardingInput = {
   differentiation: string | null;
   adaptation: null | {
     rightsScope: string;
+    sourceTitle: string;
+    sourcePath: string;
+    adaptationBrief: string;
+    processingConsent: SourceProcessingConsent;
     compressionRatio: number;
     highlightCount: number;
     namedCharacterCount: number;
@@ -79,7 +88,8 @@ export type OnboardingPlan = {
   repoPath: string;
   configRepoPath: string;
   projectDataPath: string;
-  outlineTicket: { id: string; title: string; state: "Todo"; path: string };
+  sourceIntake: SourceIntakePlan | null;
+  outlineTicket: { id: string; title: string; state: "Todo" | "Backlog"; path: string };
   files: string[];
   warnings: string[];
   requiresConfirmation: true;
@@ -99,6 +109,8 @@ export type OnboardingResult = {
   outlineTicketId: string;
   commit: string;
   createdAt: string;
+  sourceIntakePlanId: string | null;
+  sourceAnalysisTicketId: string | null;
   verification: OnboardingVerification;
 };
 
@@ -273,8 +285,31 @@ function normalizeInput(raw: unknown): OnboardingInput {
     differentiation = oneLine(obj, "differentiation", 500);
   } else {
     const a = record(obj.adaptation, "adaptation");
+    const consent = record(a.processingConsent, "adaptation.processingConsent");
+    const allowedRaw = consent.allowedHarnesses;
+    if (!Array.isArray(allowedRaw) || allowedRaw.length < 1 || allowedRaw.length > 3
+      || allowedRaw.some((item) => typeof item !== "string" || !SOURCE_HARNESSES.has(item))
+      || new Set(allowedRaw).size !== allowedRaw.length) {
+      throw new OnboardingError("adaptation.processingConsent.allowedHarnesses 必须是 claude/codex/opencode 的非空去重数组");
+    }
+    if (consent.rawNovelContentMayBeSent !== true) {
+      throw new OnboardingError("改编立项必须明确允许所选 Harness 按 source-analysis 票读取原著分块");
+    }
+    const confirmedAt = oneLine(consent, "confirmedAt", 64);
+    const confirmedMs = Date.parse(confirmedAt);
+    if (!Number.isFinite(confirmedMs) || new Date(confirmedMs).toISOString() !== confirmedAt) {
+      throw new OnboardingError("adaptation.processingConsent.confirmedAt 必须是规范 ISO 时间");
+    }
     adaptation = {
       rightsScope: oneLine(a, "rightsScope", 1_000),
+      sourceTitle: oneLine(a, "sourceTitle", 200),
+      sourcePath: text(a, "sourcePath", 2_048),
+      adaptationBrief: text(a, "adaptationBrief", 24_000),
+      processingConsent: {
+        allowedHarnesses: [...allowedRaw] as SourceProcessingConsent["allowedHarnesses"],
+        rawNovelContentMayBeSent: true,
+        confirmedAt,
+      },
       compressionRatio: integer(a, "compressionRatio", 1, 1_000),
       highlightCount: integer(a, "highlightCount", 0, 1_000),
       namedCharacterCount: integer(a, "namedCharacterCount", 1, 1_000),
@@ -483,7 +518,7 @@ function projectConfigFor(input: OnboardingInput, storedRepoPath: string): WlPro
 
 function planIdFor(plan: Pick<OnboardingPlan,
   "workspaceRoot" | "configDigest" | "templateDigest" | "implementationVersion" | "input"
-  | "projectConfig" | "repoPath" | "projectDataPath" | "outlineTicket"
+  | "projectConfig" | "repoPath" | "projectDataPath" | "sourceIntake" | "outlineTicket"
 >): string {
   const core = {
     schemaVersion: 1,
@@ -495,6 +530,7 @@ function planIdFor(plan: Pick<OnboardingPlan,
     projectConfig: plan.projectConfig,
     repoPath: plan.repoPath,
     projectDataPath: plan.projectDataPath,
+    sourceIntakePlanId: plan.sourceIntake?.planId ?? null,
     outlineTicketId: plan.outlineTicket.id,
   };
   return `wlplan_${hash(JSON.stringify(core)).slice(0, 24)}`;
@@ -527,6 +563,18 @@ function onboardingTemplateDigest(): string {
   return hash(names.map((name) => `${name}\0${template(name)}`).join("\0"));
 }
 
+function sourceRequestFor(input: OnboardingInput): SourceIntakeRequest | null {
+  if (!input.adaptation) return null;
+  return {
+    version: 1,
+    sourceTitle: input.adaptation.sourceTitle,
+    sourcePath: input.adaptation.sourcePath,
+    adaptationBrief: input.adaptation.adaptationBrief,
+    rightsScope: input.adaptation.rightsScope,
+    processingConsent: input.adaptation.processingConsent,
+  };
+}
+
 export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
   const ws = loadConfig(root);
   const input = normalizeInput(raw);
@@ -551,6 +599,10 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
   const templateDigest = onboardingTemplateDigest();
   const implementationVersion = pkgVersion() || "source";
   const projectConfig = projectConfigFor(input, repo.stored);
+  const sourceRequest = sourceRequestFor(input);
+  const sourceIntake = sourceRequest
+    ? planSourceIntakeForTarget(root, input.key, repo.absolute, sourceRequest)
+    : null;
   const ticketId = `${input.ticketPrefix}-1`;
   const warnings: string[] = [];
   if (repo.external) warnings.push("repoPath 位于 workspace 外部：整体复制 workspace 时不会随之迁移。");
@@ -560,6 +612,7 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
   if (input.adaptation && (input.adaptation.compressionRatio < 10 || input.adaptation.highlightCount < 3 || input.adaptation.namedCharacterCount > 20)) {
     warnings.push("改编三阈值未全部满足；操作者已显式确认风险，风险数据会写入 source 与 Non-goals。");
   }
+  if (sourceIntake) warnings.push(`原著 ${sourceIntake.source.fileName} · ${sourceIntake.source.byteLength} bytes · ${sourceIntake.chunking.chunkCount} chunks；确认立项后自动创建 source-analysis 票。`);
   const plan: OnboardingPlan = {
     schemaVersion: 1,
     kind: "writing-loop/onboarding-plan",
@@ -573,10 +626,11 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
     repoPath: repo.absolute,
     configRepoPath: repo.stored,
     projectDataPath: dataPath,
+    sourceIntake,
     outlineTicket: {
       id: ticketId,
       title: `完成《${input.title}》总大纲与冻结层`,
-      state: "Todo",
+      state: input.kind === "adaptation" ? "Backlog" : "Todo",
       path: join(dataPath, "board", "tickets", `${ticketId}.md`),
     },
     files: planFiles(input),
@@ -613,6 +667,10 @@ function renderNorthStar(input: OnboardingInput): string {
   raw = raw.replace(/^- 目标受众画像：.*$/m, `- 目标受众画像：${input.audience}`);
   raw = raw.replace(/^- 对标剧：.*$/m, `- 对标剧：${input.kind === "original" ? input.comparables : "授权原著；拆书清单见 source/"}`);
   raw = raw.replace(/^- format profile：.*$/m, `- format profile：${input.format}`);
+  if (input.adaptation) {
+    const sourceDirection = `## 操作者改编方向（North Star 输入）\n<!-- 【方向级】来自立项表；writing-loop 负责拆解原著、提出执行方案，不得覆盖操作者意图。 -->\n\n${input.adaptation.adaptationBrief}\n\n- 原著输入：${input.adaptation.sourceTitle}（本地文件只按 source-analysis 票分块读取，不进入 Git）\n- 自治流程：Showrunner/Story Designer 自动建票、拆解、验收；操作者无需手工填拆书三清单。\n\n`;
+    raw = raw.replace(/(## 核心情绪引擎\n)/, `${sourceDirection}$1`);
+  }
   const nonGoals = [
     `- 合规预筛：${input.complianceNotes.replace(/\s+/g, " ")}`,
     ...(input.kind === "adaptation" ? ["- 忠实度默认贴改；借壳改编禁用；只使用授权范围内素材。"] : []),
@@ -725,7 +783,7 @@ function outlineTicket(plan: OnboardingPlan, createdAt: string): string {
     ? "\n- 对照 source/highlights.md 完成名场面-卡点对齐表；只读拆书三清单，不读/复制原著全文。"
     : "\n- 对照 source/benchmarks.md 的结构与差异化证据。";
   const intakeNote = needsSource
-    ? "立项服务创建空白大纲票并停在 Backlog；先用 writing-loop source register 登记原著与改编设计，待 source-analysis 门通过后再放行大纲。"
+    ? "立项确认会自动登记原著、创建 source-analysis 票并把本票停在 Backlog；自治拆解通过 Showrunner 门后再放行大纲，操作者无需手工运行 source 命令。"
     : "立项服务创建首张大纲票；下一步运行 /showrunner-agent。";
   return `---
 id: ${plan.outlineTicket.id}
@@ -828,6 +886,7 @@ function scaffoldData(stage: string, plan: OnboardingPlan, createdAt: string, co
     repoPath: plan.repoPath,
     configDigest: plan.configDigest,
     templateDigest: plan.templateDigest,
+    sourceIntakePlanId: plan.sourceIntake?.planId ?? null,
     input: plan.input,
   }, null, 2));
 }
@@ -1308,6 +1367,7 @@ function assertOwnedData(path: string, journal: OnboardingTransactionJournal, co
     || receipt.ticketPrefix !== journal.plan.input.ticketPrefix
     || receipt.outlineTicketId !== journal.plan.outlineTicket.id || receipt.createdAt !== journal.createdAt
     || receipt.commit !== journal.commit || receipt.repoPath !== journal.plan.repoPath
+    || receipt.sourceIntakePlanId !== (journal.plan.sourceIntake?.planId ?? null)
     || JSON.stringify(receipt.input) !== JSON.stringify(journal.plan.input)) {
     throw new OnboardingError(`受管 data receipt 与 journal 不匹配：${path}`);
   }
@@ -1402,6 +1462,31 @@ function removeJournal(file: string, transactionId: string): void {
   syncDirectory(dirname(file));
 }
 
+function ensureOnboardingSourceIntake(root: string, input: OnboardingInput, expectedPlanId: string | null,
+  runtime: OnboardingRuntime): { sourceIntakePlanId: string | null; sourceAnalysisTicketId: string | null } {
+  const request = sourceRequestFor(input);
+  if (!request) {
+    if (expectedPlanId !== null) throw new OnboardingError("原创立项不能绑定 source intake plan");
+    return { sourceIntakePlanId: null, sourceAnalysisTicketId: null };
+  }
+  if (!expectedPlanId || !/^wlsrc_[0-9a-f]{32}$/.test(expectedPlanId)) {
+    throw new OnboardingError("改编立项缺少已确认的 source intake plan");
+  }
+  const ws = loadConfig(root);
+  const current = planSourceIntake(root, input.key, ws.config, request);
+  if (current.planId !== expectedPlanId) {
+    throw new OnboardingError("原著文件或改编输入在立项预览后发生变化；项目已安全停在 source-pending，请恢复原文件后用同一确认重试");
+  }
+  const result = commitSourceIntake(root, input.key, ws.config, request, expectedPlanId,
+    runtime.now ? { now: runtime.now } : {});
+  return { sourceIntakePlanId: result.planId, sourceAnalysisTicketId: result.analysisTicketId };
+}
+
+function attachOnboardingSource(root: string, input: OnboardingInput, result: OnboardingResult,
+  expectedPlanId: string | null, runtime: OnboardingRuntime): OnboardingResult {
+  return { ...result, ...ensureOnboardingSourceIntake(root, input, expectedPlanId, runtime) };
+}
+
 export function commitOnboarding(
   root: string,
   raw: unknown,
@@ -1418,7 +1503,7 @@ export function commitOnboarding(
     if (!existsSync(receiptPath)) return null;
     let receipt: {
       planId?: unknown; key?: unknown; ticketPrefix?: unknown; outlineTicketId?: unknown;
-      createdAt?: unknown; commit?: unknown; input?: unknown; repoPath?: unknown;
+      createdAt?: unknown; commit?: unknown; input?: unknown; repoPath?: unknown; sourceIntakePlanId?: unknown;
     };
     try {
       const dataReal = assertProjectDataRoot(root, requested.key);
@@ -1452,6 +1537,8 @@ export function commitOnboarding(
       outlineTicketId: `${requested.ticketPrefix}-1`,
       commit: String(receipt.commit ?? ""),
       createdAt: String(receipt.createdAt ?? ""),
+      sourceIntakePlanId: typeof receipt.sourceIntakePlanId === "string" ? receipt.sourceIntakePlanId : null,
+      sourceAnalysisTicketId: null,
       verification,
     };
   };
@@ -1460,7 +1547,9 @@ export function commitOnboarding(
   // A config-visible crash may leave the durable journal/markers/config lock behind. Exact retry
   // enters the per-key lease to prove and clean those artifacts; a clean completed project returns
   // immediately without manufacturing a new transaction.
-  if (alreadyComplete && !existsSync(journalFile)) return alreadyComplete;
+  if (alreadyComplete && !existsSync(journalFile)) {
+    return attachOnboardingSource(root, requested, alreadyComplete, alreadyComplete.sourceIntakePlanId, runtime);
+  }
 
   let preview: OnboardingPlan | undefined;
   if (!existsSync(journalFile)) {
@@ -1490,11 +1579,13 @@ export function commitOnboarding(
         || plan.repoPath !== racedComplete.repoPath || plan.projectDataPath !== racedComplete.projectDataPath) {
         throw new OnboardingError("已发布项目的 journal 与 receipt/result identity 不一致；拒绝清理恢复证据");
       }
+      const completedWithSource = attachOnboardingSource(root, requested, racedComplete,
+        plan.sourceIntake?.planId ?? null, runtime);
       removeCrashedConfigLock(root, previousOwnerPid);
       removeOwnerMarkerIfPresent(plan.repoPath, "repo", journal);
       removeOwnerMarkerIfPresent(plan.projectDataPath, "data", journal);
       removeJournal(journalFile, journal.transactionId);
-      return racedComplete;
+      return completedWithSource;
     }
 
     if (existsSync(journalFile)) {
@@ -1644,13 +1735,7 @@ export function commitOnboarding(
       throw new OnboardingError(`立项已发布，但写后验证失败：${failed}；请停止调度并运行 writing-loop doctor`);
     }
 
-    // config 已可见且 verify 通过后，所有权标记和 journal 只剩恢复用途；清理失败不能
-    // 把已提交项目伪报为失败，后续同 plan 仍会由 receipt 幂等回读。
-    try { removeOwnerMarkerIfPresent(plan.repoPath, "repo", journal); } catch { /* best effort */ }
-    try { removeOwnerMarkerIfPresent(plan.projectDataPath, "data", journal); } catch { /* best effort */ }
-    try { removeJournal(journalFile, journal.transactionId); } catch { /* best effort */ }
-
-    return {
+    const completedWithSource = attachOnboardingSource(root, plan.input, {
       planId: plan.planId,
       key: plan.input.key,
       title: plan.input.title,
@@ -1659,8 +1744,18 @@ export function commitOnboarding(
       outlineTicketId: plan.outlineTicket.id,
       commit: journal.commit,
       createdAt: journal.createdAt,
+      sourceIntakePlanId: plan.sourceIntake?.planId ?? null,
+      sourceAnalysisTicketId: null,
       verification,
-    };
+    }, plan.sourceIntake?.planId ?? null, runtime);
+
+    // config 已可见且 source intake 已提交后，所有权标记和 journal 只剩恢复用途；清理失败不能
+    // 把已提交项目伪报为失败，后续同 plan 仍会由 receipt 幂等回读。
+    try { removeOwnerMarkerIfPresent(plan.repoPath, "repo", journal); } catch { /* best effort */ }
+    try { removeOwnerMarkerIfPresent(plan.projectDataPath, "data", journal); } catch { /* best effort */ }
+    try { removeJournal(journalFile, journal.transactionId); } catch { /* best effort */ }
+
+    return completedWithSource;
   } catch (error) {
     const primary = error instanceof OnboardingError
       ? error

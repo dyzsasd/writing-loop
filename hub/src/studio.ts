@@ -327,10 +327,18 @@ export function onboardingInputFromForm(root: string, form: URLSearchParams): Re
   if (kind === "adaptation") {
     payload.adaptation = {
       rightsScope: form.get("rightsScope") ?? "",
-      compressionRatio: formInteger(form, "compressionRatio"),
-      highlightCount: formInteger(form, "highlightCount"),
-      namedCharacterCount: formInteger(form, "sourceNamedCharacters"),
-      riskAcknowledged: form.get("riskAcknowledged") === "true",
+      sourceTitle: form.get("sourceTitle") ?? "",
+      sourcePath: form.get("sourcePath") ?? "",
+      adaptationBrief: form.get("adaptationBrief") ?? "",
+      processingConsent: {
+        allowedHarnesses: [form.get("sourceHarness") ?? ""],
+        rawNovelContentMayBeSent: form.get("allowRawSourceProcessing") === "true",
+        confirmedAt: new Date().toISOString(),
+      },
+      compressionRatio: 10,
+      highlightCount: 3,
+      namedCharacterCount: Math.min(formInteger(form, "maxNamedCharacters"), 20),
+      riskAcknowledged: false,
     };
   }
   assertStudioRepoPath(root, payload);
@@ -738,7 +746,10 @@ export function createStudioServer(options: StudioOptions): Server {
         if (!/^wlplan_[0-9a-f]{24}$/.test(planId)) { sendJson(res, 400, { error: "planId 无效" }); return; }
         const payload = decodeOnboardingPayload(requestScope!.root, form.get("payload") ?? "");
         const result = commitOnboarding(requestScope!.root, payload, planId);
-        redirect(res, `${requestScope!.base}/p/${encodeURIComponent(result.key)}?notice=${encodeURIComponent(`立项完成；首票 ${result.outlineTicketId}`)}`);
+        const notice = result.sourceAnalysisTicketId
+          ? `立项完成；原著分析票 ${result.sourceAnalysisTicketId} 已进入自治队列，大纲票 ${result.outlineTicketId} 等待分析通过后解锁`
+          : `立项完成；首票 ${result.outlineTicketId}`;
+        redirect(res, `${requestScope!.base}/p/${encodeURIComponent(result.key)}?notice=${encodeURIComponent(notice)}`);
         return;
       }
 

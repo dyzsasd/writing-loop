@@ -41,11 +41,12 @@ writing-loop production handoff --project demo --input handoff.json  # approved 
 writing-loop project plan --input request.json
 writing-loop project create --input request.json --confirm wlplan_...
 writing-loop project verify my-drama
-writing-loop source plan --project my-drama --input source-intake.json
-writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
+# Advanced recovery/migration for an already-created adaptation; normal onboarding
+# records the novel and files source-analysis during project create.
+writing-loop source status --project my-drama
 
 writing-loop install-claude-plugin   # let Claude Code install the plugin from npm (then /plugin …)
-# in Claude Code: /writing-loop:add-script   ← onboarding (adaptation creates source-pending scaffolds)
+# in Claude Code: /writing-loop:add-script   ← adaptation collects source + brief and queues source-analysis
 writing-loop doctor                  # read-only health check (ends with DOCTOR_OK/FAILED + NEXT:)
 writing-loop run --dry-run           # print every agent command wl-run would fire
 writing-loop run                     # drive the whole writers' room (Ctrl-C = graceful stop)
@@ -194,7 +195,9 @@ onboarding core. The write boundary is deliberately plan → confirm → create:
    same input.
 3. Creation atomically reserves the brand-new repo and project-data final names, populates
    them under the journal, publishes config last, then runs the same checks available through
-   `project verify`.
+   `project verify`. For an adaptation, the same confirmation then exact-replays a source plan
+   bound into the onboarding fingerprint, publishes local chunks, and files `source-analysis`;
+   no second operator command is part of the normal path.
 
 Creation is crash-recoverable, but never guesses. A durable per-project journal lives at
 `.writing-loop/.onboarding-transactions/<key>.json` and advances through the backward-compatible

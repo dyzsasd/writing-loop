@@ -177,21 +177,22 @@ dans [`docs/HARNESS.fr.md`](docs/HARNESS.fr.md). Sélectionnez-les avec
 **2. Démarrer un projet** — depuis un workspace initialisé, choisissez « Nouveau
 projet » dans Studio ou lancez la skill d'accueil. Indiquez un chemin de repo qui
 n'existe pas encore, sans créer le dossier. L'entretien couvre genre, audience,
-monétisation et conformité (plus droits et seuils de décorticage pour une
-adaptation). Après approbation du plan sans écriture, le cœur partagé crée
-l'arborescence, enregistre le projet, ouvre le premier ticket de plan et vérifie
-les trois vérités-terrain :
+monétisation et conformité. Pour une adaptation, il demande seulement le roman local
+au workspace, votre brief global, la portée des droits et le Harness explicitement
+autorisé à lire les chunks ; il ne vous demande pas de pré-calculer le découpage.
+Après approbation du plan sans écriture, le cœur partagé crée l'arborescence,
+enregistre le projet et vérifie les trois vérités-terrain :
 
 ```
 /writing-loop:add-script
 ```
 
-Pour une adaptation, le ticket outline démarre en `source-pending`. Gardez le roman
-dans le workspace mais hors du repo, puis utilisez `writing-loop source plan/register`
-pour consigner roman, design, droits et consentement explicite des Harnesses.
-Le ticket interne `source-analysis` traite les chunks et agrège les trois fiches ; le
-Showrunner ne déverrouille outline qu'après cette porte. `add-script` ne lit ni
-n'analyse lui-même le roman.
+Pour une adaptation, la même confirmation lie les octets du roman, les copie/chunke
+dans le runtime local et crée le ticket `source-analysis` ; outline reste
+`source-pending`. Writing-loop choisit ensuite la fenêtre de saison, traite les chunks
+et agrège les trois fiches avant la porte du Showrunner. `source plan/register` restent
+des commandes avancées de reprise/migration, **pas une seconde étape normale**.
+`add-script` ne remplace jamais ce flux autonome par une skill externe d'analyse.
 
 **3. Faire tourner la room.** Chaque agent est une skill sans état : Claude Code et
 Codex peuvent l'invoquer comme slash command, tandis que le Harness OpenCode reçoit

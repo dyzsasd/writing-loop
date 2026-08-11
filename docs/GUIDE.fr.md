@@ -101,12 +101,13 @@ répondre :
 - **Échelle** : `totalEpisodes`, `paywall` (numéros de cartes de secours ; carte 1 ⊂
   épisodes 8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
-**Spécifique à l'adaptation (l'accueil ne consigne que les contraintes)**
+**Spécifique à l'adaptation (l'opérateur fournit les entrées, pas le découpage)**
 
-- Elle consigne les seuils de compression, de scènes fortes et de personnages, sans
-  lire ni décortiquer le roman.
-- Elle crée trois fiches vides. Le ticket writing-loop `source-analysis` les remplit
-  ensuite à partir de chunks durables et vérifiés un par un.
+- Fournissez le titre, le chemin local au workspace mais hors du repo, votre brief
+  complet, la portée des droits et le Harness explicitement autorisé à lire les chunks.
+- Ne pré-remplissez ni fenêtre de saison, ni résultat de compression, ni scènes fortes,
+  ni carte des personnages. Les trois fiches restent vides jusqu'à ce que le ticket
+  writing-loop `source-analysis` les propose à partir de chunks durables.
 - **Palier de fidélité** : par défaut **adaptation fidèle (贴改)** ; le
   **placage-de-coquille est désactivé par défaut** et inscrit dans les Non-goals.
 - **Limite de droits** : bornée par la licence (consignée dans north-star) ; aucun
@@ -120,8 +121,9 @@ Ensuite `add-script` automatiquement :
 - **REGISTER** : enregistre le projet dans `~/dramas/.writing-loop/config.json`, crée le
   répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude le
   répertoire `lessons/` (un fichier partagé + un par rôle).
-- **Premier ticket de plan** : Todo pour un original ; `Backlog+source-pending` pour
-  une adaptation, afin que le plan ne devance jamais le décorticage.
+- **Premier ticket exécutable** : outline est Todo pour un original. Pour une adaptation,
+  la même confirmation enregistre/chunke le roman, crée source-analysis en Todo et gare
+  outline en `Backlog+source-pending`.
 - **VERIFY** : relit, valide et vous indique l'étape suivante.
 
 > L'entretien d'`add-script` demande le mode — répondez `dry-run` la première fois :
@@ -129,22 +131,15 @@ Ensuite `add-script` automatiquement :
 > les conclusions de l'entretien confirmées, relancez `/writing-loop:add-script` et
 > répondez `live` pour l'accueil réel du projet.
 
-### Étape 2.5 — Enregistrer le roman et votre design d'adaptation
+### Étape 2.5 — Laisser writing-loop analyser le roman
 
-Créez un JSON indiquant le `sourcePath` local au workspace, l'`adaptationBrief`, la
-portée des droits et le consentement explicite nommant les Harnesses autorisés à lire
-les chunks bruts, puis lancez :
-
-```bash
-writing-loop source plan --project my-drama --input source-intake.json
-writing-loop source register --project my-drama --input source-intake.json --confirm wlsrc_...
-writing-loop source status --project my-drama
-```
-
-Le plan n'écrit rien et n'appelle aucun modèle. Register ne fait que copier/chunker
-localement, committer le brief et créer le ticket source-analysis. Writing-loop choisit
-ensuite la fenêtre de saison, traite un chunk par fire, agrège les trois fiches et les
-soumet à la porte du Showrunner.
+Le parcours normal n'a pas de seconde inscription manuelle. Le project plan approuvé
+lie déjà l'empreinte du roman, le brief, les droits et le consentement du Harness ;
+project create copie/chunke localement, ne committe que provenance et brief, puis crée
+source-analysis. Démarrez la room : Story-Designer choisit la fenêtre de saison, traite
+un chunk par fire, agrège les trois fiches et les soumet au Showrunner. `writing-loop
+source status --project my-drama` est en lecture seule ; `source plan/register` sont
+réservées à la reprise/migration avancée et ne font pas partie du parcours normal.
 
 ---
 

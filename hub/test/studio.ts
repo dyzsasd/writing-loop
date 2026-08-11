@@ -224,7 +224,12 @@ Episode: 1
 
   const newPage = await fetch(`${base}/projects/new`);
   const newHtml = await newPage.text();
-  ok(newPage.status === 200 && newHtml.includes("生成零写入立项计划") && newHtml.includes("改编预检"), "Studio 提供 writing-first 立项采访表");
+  ok(newPage.status === 200 && newHtml.includes("生成零写入立项计划") && newHtml.includes("原著与改编方向")
+    && newHtml.includes('name="sourcePath"') && newHtml.includes('name="adaptationBrief"')
+    && newHtml.includes('name="sourceHarness"') && newHtml.includes('name="allowRawSourceProcessing"')
+    && !newHtml.includes('name="compressionRatio"') && !newHtml.includes('name="highlightCount"')
+    && !newHtml.includes('name="sourceNamedCharacters"'),
+  "Studio 立项表只要求操作者提供原著、改编方向、权利范围与 Harness，不把拆书输出反推给操作者填写");
   const onboardingForm = new URLSearchParams({
     key: "new-drama", title: "新剧 <安全>", repoPath: "new-drama", kind: "original",
     logline: "她能听见每个谎言在月光下碎裂。", audience: "女性 25-40 岁付费用户",
@@ -232,8 +237,7 @@ Episode: 1
     genre: "revenge-slap", monetization: "paid-app", format: "live-action", totalEpisodes: "80",
     card1: "9,10,11", card2: "26,28,30", card3: "60", wordMin: "900", wordMax: "1300",
     maxPrimaryScenes: "5", maxNamedCharacters: "20", ticketPrefix: "ND", intakeMode: "autonomous", mode: "live",
-    comparables: "公开结构对标", differentiation: "谎言视觉化", rightsScope: "", compressionRatio: "10",
-    highlightCount: "3", sourceNamedCharacters: "20",
+    comparables: "公开结构对标", differentiation: "谎言视觉化",
   });
   const outsideForm = new URLSearchParams(onboardingForm);
   outsideForm.set("key", "outside-drama");
@@ -282,6 +286,56 @@ Episode: 1
   const createdHtml = await createdPage.text();
   ok(createdPage.status === 200 && createdHtml.includes("新剧 &lt;安全&gt;") && createdHtml.includes("创作时间线")
     && createdHtml.includes("立项"), "新项目页面 escaping 正确并立即呈现立项时间线");
+
+  const sourceNovel = join(tmp, "adaptation-source.txt");
+  writeFileSync(sourceNovel, Array.from({ length: 6 }, (_, index) => `第${index + 1}章 测试\n${"原著结构内容".repeat(1_000)}\n`).join(""));
+  const adaptationForm = new URLSearchParams({
+    key: "adapted-drama", title: "改编新剧", repoPath: "adapted-drama", kind: "adaptation",
+    logline: "一个自信知道王朝结局的人，发现自己的历史记忆正在失效。", audience: "男性 25-44 岁海外流媒体用户",
+    complianceNotes: "仅作内部开发；发行前完成版权、分级和史实复核。", nonGoals: "不逐章照搬原著",
+    genre: "brain-hole", monetization: "reelshort-sub", format: "reelshort-en", totalEpisodes: "60",
+    card1: "", card2: "", card3: "", wordMin: "500", wordMax: "800",
+    maxPrimaryScenes: "4", maxNamedCharacters: "18", ticketPrefix: "AD", intakeMode: "autonomous", mode: "live",
+    sourceTitle: "测试原著", sourcePath: sourceNovel,
+    adaptationBrief: "保留权力升级与历史失效的核心钩子，由 writing-loop 自主拆解并决定第一季结构。",
+    rightsScope: "仅限内部改编开发，发行前补齐权利链", sourceHarness: "claude", allowRawSourceProcessing: "true",
+  });
+  const noConsentForm = new URLSearchParams(adaptationForm);
+  noConsentForm.set("key", "no-consent");
+  noConsentForm.set("repoPath", "no-consent");
+  noConsentForm.set("ticketPrefix", "NC");
+  noConsentForm.delete("allowRawSourceProcessing");
+  const noConsent = await fetch(`${base}/projects/plan`, {
+    method: "POST", headers: { origin: base, accept: "text/html,application/xhtml+xml" }, body: noConsentForm,
+  });
+  ok(noConsent.status === 400 && (await noConsent.text()).includes("明确允许")
+    && !existsSync(join(tmp, "no-consent")) && !existsSync(join(data, "no-consent")),
+  "改编立项未明确授权所选 Harness 读取原著时零写拒绝");
+
+  const adaptationPlanned = await fetch(`${base}/projects/plan`, { method: "POST", headers: { origin: base }, body: adaptationForm });
+  const adaptationPlanHtml = await adaptationPlanned.text();
+  const adaptationPlanId = /name="planId" value="([^"]+)"/.exec(adaptationPlanHtml)?.[1] ?? "";
+  const adaptationPayload = /name="payload" value="([^"]+)"/.exec(adaptationPlanHtml)?.[1] ?? "";
+  ok(adaptationPlanned.status === 200 && /^wlplan_[0-9a-f]{24}$/.test(adaptationPlanId)
+    && adaptationPlanHtml.includes("自动原著分析") && adaptationPlanHtml.includes("adaptation-source.txt")
+    && adaptationPlanHtml.includes("chunks · claude")
+    && !existsSync(join(tmp, "adapted-drama")),
+  "改编预览绑定本地原著指纹、分块与 Harness，并保持严格零写");
+  const adaptationCreated = await fetch(`${base}/projects/create`, {
+    method: "POST", headers: { origin: base }, redirect: "manual",
+    body: new URLSearchParams({ planId: adaptationPlanId, payload: adaptationPayload }),
+  });
+  const adaptationNotice = decodeURIComponent(adaptationCreated.headers.get("location") ?? "");
+  const outlineTicket = readFileSync(join(data, "adapted-drama", "board", "tickets", "AD-1.md"), "utf8");
+  const sourceTicket = readFileSync(join(data, "adapted-drama", "board", "tickets", "AD-2.md"), "utf8");
+  ok(adaptationCreated.status === 303 && adaptationNotice.includes("原著分析票 AD-2 已进入自治队列")
+    && outlineTicket.includes("state: Backlog") && outlineTicket.includes("source-pending")
+    && sourceTicket.includes("state: Todo") && sourceTicket.includes("source-analysis")
+    && existsSync(join(data, "adapted-drama", "source-intake.v1", "original", "source.txt")),
+  "确认改编立项后自动登记原著、创建分析票并停靠大纲票，不要求手工 source 命令");
+  ok(readFileSync(join(tmp, "adapted-drama", "bible", "north-star.md"), "utf8").includes("由 writing-loop 自主拆解")
+    && readFileSync(join(tmp, "adapted-drama", "source", "adaptation-brief.md"), "utf8").includes("操作者改编设计"),
+  "项目开发总建议同时进入 North Star 与 source intake，成为自治规划的权威输入");
 
   const stalled = await fetch(`${base}/api/stream?stall=1`);
   const stalledReader = stalled.body!.getReader();

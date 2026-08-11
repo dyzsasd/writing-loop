@@ -237,8 +237,8 @@ function parseRequest(root: string, repoPath: string, value: unknown, nowMs: num
   const rel = relative(root, canonicalPath);
   if (!rel || rel === "." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new SourceIntakeError("原著必须位于 workspace 内");
   if (rel === ".writing-loop" || rel.startsWith(`.writing-loop${sep}`)) throw new SourceIntakeError("原著不能预先放入 .writing-loop 运行态");
-  const repoReal = realpathSync(repoPath);
-  if (canonicalPath === repoReal || canonicalPath.startsWith(repoReal + sep)) throw new SourceIntakeError("原著全文不能放入剧本 Git repo");
+  const repoBoundary = existsSync(repoPath) ? realpathSync(repoPath) : resolve(repoPath);
+  if (canonicalPath === repoBoundary || canonicalPath.startsWith(repoBoundary + sep)) throw new SourceIntakeError("原著全文不能放入剧本 Git repo");
   const lst = lstatSync(canonicalPath, { bigint: true });
   if (!lst.isFile() || lst.isSymbolicLink()) throw new SourceIntakeError("原著必须是普通文件，不能是 symlink");
   const { bytes } = readPinnedSource(canonicalPath);
@@ -289,11 +289,8 @@ function chunksFor(normalized: string): Array<SourceChunk & { content: string }>
   return out;
 }
 
-function sourceFacts(root: string, key: string, config: WlConfig, value: unknown, nowMs: number) {
-  const entry = projectEntries(config).find(([candidate]) => candidate === key);
-  if (!entry) throw new SourceIntakeError(`config.json 无项目 '${key}'`);
-  const repoPath = resolveRepoPath(root, entry[1]);
-  if (!statSync(repoPath).isDirectory()) throw new SourceIntakeError(`项目 repo 不存在：${repoPath}`);
+function sourceFactsForTarget(root: string, key: string, repoPath: string, value: unknown, nowMs: number) {
+  const repoIdentity = existsSync(repoPath) ? realpathSync(repoPath) : resolve(repoPath);
   const parsed = parseRequest(root, repoPath, value, nowMs);
   const chunks = chunksFor(parsed.normalized);
   const source = {
@@ -302,17 +299,24 @@ function sourceFacts(root: string, key: string, config: WlConfig, value: unknown
     lineCount: parsed.normalized.split("\n").length, normalizedSha256: hash(parsed.normalized),
   };
   const planSeed = {
-    version: 1, projectKey: key, repoPath: realpathSync(repoPath), source,
+    version: 1, projectKey: key, repoPath: repoIdentity, source,
     adaptationBrief: parsed.request.adaptationBrief, rightsScope: parsed.request.rightsScope,
     processingConsent: parsed.request.processingConsent,
     chunking: { algorithm: "heading-line-v1", targetBytes: TARGET_CHUNK_BYTES, maxSectionsPerChunk: MAX_SECTIONS_PER_CHUNK,
       chunks: chunks.map(({ content: _content, ...chunk }) => chunk) },
   };
-  return { repoPath, parsed, chunks, source, planSeed, planId: `wlsrc_${hash(canonical(planSeed)).slice(0, 32)}` };
+  return { repoPath: repoIdentity, parsed, chunks, source, planSeed, planId: `wlsrc_${hash(canonical(planSeed)).slice(0, 32)}` };
 }
 
-export function planSourceIntake(root: string, key: string, config: WlConfig, value: unknown, nowMs = Date.now()): SourceIntakePlan {
-  const facts = sourceFacts(root, key, config, value, nowMs);
+function sourceFacts(root: string, key: string, config: WlConfig, value: unknown, nowMs: number) {
+  const entry = projectEntries(config).find(([candidate]) => candidate === key);
+  if (!entry) throw new SourceIntakeError(`config.json 无项目 '${key}'`);
+  const repoPath = resolveRepoPath(root, entry[1]);
+  if (!statSync(repoPath).isDirectory()) throw new SourceIntakeError(`项目 repo 不存在：${repoPath}`);
+  return sourceFactsForTarget(root, key, repoPath, value, nowMs);
+}
+
+function planFromFacts(root: string, key: string, facts: ReturnType<typeof sourceFactsForTarget>): SourceIntakePlan {
   const first = facts.chunks[0];
   const last = facts.chunks[facts.chunks.length - 1];
   const pick = (chunk: SourceChunk): Pick<SourceChunk, "id" | "startLine" | "endLine" | "headings"> =>
@@ -325,6 +329,15 @@ export function planSourceIntake(root: string, key: string, config: WlConfig, va
     processingConsent: facts.parsed.request.processingConsent,
     warnings: ["原著全文不进入 Git；获授权的 harness 只会按 source-analysis 票逐块读取。"], requiresConfirmation: true,
   };
+}
+
+export function planSourceIntakeForTarget(root: string, key: string, repoPath: string, value: unknown,
+  nowMs = Date.now()): SourceIntakePlan {
+  return planFromFacts(root, key, sourceFactsForTarget(root, key, repoPath, value, nowMs));
+}
+
+export function planSourceIntake(root: string, key: string, config: WlConfig, value: unknown, nowMs = Date.now()): SourceIntakePlan {
+  return planFromFacts(root, key, sourceFacts(root, key, config, value, nowMs));
 }
 
 function fsyncFile(file: string): void {

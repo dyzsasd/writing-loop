@@ -435,9 +435,30 @@ CLI 的 `plan` / `create` 使用**同一份 request**，不是把 plan JSON 再�
 }
 ```
 
-改编项目使用 `adaptation` 对象，字段为 `rightsScope`、`compressionRatio`、`highlightCount`、
-`namedCharacterCount`、`riskAcknowledged`，不带 `comparables` / `differentiation`。风险阈值未满足时
-必须显式 `riskAcknowledged:true`。`planId` 是 SHA-256 派生的稳定确认指纹，绑定规范化 request、
+改编项目不带 `comparables` / `differentiation`，而使用：
+
+```jsonc
+"adaptation": {
+  "sourceTitle": "原著名",
+  "sourcePath": "/workspace/原著.txt",       // workspace 内、剧本 repo 外
+  "adaptationBrief": "整体开发建议、核心钩子、重构边界与季目标……",
+  "rightsScope": "已确认的内部开发/改编权范围",
+  "processingConsent": {
+    "allowedHarnesses": ["claude"],
+    "rawNovelContentMayBeSent": true,
+    "confirmedAt": "2026-08-11T12:00:00.000Z"
+  },
+  "compressionRatio": 10,                   // v1 core 内部分析目标，不是操作者拆书答案
+  "highlightCount": 3,
+  "namedCharacterCount": 18,
+  "riskAcknowledged": false
+}
+```
+
+Studio 与 `add-script` 只向操作者询问原著、改编建议、权利和 Harness 同意；三项兼容阈值由
+onboarding core 依据安全默认与制作上限生成，不能让操作者把尚未分析的结果填进表单。高级 CLI
+仍可显式覆盖；风险阈值未满足时必须 `riskAcknowledged:true`。`planId` 是 SHA-256 派生的稳定
+确认指纹，绑定规范化 request、原著 bytes 与分块、
 解析后的 workspace/repo/data 路径、将写入的项目条目和首票 ID、当前 config 原始内容摘要、
 模板摘要与实现版本。`plan` 不建目录、不拿配置锁、不写 report；操作者应审阅路径、规格、文件
 清单和 warnings 后才把显示的 `planId` 交给 create。
@@ -469,16 +490,21 @@ repo 已修改、final 与 stage 同时存在等情况都要求人工审计；co
 
 ### 改编原著 source intake 与拆书门
 
-`add-script` / onboarding core 对改编项目只创建空白三清单，并把 outline 票置为
-`Backlog+source-pending`；它不读取原著。原著必须是 workspace 内、剧本 Git repo 外的单链接
-普通 UTF-8 文件。后续使用两阶段命令：
+`add-script` / Studio / CLI onboarding 对改编项目只收集原著、整体改编建议、权利范围与
+Harness 同意；它们不替 story-designer 拆书。原著必须是 workspace 内、剧本 Git repo 外的
+单链接普通 UTF-8 文件。`project plan` 会零写读取并绑定原著 identity、bytes、SHA-256 和确定性
+分块；同一次 `project create` 在项目三处真相发布并验证后 exact-replay 该 source plan，自动
+发布本地 chunks、创建 `source-analysis` Todo 票，并把 outline 置为
+`Backlog+source-pending`。因此正常立项之后直接启动 scheduler，不再要求第二次手工登记。
+
+以下两阶段命令只用于**已有改编项目迁移、恢复或高级管理**：
 
 ```bash
 writing-loop source plan --project KEY --input source-intake.json
 writing-loop source register --project KEY --input source-intake.json --confirm wlsrc_...
 ```
 
-intake v1 顶层 exact keys 为 `version/sourceTitle/sourcePath/adaptationBrief/rightsScope/
+独立 intake v1 顶层 exact keys 为 `version/sourceTitle/sourcePath/adaptationBrief/rightsScope/
 processingConsent`。`processingConsent` exact keys 为：
 
 ```json
