@@ -344,6 +344,12 @@ spawn、零写、不拿锁；`--plan N` 模拟打印未来 N 个 fire 的排程�
 一 fire（操作者显式点火——绕过 laneGating 拦截，`[gate]` 逐 agent 求值行仅诊断）；
 `--for S` 跑 S 秒后优雅停止；Ctrl-C = 优雅停（宽限收尾，再按立即杀）。
 
+Harness 契约只有 `claude | codex | opencode` 三个一级 ID；其他 `--cli` 值会在 spawn 前
+拒绝。`agents.<name>.command` 只是逐 agent argv 逃生口，不会把 Gemini/Kimi 等命令提升为
+经过 prompt、模型、认证、权限和遥测契约测试的第四种 Harness。`providers{}` 仍只服务
+OpenCode。完整矩阵见 [`docs/HARNESS.zh-CN.md`](../docs/HARNESS.zh-CN.md)。这些 Harness
+负责剧本写作；ComfyUI/H3/GPU 是独立的镜头制作执行层。
+
 运行时产物（都在项目数据目录）：**遥测账本 `fires.jsonl`**——每 fire 追加一行
 `{agent, model, effort, startedAt, endedAt, durationSeconds, exitCode, timedOut, noop,
 keystoneEscalated, descendantDrain?}`；`descendantDrain:true` 表示 CLI leader 已退但同

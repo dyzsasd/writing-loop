@@ -11,10 +11,18 @@
 
 ## Prerequisites
 
-- **Claude Code or Codex** CLI installed — either works (install commands in the
-  README; this guide uses Claude Code in its examples).
+- One first-class Harness CLI: **Claude Code, Codex, or OpenCode**. This guide uses
+  Claude Code because its onboarding examples are slash commands. OpenCode receives
+  the nine writers' room agent skills inline through `writing-loop run`; it does not
+  receive the attended `add-script` skill. See
+  [Harness CLI support](HARNESS.md).
 - `git` on your machine.
 - The novel as **plain text** (`.txt` / `.md`; convert PDF/EPUB to text first).
+
+The board, repository, and scheduler control plane stay local during onboarding,
+outlining, writing, and review. A Harness may still contact its configured text-model
+provider, but these stages do not start ComfyUI, MiniMax H3, or a GPU server; those
+belong to the later shot-rendering production path.
 
 ---
 
@@ -28,6 +36,11 @@ Inside Claude Code:
 ```
 
 You now have the `/writing-loop:*` slash commands (9 agents + `add-script`).
+
+Codex exposes the same plugin/slash onboarding. If OpenCode is your only Harness,
+create the project through Studio's **New project** flow or the deterministic
+`writing-loop project plan` then `writing-loop project create` commands; after that,
+run the nine agent skills with `writing-loop run --cli opencode`.
 
 ---
 
@@ -122,9 +135,10 @@ Then `add-script` automatically:
 
 ## Step 3 — Run the writers' room
 
-Each agent is a slash command and is **stateless**: every run re-reads ground truth
-from the board + repo and does whatever its role has ready, or no-ops. They hand off
-**only through tickets** — you never pass work by hand.
+Each agent is a **stateless skill**: Claude Code and Codex expose it as a slash command;
+OpenCode receives the same nine agent skills inline from the scheduler. Every run
+re-reads ground truth from the board + repo and does whatever its role has ready, or
+no-ops. Agents hand off **only through tickets** — you never pass work by hand.
 
 **First cycle (the natural order for adaptation):**
 

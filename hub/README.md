@@ -51,6 +51,24 @@ writing-loop status                  # board summary: states, parked tickets, ep
 writing-loop fires --last 20         # per-fire telemetry tail + per-agent success rates
 ```
 
+## Harness CLIs
+
+The scheduler accepts exactly `claude`, `codex`, and `opencode` as first-class
+Harness IDs:
+
+```sh
+writing-loop run --cli claude
+writing-loop run --cli codex
+writing-loop run --cli opencode
+```
+
+Claude and Codex support slash or inline prompt transport; OpenCode is always inline.
+The workspace `providers{}` registry is OpenCode-only and may describe
+OpenAI-compatible endpoints. Per-agent `command` overrides are an operator escape hatch,
+not additional certified Harnesses. Script writing does not contact ComfyUI/H3 and does
+not require a GPU. See the repository's
+[Harness contract](https://github.com/dyzsasd/writing-loop/blob/main/docs/HARNESS.md).
+
 Minimal approved-take handoff input (`createdAt` is canonical UTC ISO and must not
 predate the production revision being exported):
 

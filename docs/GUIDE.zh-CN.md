@@ -9,9 +9,15 @@
 
 ## 前提
 
-- 已装好 **Claude Code 或 Codex** CLI——两个皆可（安装命令见 README；本指南以 Claude Code 为例）。
+- 已安装一种一级 Harness CLI：**Claude Code、Codex 或 OpenCode**。本指南用 Claude Code
+  展示 slash onboarding；OpenCode 由 `writing-loop run` 内联传入编剧房的 9 个 agent skill，
+  不包含 attended `add-script` skill。详见 [Harness CLI 支持](HARNESS.zh-CN.md)。
 - 本机有 `git`。
 - 准备好小说的**纯文本**（`.txt` / `.md`；PDF/EPUB 请先转成文本）。
+
+立项、大纲、剧本正文和审读期间，看板、仓库与 scheduler 控制面都留在本地；Harness
+仍可能访问你配置的文本模型 provider，但这些阶段不会启动 ComfyUI、MiniMax H3 或 GPU
+服务器。它们只属于后续镜头渲染制作链。
 
 ---
 
@@ -25,6 +31,10 @@
 ```
 
 装好后你会有一组 `/writing-loop:*` 斜杠命令（9 个 agent + `add-script`）。
+
+Codex 提供同样的 plugin/slash 立项入口。如果只使用 OpenCode，请在 Studio 中点“新建项目”，
+或依次运行确定性的 `writing-loop project plan` / `writing-loop project create`；项目建好后再用
+`writing-loop run --cli opencode` 运行 9 个 agent skill。
 
 ---
 
@@ -90,7 +100,9 @@ cp /path/to/你的小说.txt ~/dramas/my-drama/source/novel.txt
 
 ## 第 3 步：让编剧团队跑起来
 
-每个 agent 是一条斜杠命令，**无状态**：每次运行都从看板 + 仓库重读真相，做本角色当下该做的事，没活就空转。它们**只通过工单交接**，你不用手动传递。
+每个 agent 都是**无状态 skill**：Claude Code/Codex 将其暴露为 slash 命令；OpenCode
+由 scheduler 内联同一组 9 个 agent skill。每次运行都从看板 + 仓库重读真相，做本角色
+当下该做的事，没活就空转。它们**只通过工单交接**，你不用手动传递。
 
 **第一轮（改编线的自然顺序）：**
 

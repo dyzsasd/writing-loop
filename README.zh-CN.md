@@ -51,11 +51,15 @@
 /plugin install writing-loop
 ```
 
-或在 **Codex** 内（同一套 skill、同一块本地看板，两个 CLI 都能跑；见 conventions §24–§25）：
+或在 **Codex** 内（Claude Code 与 Codex 提供 plugin/slash 传输；见 conventions §24–§25）：
 
 ```
 codex plugin marketplace add dyzsasd/writing-loop
 ```
+
+OpenCode 是第三种一级 scheduler Harness。项目创建完成后，它会以内联方式收到编剧房的
+9 个 agent skill；只使用 OpenCode 时，请通过 Studio 或 `writing-loop project plan/create`
+完成立项。
 
 Codex 还可作为可选的**加速器**（按项目 `codex` 配置 opt-in）：**图像生成**——把 bible 的
 视觉 token 变成人物/场景概念图；以及给审读/剧本医生的**异构第二引擎审查**。未装或关闭 ⇒
@@ -128,8 +132,10 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 用量与成本明确显示 **unknown / 未记录**，绝不估价。除确认立项外，Studio 的其他写面仅为
 原子暂停/恢复。scheduler 检测到暂停后停止新派发，完成 graceful drain 才释放项目锁。
 
-编剧团队可跑在**三个引擎**任一之上——Claude Code（默认）/ Codex / opencode
-（`writing-loop run --cli opencode`；见 conventions §25）。
+编剧团队只把三种 CLI 视为**一级 Harness**——Claude Code（默认）/ Codex / OpenCode。
+进程形态、prompt 传输、provider 边界、就绪检查，以及“剧本阶段不启动 H3/GPU”的边界见
+[`docs/HARNESS.zh-CN.md`](docs/HARNESS.zh-CN.md)。用
+`writing-loop run --cli claude|codex|opencode` 选择；其他 `--cli` 值会被拒绝。
 
 **2. 立项**——在已 init 的 workspace 中点 Studio“新建项目”，或运行立项 skill。请选择一个
 **尚不存在**的 repo 路径，不要先建文件夹。attended interview 收题材、受众、monetization、
@@ -140,7 +146,8 @@ file 第一张大纲票，并验证三处 ground truth：
 /writing-loop:add-script
 ```
 
-**3. 运行团队。** 每个 agent 都是一个 slash 命令；每次 fire 无状态，都从板 + repo
+**3. 运行团队。** 每个 agent 都是无状态 skill：Claude Code/Codex 可把它作为 slash
+命令调用；OpenCode Harness 则内联同一组 9 个 agent skill。每次 fire 都从板 + repo
 重读 ground truth。按自然顺序依次驱动，或用外部 `cron` 调度：
 
 ```

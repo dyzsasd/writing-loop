@@ -68,12 +68,16 @@ léger d'un ou deux drames de comparaison).
 /plugin install writing-loop
 ```
 
-Ou dans **Codex** (la writers' room tourne sur l'un ou l'autre CLI — mêmes skills,
-même tableau local ; voir conventions §24–§25) :
+Ou dans **Codex** (Claude Code et Codex fournissent le transport plugin/slash ;
+voir conventions §24–§25) :
 
 ```
 codex plugin marketplace add dyzsasd/writing-loop
 ```
+
+OpenCode est le troisième Harness de premier rang de l'ordonnanceur. Après création
+du projet, il reçoit inline les neuf skills d'agents de la writers' room ; pour un
+accueil OpenCode-only, utilisez Studio ou `writing-loop project plan/create`.
 
 Codex est aussi un accélérateur optionnel dans la boucle (opt-in via la config
 `codex` du projet) : **génération d'images** — transformer les tokens visuels de la
@@ -164,8 +168,11 @@ Outre la création confirmée, les seules écritures de Studio sont pause/repris
 atomiques. Un ordonnanceur actif observe la pause, cesse les nouveaux départs puis
 termine son drain contrôlé.
 
-La room tourne sur l'un des **trois moteurs** — Claude Code (par défaut), Codex ou
-opencode (`writing-loop run --cli opencode` ; voir conventions §25).
+La room reconnaît exactement **trois Harnesses de premier rang** — Claude Code
+(par défaut), Codex et OpenCode. Les processus, transports de prompt, frontières de
+provider, contrôles de disponibilité et la séparation écriture-sans-GPU sont décrits
+dans [`docs/HARNESS.fr.md`](docs/HARNESS.fr.md). Sélectionnez-les avec
+`writing-loop run --cli claude|codex|opencode` ; toute autre valeur est refusée.
 
 **2. Démarrer un projet** — depuis un workspace initialisé, choisissez « Nouveau
 projet » dans Studio ou lancez la skill d'accueil. Indiquez un chemin de repo qui
@@ -179,9 +186,10 @@ les trois vérités-terrain :
 /writing-loop:add-script
 ```
 
-**3. Faire tourner la room.** Chaque agent est une slash command ; un « fire » est
-sans état et relit la vérité-terrain depuis le tableau + le repo à chaque fois.
-Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
+**3. Faire tourner la room.** Chaque agent est une skill sans état : Claude Code et
+Codex peuvent l'invoquer comme slash command, tandis que le Harness OpenCode reçoit
+inline les neuf mêmes skills d'agents. Chaque fire relit la vérité-terrain depuis le
+tableau + le repo. Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 
 ```
 /writing-loop:showrunner-agent        # crée le ticket de plan, filtre les designs, promeut la file

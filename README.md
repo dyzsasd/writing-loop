@@ -63,12 +63,16 @@ two comparison dramas).
 /plugin install writing-loop
 ```
 
-Or in **Codex** (the writers' room runs on either CLI — same skills, same local
-board; see conventions §24–§25):
+Or in **Codex** (Claude Code and Codex expose the plugin/slash transport; see
+conventions §24–§25):
 
 ```
 codex plugin marketplace add dyzsasd/writing-loop
 ```
+
+OpenCode is the third first-class scheduler Harness. It receives the nine writers'
+room agent skills inline after a project has been created; use Studio or the
+`writing-loop project plan/create` commands for OpenCode-only onboarding.
 
 Codex is also an optional in-loop accelerant (opt-in via the project's `codex`
 config): **image generation** — turn the bible's visual tokens into character /
@@ -188,8 +192,11 @@ Besides confirmed project creation, Studio's only writes are atomic pause/resume
 A running scheduler observes a pause, stops dispatching, and completes its
 graceful drain before releasing the project lock.
 
-The room runs on any of **three engines** — Claude Code (default), Codex, or
-opencode (`writing-loop run --cli opencode`; see conventions §25).
+The room runs on exactly **three first-class Harnesses** — Claude Code (default),
+Codex, or OpenCode. Their process shapes, prompt transports, provider boundary,
+readiness checks, and the separate no-GPU script-writing boundary are documented in
+[`docs/HARNESS.md`](docs/HARNESS.md). Select one with
+`writing-loop run --cli claude|codex|opencode`; other `--cli` values are rejected.
 
 **2. Start a project** — from an initialized workspace, use Studio's “New
 project” or run the intake skill. Choose a path for a repo that does not exist
@@ -203,9 +210,10 @@ ticket, and verifies all three ground truths:
 /writing-loop:add-script
 ```
 
-**3. Run the room.** Each agent is a slash command; a fire is stateless and
-reads ground truth from the board + repo every time. Drive them in the natural
-order, or point external `cron` at them:
+**3. Run the room.** Each agent is a stateless skill: Claude Code and Codex can
+invoke it as a slash command, while the OpenCode Harness receives the same nine
+agent skills inline. Every fire re-reads ground truth from the board + repo. Drive
+them in the natural order, or point external `cron` at them:
 
 ```
 /writing-loop:showrunner-agent        # files the outline ticket, gates designs, promotes the queue

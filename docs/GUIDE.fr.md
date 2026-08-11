@@ -11,10 +11,18 @@
 
 ## Prérequis
 
-- **Claude Code ou Codex** CLI installé — les deux conviennent (commandes
-  d'installation dans le README ; ce guide prend Claude Code comme exemple).
+- Un Harness CLI de premier rang : **Claude Code, Codex ou OpenCode**. Ce guide
+  utilise Claude Code pour les exemples slash d'accueil ; `writing-loop run`
+  transmet inline à OpenCode les neuf skills d'agents de la writers' room, mais pas
+  la skill attended `add-script`. Voir
+  [Prise en charge des CLI Harness](HARNESS.fr.md).
 - `git` sur votre machine.
 - Le roman en **texte brut** (`.txt` / `.md` ; convertissez d'abord PDF/EPUB en texte).
+
+Pendant l'accueil, le plan, l'écriture et la review, le tableau, le repo et le plan
+de contrôle de l'ordonnanceur restent locaux. Un Harness peut néanmoins contacter le
+provider de modèle texte configuré ; ces étapes ne démarrent ni ComfyUI, ni MiniMax
+H3, ni serveur GPU. Ceux-ci appartiennent à la chaîne de rendu des plans.
 
 ---
 
@@ -28,6 +36,11 @@ Dans Claude Code :
 ```
 
 Vous disposez maintenant des slash commands `/writing-loop:*` (9 agents + `add-script`).
+
+Codex expose le même accueil plugin/slash. Si OpenCode est votre seul Harness, créez
+le projet via **Nouveau projet** dans Studio ou avec les commandes déterministes
+`writing-loop project plan` puis `writing-loop project create` ; lancez ensuite les
+neuf skills d'agents avec `writing-loop run --cli opencode`.
 
 ---
 
@@ -126,10 +139,11 @@ Ensuite `add-script` automatiquement :
 
 ## Étape 3 — Faire tourner la writers' room
 
-Chaque agent est une slash command et est **sans état** : chaque passage relit la
-vérité-terrain depuis le tableau + le repo et fait ce que son rôle a de prêt, ou ne
-fait rien. Ils se passent le relais **uniquement par les tickets** — vous ne
-transmettez jamais le travail à la main.
+Chaque agent est une **skill sans état** : Claude Code et Codex l'exposent comme slash
+command ; OpenCode reçoit inline les neuf mêmes skills d'agents via l'ordonnanceur.
+Chaque passage relit la vérité-terrain depuis le tableau + le repo et fait ce que son
+rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les tickets**
+— vous ne transmettez jamais le travail à la main.
 
 **Premier cycle (l'ordre naturel pour l'adaptation) :**
 

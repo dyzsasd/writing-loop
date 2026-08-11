@@ -1216,6 +1216,9 @@ agent 经 backend（§18）落。
 skill」（showrunner / reviewer / …），不靠环境变量区分。各 CLI 读写的是**同一批**
 `.writing-loop/<key>/board/*.md` 文件。
 
+这里的 `scheduler.cli:"codex"` 是“整间编剧房由哪个 Harness 起 fire”的选择；它与 §24
+项目级 `codex.enabled` 图像生成/异构二审加速器是两套独立开关，任一都不隐式开启另一项。
+
 - **插件格式跨 CLI 兼容（Claude Code / Codex）**：skill 是 `skills/<name>/SKILL.md` +
   `name`/`description` frontmatter（两 CLI 同构）；skill 里的 `${CLAUDE_PLUGIN_ROOT}` 指针在
   Codex 上也解析（Codex 显式提供 `CLAUDE_PLUGIN_ROOT` 环境变量）。manifest 双份：

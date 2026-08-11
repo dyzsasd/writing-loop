@@ -204,20 +204,23 @@ templates/{north-star,outline,arc-beat-card,episode,characters,world,
            foreshadow-ledger,story-state,production-ledger,evaluation-report}.md
 templates/deconstruction/README.md
 docs/DESIGN.md docs/RESEARCH/*.md（12 份调研归档）
+docs/HARNESS{,.zh-CN,.fr}.md（Claude/Codex/OpenCode 运行合同）
 ```
 
 ## 11. 照搬 / 替换 / 砍掉
 
 **照搬**：三铁律、boot、状态机、三分类、§5a、claim、dedupe、blocked 协议、查询纪律、
 dry-run、lessons、§17、§18 local 板、§21a 结构、§22 报告点评、§24 Codex 加速器
-（图像生成 + 独立审查）、§25 第二 CLI 可移植性（Claude/Codex）。
+（图像生成 + 独立审查）、§25 三 Harness 可移植性（Claude/Codex/OpenCode）。
 **替换**：build 门→格式与叙事门禁；coverage→账本回写强制令；sensitive→keystone；
 design doc→arc 节拍单；strategyDoc→north-star；Ops→market-watch；
-自动回滚→fail-revert 协议；档位→CLI 无关抽象等级（Claude↔Codex 映射）。
+自动回滚→fail-revert 协议；档位→CLI 无关抽象等级（Claude↔Codex 映射；OpenCode
+使用 `provider/model`）。
 **砍掉**：PR/autoMerge/deploy、多 repo §19（change-gate 思想保留给 doctor）、
 Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 park）。
-**Codex 的差异**：dev-loop 的第二 CLI 需要 hub 的 env-identity 网关；writing-loop v1
-纯本地文件板，「是哪个 agent」= 「调了哪条 skill」，无需 MCP/identity——§25 因此更简。
+**Harness 的差异**：Claude/Codex 可使用 plugin/slash 传输；OpenCode 由 scheduler 内联
+相同的 9 个 agent skill。writing-loop v1 的文件板仍是本地真相源，「是哪个 agent」=
+「调了哪条 skill」，无需用 MCP/identity 推断角色——§25 因此更简。
 
 ## 12. v1→v2 评审决策日志（38 findings 裁决）
 
