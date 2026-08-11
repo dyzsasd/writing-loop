@@ -120,4 +120,6 @@ export function sourceMain(argv = process.argv.slice(2)): number {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exit(sourceMain());
+// Do not call process.exit here: source status can emit a multi-megabyte bounded manifest. When
+// stdout is a pipe, console.log is asynchronous and process.exit would truncate valid JSON.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exitCode = sourceMain();

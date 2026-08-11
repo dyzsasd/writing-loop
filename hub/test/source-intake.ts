@@ -126,6 +126,23 @@ try {
   const finalized = finalizeSourceAnalysis(tmp, "demo", ws.config, new Date("2026-08-11T01:04:00.000Z"));
   ok(finalized.phase === "review-ready" && finalized.remainingChunks.length === 0,
     "only committed provenance sheets and all selected chunks reach review-ready");
+  // Real novels can have hundreds of chunks. The CLI must let its pipe drain instead of calling
+  // process.exit immediately after console.log and returning a truncated, unparsable JSON value.
+  const manifestFile = join(data, "demo", "source-intake.v1", "manifest.v1.json");
+  const largeManifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+  let previousEnd = largeManifest.chunking.chunks.at(-1).endLine as number;
+  for (let index = largeManifest.chunking.chunks.length; index < 80; index++) {
+    const id = `chunk-${String(index + 1).padStart(4, "0")}`; previousEnd++;
+    largeManifest.chunking.chunks.push({ id, path: `chunks/${id}.txt`, sha256: "a".repeat(64),
+      byteLength: 1, startLine: previousEnd, endLine: previousEnd, sectionCount: 1,
+      headings: [`大输出标题-${id}-` + "结构".repeat(1_000)] });
+  }
+  writeFileSync(manifestFile, JSON.stringify(largeManifest, null, 2) + "\n");
+  const statusCli = spawnSync(process.execPath, [join(import.meta.dirname, "..", "src", "source.ts"),
+    "status", "--project", "demo", "--json"], { cwd: tmp, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+  let parsedStatus: any = null; try { parsedStatus = JSON.parse(statusCli.stdout); } catch { /* asserted below */ }
+  ok(statusCli.status === 0 && parsedStatus?.source?.manifest?.chunking?.chunks?.length === 80,
+    "source status lets large manifest JSON drain completely before process exit");
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
