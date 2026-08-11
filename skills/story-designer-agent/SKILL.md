@@ -150,6 +150,19 @@ writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其�
 6. **自主 commit** 节拍单 + 排期 + 滚存（design doc 层 = §17 产品文档，无操作者 publish
    门；stage+commit 包在 repo 写锁内 §15.6）——绝不 commit 正文。
 
+**结构化伴随文件（所有 design/outline 都必须同步）**：人读的 `outline.md` / arc beat card 是
+创作正文；同时维护 `story/outline.v1.json`，严格契约见
+`references/story-design-schema.md`。它不是第二份模型散文，而是同一设计的机读投影：改编
+保留/删除/合并/风险及 source refs、角色 tier、场景与复用、季级 beats、逐集 hook/agency/
+资产引用。人物与场景清单只能由该文件派生，不另写一份会漂移的“资产报告”。
+
+- outline 初稿先运行 `writing-loop story validate --project <project> --stage skeleton`；节拍
+  与伏笔齐备后运行 `--stage beats`；60 集逐集结构齐备后运行 `--stage full`。
+- 任一 deterministic gate fail，不得 spawn 子票或交 In Review；按 gate ID 修复同一产物。
+  `skipped` 表示阶段未到，绝不写成 pass；`J01` 明确保留 Showrunner 的“合规但平庸”否决位。
+- JSON 不写对白，不复制原著正文；`sourcePlanId` 和每项 `sourceRefs` 必须精确绑定已验的
+  source-intake/chunk 摘要。Stage/commit 时与 Markdown 同一 commit，防止两个版本分叉。
+
 **spawn 单集子票**（每集一张，§6 模板；§21a-design.3）：`state:"Backlog"` 暂存、绝不
 file 到 Todo（大纲门放行）；机读行 `Design:` + `Episode: N` + **`Design-hash:
 <sha256-12>`**（spawn 时刻 arc 文件内容哈希，全部子票同值——门与子票必须见同一字节；
@@ -167,7 +180,8 @@ In Review 交 showrunner 大纲门。你**不标 Done**（§21a-design.5：pass 
 季级伏笔登记表 / R8 名场面 / 续季钩）+ bible `characters.md`/`world.md` 增补（§19 明许）。
 `north-star.md` 只读——showrunner 唯一写者（§20），需增补 ⇒ `needs-showrunner`；镜像地
 outline 唯一写者是你（§19），单元表「细纲状态」列由你在设计票内维护。用 templates/。
-自主 commit（repo 写锁内 §15.6）→ 父票 In Review。outline 票不 spawn arc 子票。
+同步完成 `story/outline.v1.json` 并在交门前运行 full gate；自主 commit（repo 写锁内
+§15.6）→ 父票 In Review。outline 票不 spawn arc 子票。
 
 ### Step 5 — DIRECT-WRITE 模式（升级重写票 / keystone 首稿；流程 = §21a-episode）
 与 episode-writer 同流，但你是顶配：

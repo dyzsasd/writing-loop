@@ -26,6 +26,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   ui:                      ["studio"],                // studio 的短别名
   project:                 ["project"],               // 项目清单与安全启停
   source:                  ["source"],                // 原著登记、不可变分块与拆书票
+  story:                   ["story"],                 // 结构化故事伴随文件的确定性质量门
   production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
   workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
@@ -74,6 +75,10 @@ const usage = (): void => {
                               本地登记原著与改编设计，并创建 writing-loop 拆书票
   source status --project K [--json]
                               查看原著登记及 source-analysis 进度
+  story status --project K [--json]
+                              查看结构化故事、派生资产与质量门（只读；通常由 Studio 使用）
+  story validate --project K [--stage skeleton|beats|full] [--json]
+                              独立复核 story/outline.v1.json；scheduler agents 自动调用
   production status [--project K] [--json]
                               查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
   production enqueue --plan --project K --input FILE [--json]

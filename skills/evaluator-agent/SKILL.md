@@ -72,6 +72,9 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
 3. 读 ground truth（按门取所需）：`bible/north-star.md`（结局承诺/Non-goals）、
    `outline.md`（五锚点/卡点规划/伏笔登记表/名场面规划）、涉及节拍单、`ledgers/`、
    评估范围内正文、以及 **market-watch 的带日期评估**（§21）。
+4. 大纲/结构相关门先运行 `writing-loop story validate --project <project> --stage full --json`，
+   把 gate report 作为「机内断言」证据；`fail` 阻断，`skipped` 只表示尚未执行，绝不折算
+   通过。报告仍须独立完成判断项与市场/实测项，不能把确定性门当作创作品质总分。
 
 ### Job 2 — 数据依赖纪律（第一戒律，违反即报告作废）
 - 市场层四指标与红线②③④依赖外部数据：打分**必须引用 market-watch 带日期评估**；

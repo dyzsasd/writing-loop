@@ -141,6 +141,13 @@ un chunk par fire, agrège les trois fiches et les soumet au Showrunner. `writin
 source status --project my-drama` est en lecture seule ; `source plan/register` sont
 réservées à la reprise/migration avancée et ne font pas partie du parcours normal.
 
+Après la porte source, Story Designer synchronise le plan lisible et le compagnon strict
+`story/outline.v1.json`, puis exécute automatiquement les portes
+`skeleton → beats → full`. L'opérateur n'a pas à lancer `story validate` : Studio montre
+les mêmes faits dans Source / Architecture / Personnages / Art / Épisodes et qualité.
+Les registres de personnages et de scènes sont dérivés, skipped n'est jamais pass, et
+le Showrunner conserve une validation éditoriale indépendante.
+
 ---
 
 ## Étape 3 — Faire tourner la writers' room

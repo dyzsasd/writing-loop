@@ -17,6 +17,7 @@ const harnessDocs = [
 ];
 const storyDesigner = read("skills", "story-designer-agent", "SKILL.md");
 const showrunner = read("skills", "showrunner-agent", "SKILL.md");
+const evaluator = read("skills", "evaluator-agent", "SKILL.md");
 
 for (const [index, doc] of harnessDocs.entries()) {
   ok(doc.includes("writing-loop run --cli claude")
@@ -61,6 +62,13 @@ ok(storyDesigner.includes("SOURCE-ANALYSIS 模式（writing-loop 内生拆书）
   && showrunner.includes("control.phase=`review-ready`")
   && showrunner.includes("outline 继续 Backlog"),
 "改编拆书由 writing-loop source-analysis/checkpoint/showrunner 门闭环，明确拒绝外部 skill 旁路");
+ok(storyDesigner.includes("story/outline.v1.json")
+  && storyDesigner.includes("writing-loop story validate")
+  && showrunner.includes("--stage full")
+  && evaluator.includes("story validate --project <project> --stage full --json")
+  && read("references", "story-design-schema.md").includes("skipped` 表示阶段未到")
+  && read("references", "config-schema.md").includes("结构化故事伴随文件与质量门"),
+"Story Designer 写严格 companion，Showrunner/Evaluator 独立重验，阶段未到不伪绿");
 
 const guides = [read("docs", "GUIDE.md"), read("docs", "GUIDE.zh-CN.md"), read("docs", "GUIDE.fr.md")];
 const automaticSourcePhrases = [
@@ -75,6 +83,8 @@ for (const [index, guide] of guides.entries()) {
   ok(guide.includes(automaticSourcePhrases[index]!) && guide.includes("source-analysis")
     && guide.includes("source status --project my-drama") && !guide.includes("my-drama/source/novel.txt"),
   `指南 ${index + 1} 把原著交给立项后自动 source-analysis，而非要求第二次手工登记或外部拆书`);
+  ok(guide.includes("story/outline.v1.json") && guide.includes("skeleton") && guide.includes("beats") && guide.includes("full"),
+  `指南 ${index + 1} 同步结构伴随文件与三阶段质量门`);
 }
 ok(read("skills", "add-script", "SKILL.md").includes("不是正常立项步骤")
   && read("skills", "add-script", "SKILL.md").includes("同一次确认会在项目发布后自动登记原著")

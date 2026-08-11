@@ -141,6 +141,14 @@ l'opérateur, puis délèguent au même cœur d'accueil : plan déterministe **s
 finaux, création journalisée et vérification après relecture. Les commandes ci-dessus exposent la même frontière
 plan/create/verify. La création exige un nouveau repo ; Studio le limite en plus
 au workspace courant.
+
+Dans un projet, Studio suit les responsabilités créatives : **Vue d'ensemble / Analyse de
+la source / Architecture / Personnages / Assets visuels / Épisodes et qualité**. La vue source
+n'affiche que les empreintes locales, la fenêtre de saison et les checkpoints des chunks —
+jamais le texte brut du roman. Story Designer maintient le compagnon strict
+`story/outline.v1.json`, dont les personnages et scènes sont dérivés de façon déterministe.
+La qualité distingue pass, fail, skipped et not-applicable, tout en gardant le veto éditorial
+du Showrunner. Studio ne modifie pas ces assets et ne démarre pas H3/GPU.
 Avant que la config rende le projet visible, un journal durable par projet permet
 de reprendre après un vrai crash avec la **même requête et le `planId` initial**
 si le commit et le manifeste complets sont déjà durables. Un arbre partiel antérieur

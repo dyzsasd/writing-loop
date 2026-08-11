@@ -131,6 +131,9 @@ Episode: 1
   const page = await fetch(`${base}/p/demo?notice=${encodeURIComponent("<img src=x onerror=alert(1)>")}`);
   const pageHtml = await page.text();
   ok(page.status === 200 && pageHtml.includes("故事脊柱") && pageHtml.includes("等待你的决定") && pageHtml.includes("审读正在工作"), "项目页呈现创作成熟度、人工门与 live agent");
+  ok(pageHtml.includes("原著分析") && pageHtml.includes("故事结构") && pageHtml.includes("人物设定")
+    && pageHtml.includes("美术资产") && pageHtml.includes("分集与质量"),
+  "项目概览提供完整的创作工作台信息架构，不再只呈现看板");
   ok(pageHtml.includes("一句话故事已定") && pageHtml.includes("总大纲尚未过门"), "成熟度使用真实创作信号，不把已生成的大纲模板当作过门");
   ok(!pageHtml.includes("<img src=x") && pageHtml.includes("&lt;img src=x"), "notice 参数不会注入 HTML");
 
@@ -225,6 +228,8 @@ Episode: 1
   const newPage = await fetch(`${base}/projects/new`);
   const newHtml = await newPage.text();
   ok(newPage.status === 200 && newHtml.includes("生成零写入立项计划") && newHtml.includes("原著与改编方向")
+    && newHtml.includes("YOU PROVIDE") && newHtml.includes("WRITING-LOOP DECIDES")
+    && newHtml.includes("选取哪一季内容、如何拆书、人物与场景资产、分集节拍、质量门和 tickets")
     && newHtml.includes('name="sourcePath"') && newHtml.includes('name="adaptationBrief"')
     && newHtml.includes('name="sourceHarness"') && newHtml.includes('name="allowRawSourceProcessing"')
     && !newHtml.includes('name="compressionRatio"') && !newHtml.includes('name="highlightCount"')
@@ -336,6 +341,22 @@ Episode: 1
   ok(readFileSync(join(tmp, "adapted-drama", "bible", "north-star.md"), "utf8").includes("由 writing-loop 自主拆解")
     && readFileSync(join(tmp, "adapted-drama", "source", "adaptation-brief.md"), "utf8").includes("操作者改编设计"),
   "项目开发总建议同时进入 North Star 与 source intake，成为自治规划的权威输入");
+  const sourceWorkbench = await fetch(`${base}/p/adapted-drama/source`);
+  const sourceWorkbenchHtml = await sourceWorkbench.text();
+  const storyApi = await fetch(`${base}/api/projects/adapted-drama/story`);
+  const storyProjection = await storyApi.json() as { version?: number; project?: string; source?: { chunkCount?: number }; summary?: { stage?: string } };
+  ok(sourceWorkbench.status === 200 && sourceWorkbenchHtml.includes("原著分析")
+    && sourceWorkbenchHtml.includes("不可变分块") && !sourceWorkbenchHtml.includes("原著结构内容"),
+  "原著工作台显示指纹/分块/checkpoint 而不泄露原著正文");
+  ok(storyApi.status === 200 && storyProjection.version === 1 && storyProjection.project === "adapted-drama"
+    && Number(storyProjection.source?.chunkCount) > 0 && storyProjection.summary?.stage === "source",
+  "project story API 与 Studio 共用本地 source/story 读模型");
+  const qualityWorkbench = await fetch(`${base}/p/adapted-drama/quality`);
+  ok(qualityWorkbench.status === 200 && (await qualityWorkbench.text()).includes("S00 · 结构化故事资产已建立"),
+  "质量页在 companion 尚未建立时诚实显示 fail，而不是伪绿或空白");
+  const wrongStoryMethod = await fetch(`${base}/api/projects/adapted-drama/story`, { method: "POST", headers: { origin: base } });
+  ok(wrongStoryMethod.status === 405 && wrongStoryMethod.headers.get("allow") === "GET, HEAD",
+  "story API 保持只读，Studio 不能绕过 agent/票据直接改故事资产");
 
   const stalled = await fetch(`${base}/api/stream?stall=1`);
   const stalledReader = stalled.body!.getReader();

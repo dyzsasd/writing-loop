@@ -528,6 +528,18 @@ register 将原始 bytes 与 chunks 以 mode 0600 发布到
 `source finalize`。只有 control.phase=`review-ready` 且 showrunner 将 source-analysis 票 Done，
 通用 Blocked-by resolver 才能解锁 outline。任何外部拆书 skill 产物都不能替代这条证据链。
 
+### 结构化故事伴随文件与质量门
+
+source-analysis 通过后，Story Designer 同步维护人读 `outline.md` / `arcs/*.md` 与严格的
+`story/outline.v1.json`。后者绑定 source plan、改编处置、角色 tier、场景复用、季级 beats 与
+逐集 hook/agency/资产引用；人物/场景资产清单从它确定性派生，不由另一次模型调用重写。
+
+Story Designer 按 `skeleton → beats → full` 三阶段运行 `writing-loop story validate`；
+Showrunner/Evaluator 在各自门内独立重跑。`fail` 阻断交门，`skipped` 仅表示阶段未到，机器全绿
+仍保留人工“合规但平庸”否决。完整 exact-key 契约见
+[`story-design-schema.md`](story-design-schema.md)。正常操作者通过 Studio 查看，不需要手工执行
+story/source 内部命令。
+
 ## 数据目录布局 — `<workspace>/.writing-loop/<project-key>/`
 
 ```

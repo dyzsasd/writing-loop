@@ -15,10 +15,11 @@ import { buildProductionReadModel, type ProductionReadModel } from "./production
 import { readProductionState } from "./production-store.ts";
 import { listProjectEvaluations, listProjectReports, readProjectResource, type ProjectResourceKind } from "./project-detail.ts";
 import { buildWorkspaceSnapshot, snapshotFingerprint, type WorkspaceSnapshot } from "./project-read-model.ts";
+import { buildStoryStudioReadModel, type StoryStudioReadModel } from "./story-design.ts";
 import { setProjectEnabled } from "./workspace-store.ts";
 import {
-  LIVE_SCRIPT, fleetPage, newProjectPage, notFoundPage, onboardingPlanPage, operationErrorPage, projectPage, resourcePage,
-  workspacePage, type FleetWorkspaceView,
+  LIVE_SCRIPT, fleetPage, newProjectPage, notFoundPage, onboardingPlanPage, operationErrorPage, projectPage, projectStoryPage,
+  resourcePage, workspacePage, type FleetWorkspaceView, type StoryStudioSection,
 } from "./studio-view.ts";
 import { findWorkspaceRoot, loadConfig, PROJECT_KEY_PATTERN, WsError } from "./workspace.ts";
 import {
@@ -44,6 +45,8 @@ export type StudioOptions = {
   productionProvider?: (root: string, workspaceId: string, project: string) => ProductionReadModel;
   /** Local crash-recovery projection; never performs provider I/O. */
   productionControlProvider?: (root: string, workspaceId: string, project: string) => ProductionCoordinatorReadModel;
+  /** Local-only creative projection; never reads raw source contents or invokes a model. */
+  storyProvider?: (root: string, project: string) => StoryStudioReadModel;
 };
 
 export type StudioWorkspaceEntry = {
@@ -366,8 +369,8 @@ function temporaryRedirect(res: ServerResponse, location: string): void {
 
 function allowedMethods(pathname: string): string[] | null {
   if (["/", "/api/health", "/api/snapshot", "/projects/new"].includes(pathname)
-    || /^\/api\/projects\/[^/]+\/(?:activity|production|production-control|resources\/(?:ticket|document|episode|report|evaluation)\/[^/]+)$/.test(pathname)
-    || /^\/p\/[^/]+(?:\/(?:ticket|document|episode|report|evaluation)\/[^/]+)?$/.test(pathname)) return ["GET", "HEAD"];
+    || /^\/api\/projects\/[^/]+\/(?:activity|production|production-control|story|resources\/(?:ticket|document|episode|report|evaluation)\/[^/]+)$/.test(pathname)
+    || /^\/p\/[^/]+(?:\/(?:source|story|characters|art|quality)|\/(?:ticket|document|episode|report|evaluation)\/[^/]+)?$/.test(pathname)) return ["GET", "HEAD"];
   if (pathname === "/api/stream") return ["GET"];
   if (pathname === "/projects/plan" || pathname === "/projects/create" || /^\/p\/[^/]+\/toggle$/.test(pathname)) return ["POST"];
   return null;
@@ -391,6 +394,9 @@ export function createStudioServer(options: StudioOptions): Server {
   const snapshotNow = options.snapshotProvider ?? loadSnapshot;
   const productionNow = options.productionProvider ?? loadProduction;
   const productionControlNow = options.productionControlProvider ?? loadProductionControl;
+  const storyNow = options.storyProvider ?? ((root: string, project: string): StoryStudioReadModel => {
+    const ws = loadConfig(root); return buildStoryStudioReadModel(root, project, ws.config);
+  });
   const productionFor = (root: string, workspaceId: string, project: string): ProductionReadModel => {
     const value = productionNow(root, workspaceId, project);
     if (value.version !== 1 || value.workspaceId !== workspaceId || value.project !== project) {
@@ -403,6 +409,11 @@ export function createStudioServer(options: StudioOptions): Server {
     if (value.version !== 1 || value.workspaceId !== workspaceId || value.project !== project) {
       throw new StudioError("production control provider 返回了跨 workspace/project 或未知版本的 read model", 409);
     }
+    return value;
+  };
+  const storyFor = (root: string, project: string): StoryStudioReadModel => {
+    const value = storyNow(root, project);
+    if (value.version !== 1 || value.project !== project) throw new StudioError("story provider 返回了跨 project 或未知版本的 read model", 409);
     return value;
   };
   const fleetMode = options.workspaceProvider !== undefined;
@@ -439,6 +450,7 @@ export function createStudioServer(options: StudioOptions): Server {
       digest.update("\0production\0").update(String(production.revision)).update("\0").update(production.updatedAt ?? "");
       const control = productionControlFor(row.root, row.id, project.key);
       digest.update("\0production-control\0").update(String(control.revision)).update("\0").update(control.updatedAt ?? "");
+      digest.update("\0story\0").update(JSON.stringify(storyFor(row.root, project.key)));
     }
     return digest.digest("hex");
   };
@@ -701,6 +713,16 @@ export function createStudioServer(options: StudioOptions): Server {
         return;
       }
 
+      const storyApiMatch = /^\/api\/projects\/([^/]+)\/story$/.exec(routedPath);
+      if ((method === "GET" || head) && storyApiMatch) {
+        const key = decodeProject(storyApiMatch[1]);
+        if (!key) { sendJson(res, 400, { error: "项目 key 无效" }, head); return; }
+        const snapshot = snapshotNow(requestScope!.root);
+        if (!hasProject(snapshot, key)) { sendJson(res, 404, { error: `没有项目 '${key}'` }, head); return; }
+        sendJson(res, 200, storyFor(requestScope!.root, key), head);
+        return;
+      }
+
       const resourceApiMatch = /^\/api\/projects\/([^/]+)\/resources\/(ticket|document|episode|report|evaluation)\/([^/]+)$/.exec(routedPath);
       if ((method === "GET" || head) && resourceApiMatch) {
         const key = decodeProject(resourceApiMatch[1]);
@@ -783,6 +805,17 @@ export function createStudioServer(options: StudioOptions): Server {
         return;
       }
 
+      const storyPageMatch = /^\/p\/([^/]+)\/(source|story|characters|art|quality)$/.exec(routedPath);
+      if ((method === "GET" || head) && storyPageMatch) {
+        const snapshot = snapshotNow(requestScope!.root);
+        const key = decodeProject(storyPageMatch[1]);
+        const project = key ? snapshot.projects.find((item) => item.key === key) : undefined;
+        if (!project || !key) { sendHtml(res, 404, notFoundPage(snapshot, "没有找到这部剧。", requestScope!.base), head); return; }
+        sendHtml(res, 200, projectStoryPage(snapshot, project, storyPageMatch[2] as StoryStudioSection,
+          storyFor(requestScope!.root, key), requestScope!.base), head);
+        return;
+      }
+
       const projectMatch = /^\/p\/([^/]+)$/.exec(routedPath);
       if ((method === "GET" || head) && projectMatch) {
         const snapshot = snapshotNow(requestScope!.root);
@@ -799,6 +832,7 @@ export function createStudioServer(options: StudioOptions): Server {
           productionControl: productionControlFor(requestScope!.root, requestScope!.id, project.key),
           reports: listProjectReports(ws, project.key),
           evaluations: listProjectEvaluations(ws, project.key),
+          story: storyFor(requestScope!.root, project.key),
         }, requestScope!.base), head);
         return;
       }

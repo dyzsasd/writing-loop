@@ -164,6 +164,14 @@ explicit `planId` confirmation, atomic reservation of the final directories,
 journaled creation, and write-after-read verification.
 The CLI commands above expose that same plan/create/verify boundary. Creation is
 limited to a brand-new repo; Studio additionally keeps it inside the workspace.
+
+Inside a project, Studio is organized by creative responsibility: **Overview / Source
+analysis / Story architecture / Characters / Art assets / Episodes & quality**. The source
+workbench shows only local fingerprints, the selected season window, and chunk checkpoints—
+never raw novel text. Story Designer owns the strict `story/outline.v1.json` companion;
+characters and scenes are deterministically derived from it. The quality page keeps pass,
+fail, skipped, and not-applicable distinct and preserves Showrunner's editorial veto even
+when every machine gate is green. Studio still cannot edit story assets or start H3/GPU.
 Before config makes the project visible, a durable per-project journal lets the
 exact same request and original `planId` resume after a real process crash once
 the complete commit/manifest evidence is durable. Earlier partial trees are

@@ -101,7 +101,9 @@ source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张
 `Designed into:` 子票清单。**幂等入口**：父票已带 `Approved-hash:` 评论行 = 上
 fire 已判 pass、崩于放行途中 ⇒ **不重判**，直接补完「promote 全部子票 → 父票 Done」
 （§21a-design.5——重判可能翻案、连坐已放行子票）。否则按 §23「细纲（大纲门）」行逐项判：
-- **机器项**：钩型序列（R1.1-R1.3，对照 genre profile）、R2.1 伏笔配额与排期 + 季级到期
+- **机器项先独立执行**：运行 `writing-loop story validate --project <project> --stage beats`
+  并把 gate ID/状态写进验收评论；任何 fail 或本阶段应执行却被 skipped = fail。随后才核：
+  钩型序列（R1.1-R1.3，对照 genre profile）、R2.1 伏笔配额与排期 + 季级到期
   已排入、R3.2 五拍、禁写清单对邻集完备、制作预算余量、被动率预算、切片候选 ≥3（前 10
   集）；**子票版本锚**：全部子票带 `Design-hash:` 且 == 节拍单当前内容哈希
   （§21a-design.3——spawn 后被改未重 stamp = fail：门与子票必须见同一字节）。
@@ -118,7 +120,9 @@ superseded by <新票>`），暂存子票连坐 Canceled（绝不留孤儿），
 （Todo，`relatedTo` 原票）。
 
 **A2 · outline 票（定稿门 Blocked-by 前置，§21 末段）**。先结构预审（§23 判断项适用
-部分）；outline 票 Done 以「大纲定稿门」eval 票 Done 为前置：尚无 eval 票 ⇒ file
+部分）；先独立运行 `writing-loop story validate --project <project> --stage full`，只有全部
+deterministic gate 无 fail、无应执行 skipped 才能进入判断门；机器全绿仍保留 J01 的人工
+否决。outline 票 Done 以「大纲定稿门」eval 票 Done 为前置：尚无 eval 票 ⇒ file
 `Feature+milestone-eval`（evaluator 执行、owner=showrunner，§6 模板），**直进 Todo
 （§5a 第五豁免）**，outline 票
 加机读行 `Blocked-by: <eval票ID>` + `blocked` 标签留 In Review（此 file 属验收响应，
