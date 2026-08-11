@@ -90,7 +90,9 @@ try {
   const planAgain = planOnboarding(tmp, input());
   ok(plan.planId === planAgain.planId && plan.templateDigest === planAgain.templateDigest, "相同输入/config/templates 生成确定性 plan 指纹");
   ok(readFileSync(configFile, "utf8") === beforePlan && !existsSync(join(tmp, "paper-moon")), "plan 严格零写");
-  ok(plan.files.includes("episodes/.gitkeep") && plan.outlineTicket.id === "PM-1", "plan 列出可克隆空目录与唯一首票");
+  ok(plan.files.includes("story/.gitkeep") && plan.files.includes("episodes/.gitkeep")
+    && !plan.files.includes("outline.md") && plan.outlineTicket.id === "PM-1",
+  "plan 列出结构化故事目录且不再计划重复 Markdown");
   ok(plan.requiresConfirmation && plan.projectConfig.repoPath === "paper-moon", "plan 明示确认门并保持相对 repoPath");
 
   const badAudience = { ...input("bad-audience"), audience: "喜欢爽剧的人", ticketPrefix: "BA" };
@@ -526,10 +528,11 @@ try {
   ok(config.projects["paper-moon"]?.repoPath === "paper-moon" && config.projects["paper-moon"]?.enabled === true, "config 最后发布完整项目条目");
   const repo = join(tmp, "paper-moon");
   const northStar = readFileSync(join(repo, "bible", "north-star.md"), "utf8");
-  const production = readFileSync(join(repo, "ledgers", "production.md"), "utf8");
   ok(northStar.includes("她写下的每一场戏") && northStar.includes("女性 25-40 岁") && northStar.includes("合规预筛"), "north-star 落入采访决定而非占位猜测");
-  ok(production.includes("主场景 ≤5") && production.includes("具名角色 ≤20") && production.includes("format：live-action"), "production ledger 初始化制作预算");
-  ok(["arcs", "episodes", "evaluation", "ledgers/archive"].every((dir) => existsSync(join(repo, ...dir.split("/"), ".gitkeep"))), "空创作目录进入 Git scaffold");
+  ok(["story", "episodes", "evaluation"].every((dir) => existsSync(join(repo, dir, ".gitkeep"))), "唯一结构化事实源与正文目录进入 Git scaffold");
+  const legacy = ["outline.md", "bible/characters.md", "bible/world.md", "ledgers/foreshadow.md",
+    "ledgers/story-state.md", "ledgers/production.md"];
+  ok(legacy.every((path) => !existsSync(join(repo, ...path.split("/")))), "新项目不会生成重复的 Markdown 剧情资产");
   const git = spawnSync("git", ["log", "--oneline"], { cwd: repo, encoding: "utf8" });
   ok(git.status === 0 && git.stdout.trim().split("\n").length === 1 && git.stdout.includes("立项 paper-moon"), "新 repo 只有一个可验证 scaffold commit");
   const ticket = readFileSync(join(data, "paper-moon", "board", "tickets", "PM-1.md"), "utf8");
@@ -539,6 +542,11 @@ try {
   ok(readdirSync(join(data, "paper-moon", "board", "tickets")).length === 1, "立项恒只创建一张首票");
   const snapshot = buildWorkspaceSnapshot(loadConfig(tmp), Date.parse("2026-08-10T10:00:00.000Z"));
   ok(snapshot.projects.some((project) => project.key === "paper-moon" && project.board.tickets[0]?.malformed === false), "config 发布后统一 read model 一次读到完整非畸形项目");
+
+  writeFileSync(join(repo, "outline.md"), "# 重复大纲\n");
+  ok(!verifyOnboarding(tmp, "paper-moon").ok, "verify 对后来重新引入的重复剧情事实源 fail-closed");
+  rmSync(join(repo, "outline.md"));
+  ok(verifyOnboarding(tmp, "paper-moon").ok, "移除重复镜像后 verify 恢复通过");
 
   // verify 以 receipt 为三处 ground truth 的锚：缺失/篡改、config identity 漂移、非祖先
   // HEAD 与原 outline ticket 丢失都必须失败，不能仅凭“有几个同名文件”误报成功。

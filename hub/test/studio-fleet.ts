@@ -39,9 +39,6 @@ function fixture(parent: string, name: string, title: string, marker: string, id
     projects: { demo: { title, repoPath: "repo", enabled: true, totalEpisodes: 6 } },
   }, null, 2) + "\n");
   writeFileSync(join(repo, "bible", "north-star.md"), `## 一句话故事\n${marker} 的故事脊柱。\n`);
-  writeFileSync(join(repo, "bible", "characters.md"), `# ${marker} 人物\n`);
-  writeFileSync(join(repo, "bible", "world.md"), `# ${marker} 世界\n`);
-  writeFileSync(join(repo, "outline.md"), `# ${marker} 总大纲\n`);
   writeFileSync(join(repo, "episodes", "ep-001.md"), `# ${marker} 第一集\n`);
   const ticket = join(tickets, "WL-1.md");
   writeFileSync(ticket, `---

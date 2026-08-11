@@ -75,9 +75,6 @@ function fixture(parent: string, name: string, title: string, workspaceId: strin
     projects: { demo: { title, repoPath: "repo", enabled, totalEpisodes: 6 } },
   }, null, 2) + "\n");
   writeFileSync(join(repo, "bible", "north-star.md"), `## 一句话故事\n${title} 的故事。\n`);
-  writeFileSync(join(repo, "bible", "characters.md"), "# 人物\n");
-  writeFileSync(join(repo, "bible", "world.md"), "# 世界\n");
-  writeFileSync(join(repo, "outline.md"), "# 大纲\n");
   writeFileSync(join(repo, "episodes", "ep-001.md"), "# 第一集\n");
   return realpathSync(root);
 }

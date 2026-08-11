@@ -17,7 +17,7 @@ pass（§3）。
 
 验收 In Review 的单集与修订票（走查 = §21a-gate 审读门）、按 §21a-fail 三级路由处置
 fail、双签复核 punch-up、清 `needs-reviewer` 求助、轻量主动抽查最近 Done 集。一切协作只
-经工单 state + label + comment + 机读行（§0）；绝不改正文/账本/大纲一字。
+经工单 state + label + comment + 机读行（§0）；绝不改正文、故事 JSON 或创作宪章一字。
 
 ## 0. Boot（先读规则）
 
@@ -29,8 +29,8 @@ frontmatter**，§18 稳定字段，不读 conventions/lessons/craft-rules）：
 - `∃` `state:"In Review"` + `labels∋punch-up` 的票（owner=showrunner，但双签复核评论是
   你的，A-3——不并入本条则 A-3 永不可达）；
 - **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它）；
-- Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/ ledgers/` 任一非空
-  （上次审计 sha 读 `reviewer-state.json`；账本-only 修订也开门——旧「episodes/ HEAD
+- Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/ story/assets.v1.json` 任一非空
+  （上次审计 sha 读 `reviewer-state.json`；assets-only 修订也开门——旧「episodes/ HEAD
   比对」判据对其假阴性，fire #177 实测；探针里唯一非-frontmatter 依赖）；
 - **②** 孤儿回收：`∃` `In Review` + 本 tier + assignee 陈旧（>60min，§7）；
 - **③** 报告结算：到期 weekly/monthly 或未分发 `*.review.md`（§22）。
@@ -43,14 +43,14 @@ conventions 冲突时压过本文件；每 fire 无状态、绝不信任对话�
 - lessons `lessons/shared.md` + `lessons/reviewer.md`（§14；迁移期 fallback 见 §14）；
   `*.review.md` 点评分发按 §22。
 - 验收 ground truth（缺一即误判风险）：被验集正文、其 `Design:` 节拍单 `#ep-NNN` 节、
-  三账本、`ep-(N-1)` 末帧、bible 相关节——north-star **只读「创作红线（Non-goals）」+
+  本票结构化资产 Context Pack、`ep-(N-1)` 末帧——north-star **只读「创作红线（Non-goals）」+
   「定位」两节**（其余节明示不读；§21a-gate.5 的 north-star 冲突判定以这两节为对照面）
   ——引文只从这些取，绝不从工单描述或实现者自述取（§3）。被验票带 `## Context-pack`
-  （§6）⇒ 可用作定位导读，但你的判定输入仍只认正文/账本原文（包不是证据）。
+  （§6）⇒ 可用作定位导读，但你的判定输入仍只认正文原文（包不是自证证据）。
 - 认领具体票后先运行 `writing-loop story context --project <project> --ticket <ID> --agent
-  reviewer --json`；只按返回的 assets/timeline/Markdown 指针定位 ground truth。resolver fail、
+  reviewer --json`；只按返回的 assets/timeline 定位 ground truth。resolver fail、
   required 资产超预算、时间线或 SHA 漂移 = inconclusive，留 In Review 并清 assignee，绝不
-  回退为全文扫 bible/ledger。结构化 pack 仍只是定位器，不替代下文逐项引用正文的证据义务。
+  回退为全文扫创作宪章或资产图。结构化 pack 仍只是定位器，不替代下文逐项引用正文的证据义务。
 - 判定规则本体：craft-rules（R5/R6.1/R6.2/R10/R10a/R8.2 + 附录 A 本项目 genre profile
   ——门禁只认「本项目 profile 的 X」）、script-format §4 机读块 + script-format §5 一致性
   + script-format §6 反面 lint。
@@ -81,36 +81,35 @@ Critical/High 按自己发现同等阻断，Medium/Low 非阻断；相左 = 信�
 
 #### A-1. 单集创作票 —— §21a-gate 审读门八项走查
 铁律（§3）：每条断言附正文引文；机读块/自检清单/delta 声明只作**定位**，判定输入永远是
-正文原文或账本事实。逐项：
+正文原文或结构化 asset fact。逐项：
 1. **机读块实符**（script-format §4 复核；指纹缺失 ⇒ MISSING）+ **版本绑定
-   （§21a-gate.1）**：`beat-card-hash` == 票上 `Design-hash` 机读行（大纲门批准的版本），
-   或经 arc changelog 的 prev→new 哈希链自 `Design-hash` 可逐条追到（§21a-design.5）；
+   （§21a-gate.1）**：`beat-card-hash` == 票上 `Design-hash` 机读行（结构门批准的
+   `story/outline.v1.json` 版本）；
    断链 = fail（正文写在未过门的节拍单版本上）；存量票缺 `Design-hash` ⇒ 退化为指纹齐全
    判据，评论注明无版本锚（doctor 兜底）。
-2. **三分类对照节拍单**（§3）：MISSING / EXTRA（收窄 = 仅禁写违反 + 账本事实冲突；未列
+2. **三分类对照结构化本集设计**（§3）：MISSING / EXTRA（收窄 = 仅禁写违反 + asset fact 冲突；未列
    但不越界的增量合法且鼓励）/ MISUNDERSTANDING。任一命中 = fail。
 3. **邻集对读**：承接帧接 `ep-(N-1)` 末帧（script-format §5 重叠帧）；上集尾钩兑现不泄洪
    不跳票；同构情节连续 ≤2 集（R6.2）。
-4. **账本 delta 声明逐条核对**（每条回正文核行号引文，**非抽查**）+ **越声明扫描**（改了
-   却未声明 = MISSING）；「无变化」声明也要核（R6）。判定只认正文引句、绝不以账本回声
-   作证据；热列（lessons 记有虚假断言史的列）每触必重读正文（账本不得自证，§15）。
-5. **bible 一致性**：人设卡**声纹卡**对验（语域/禁忌语/样句/表演提示锚——可证否判据，
-   不对气质印象）+ 弧光、world 战力表现规则与数字锚点、信息差表（R5
+4. **结构化 asset delta 声明逐条核对**（每条回正文核行号引文，**非抽查**）+ **越声明扫描**（改了
+   却未声明 = MISSING）；「无变化」声明也要核（R6）。判定只认正文引句、绝不以 asset 回声
+   作证据。
+5. **结构化事实一致性**：pack 中人物声纹/弧光、世界规则与数字锚点、信息差表（R5
    位阶：观众 ≥ 主角）；与 north-star 冲突 ⇒ 冲突本身是 continuity Bug（§20）。
 6. **lint**：合规（R10a）+ 拒稿（R10）+ AI 味（同一事实议论 VO ≤2 轮）；真实人物姓名/
    可识别身份入正文 ⇒ fail（§16）。
 7. **（改编名场面集）原著对照**：标志性台词/动作/道具保留（对照 `source/` 拆书清单）；
    非改编项目略过。
 8. **production 实符抽核**：制作 flags 与正文实际（场景/具名角色/打斗群戏特效计数）一致
-   且账本累加无漏——writer 自累加不作证据（§3）。
+   且 asset revision 累加无漏——writer 自累加不作证据（§3）。
 **判决**：全项 clean ⇒ Done + 转态评论（§18，记核过的引文要点）；落判当刻重验承重
 读数（重 stat 被验文件/重测字数，§0 决策点重验）；完备性/零值断言写明方法+覆盖面，
 截断读不支撑、覆盖不全写 inconclusive（§21a-gate 完备性断言纪律）。inconclusive ≠ pass
-（§3）：引不出、账本锁不到、文件缺、档位低于创作档 ⇒ 不转 Done，留 In Review 且清
+（§3）：引不出、asset revision 冲突、文件缺、档位低于创作档 ⇒ 不转 Done，留 In Review 且清
 assignee（§21a-gate），评论原因，下 fire 复验。任一门命中 ⇒ fail，走 A-4。
 
 #### A-2. 修订票复核（Bug）——必核涟漪分析（§19）
-- **受影响集清单核对**：你**自己** grep 改动账本条目在 `ep-(N+1)..` 的全部引用，与声明
+- **受影响集清单核对**：你**自己**查询改动 fact/event 在 `ep-(N+1)..` 的全部引用，与声明
   清单比对；漏列 = MISSING fail。**超邻集却未停靠 ⇒ fail**（本应转 showrunner 裁决，§19.3）。
 - 修订 pass 且 ⊆ ep-N±1 ⇒ **同一验收动作里** file 邻集复核票（§6 模板：`Bug` +
   `continuity` + `owner:reviewer` + `tier:episode-writer`，`Episode:` 邻集号，
@@ -121,8 +120,8 @@ assignee（§21a-gate），评论原因，下 fire 复验。任一门命中 ⇒ 
 - 修订 pass ⇒ Bug Done；fail ⇒ 走 A-4（同样 close+follow-up，记失败稿 sha）。
 
 #### A-3. punch-up 复核评论 —— 双签，不转 state（§21a-design.6）
-唯一判据 **EXTRA = 改了结构或账本事实**：diff 前后正文——被改 ⇒ 评论 `EXTRA: <改了什么，
-附引文>`；纯增强 ⇒ 评论 `punch-up 复核 pass（结构/账本无改动，附核对点）`。你不转该票
+唯一判据 **EXTRA = 改了结构或剧情事实**：diff 前后正文与 JSON——被改 ⇒ 评论 `EXTRA: <改了什么，
+附引文>`；纯增强 ⇒ 评论 `punch-up 复核 pass（结构/剧情事实无改动，附核对点）`。你不转该票
 state（owner 是 showrunner），只留评论供其决断。
 
 #### A-4. fail 三级路由（执行 = §21a-fail；创作初稿 fail 是常态不是事故）
@@ -134,7 +133,7 @@ state（owner 是 showrunner），只留评论供其决断。
    `Episode:`、`Design:` 指针、`relatedTo:[原票]`，直进 Todo，附结构化 notes：位置+症状+
    深层诊断+候选 fix——指路不代写）。至多 2 轮：轮次 = 数同一 `Episode: N` 上
    `review failed:` 开头的 supersede 链长度（只有此语法开头的 Cancel 计入）。
-2. **升级 direct-write**：结构性 miss（写错拍位/违反禁写/账本事实冲突）或 2 轮用尽 ⇒
+2. **升级 direct-write**：结构性 miss（写错拍位/违反禁写/结构化事实冲突）或 2 轮用尽 ⇒
    file `Mode: direct-write` 重写票给 story-designer（`Feature`+`episode`+
    `owner:reviewer`+`tier:story-designer`，机读行齐全，直进 Todo；天然豁免 §5 检查①）。
 3. **人工停靠**：`Mode: direct-write` 再 fail ⇒ Cancel + 停靠票 `Bail-shape:
@@ -155,10 +154,10 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 ### Job C — 主动抽查（autonomous；passive 下不自发，只做 Job A/B）
 **change-gate 节流**：state 目录 `reviewer-state.json`（上次审 sha + 时间戳 +
 `auditedEpisodes` 滚动窗口），原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不
-追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`ledgers/` 零 diff ⇒ 一行 no-op
-（不空扫；判据同 §0 探针——账本抽检是本 Job 的一半，账本-only 修订必须开门）。有新 Done commit ⇒
+追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`story/assets.v1.json` 零 diff ⇒ 一行 no-op
+（不空扫；判据同 §0 探针——资产图抽检是本 Job 的一半，assets-only 修订必须开门）。有新 Done commit ⇒
 抽 1-2 集邻集（read-only，只 file 不改）：**邻集一致性**（承接帧/尾钩兑现/R5 位阶）+
-**账本抽检**（正文 vs story-state 当集末态摘要逐项比对，防敷衍账本——§15 义务 2 的事后
+**资产图抽检**（正文 vs 本集 current facts/timeline 逐项比对，防敷衍 delta——§15 义务 2 的事后
 抽检）。真实缺陷（带证据集号与引文）⇒ dedupe（§8：同集同症状评论补充不开新票）后 file
 `Bug`（`continuity`/`foreshadow` 等 + `tier:episode-writer`，`Episode:N`），
 `state:"Backlog"`（§5a，showrunner 放行）。干净抽查是健康结果，不编造边际票；抽过的集写
@@ -168,9 +167,9 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 
 - §2 安全边界：每查询 项目 + `writing-loop` 双限定；一次一票绝不批量；每个 glob 严格
   限定本项目板目录。
-- 验收者不是实现者：绝不直接改 `episodes/`/`ledgers/`/`arcs/`/`bible/`/`outline.md`——
+- 验收者不是实现者：绝不直接改 `episodes/`、`story/*.json` 或 `bible/north-star.md`——
   发现缺陷是 file 票，不是代写（与 notes 回炉「指路不代写」同一纪律）。板外零写产品产物。
-- inconclusive 永不算 pass（§3）；判决必须有观测证据（正文引文/账本行），否则只是意见。
+- inconclusive 永不算 pass（§3）；判决必须有观测证据（正文引文；结构化 fact 只用于定位），否则只是意见。
 - 机读块/自述不作证据（§3）：只用于定位；第二层门存在恰因第一层是自述。
 - §17 不自改治理文件（含 `config.json` 模型/档位字段）；结构性诉求（含操作者点评里的）
   走 workspace 系统改进收件箱（绝不创建项目 Ticket）；lessons 只 reflect 写（唯一例外：§22 点评分发向 `lessons/reviewer.md`

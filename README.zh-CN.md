@@ -22,19 +22,14 @@
 
 ## 这是什么
 
-一个文件夹 = 一个 project = 一部剧 = 一块本地板。里面一支小团队用四样东西把长剧
-撑住连贯——这四样正是 citron 级 AI 剧本会跳过的：
+一个文件夹 = 一个 project = 一部剧 = 一块本地板。里面一支小团队用三个权威层把长剧
+撑住连贯：
 
-- **一本圣经**（`bible/north-star.md` + 人物 + 世界观）——冻结的战略层：一句话
-  故事、定位、核心情绪引擎、结局承诺、创作红线。
-- **一份总大纲**（`outline.md`）——单元表、高潮五锚点、卡点规划、季级主线伏笔
-  登记表、名场面与续季钩规划。
-- **逐集节拍单**（`arcs/arc-NN-*.md`）——骨架与成稿之间的契约：每集的狠点子、
-  三轴推进、爽点、尾钩、伏笔操作、**禁写**边界，外加落选的候选案及其弃因。
-- **三本账本**（`ledgers/`）——`foreshadow.md`（planted → refreshed → paid）、
-  `story-state.md`（可重建的状态 + 逐集末态 + 被动标记）、`production.md`（场景/
-  角色注册表 + 成本计数器）。每集开写前先读三账本，交付时在同一 commit 里逐条
-  带行号地写回一份**账本 delta 声明**。
+- **创作宪章**（`bible/north-star.md`）——方向、受众、结局承诺和红线；不重复保存剧情事实。
+- **唯一结构事实源**（`story/outline.v1.json`）——arc、节拍、逐集钩子、角色/场景预算和改编处置。
+- **唯一剧情资产图**（`story/assets.v1.json`）——人物、世界、地点、伏笔、连续性以及真实时序/
+  观众揭示顺序。Studio 直接渲染，Harness 只接收有界 Context Pack。平行 Markdown 大纲、
+  人物/世界圣经和台账会被 S00 拒绝。
 
 里程碑由评估官依一份**四维十六指标 rubric** 把门：前三集微门、大纲定稿门、
 **一卡包（一卡门）**——第一个真正的交付里程碑——随后是卡二门、卡三门、完本门。
@@ -173,7 +168,7 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 ```
 /writing-loop:story-designer-agent      # 改编先逐块 source-analysis；之后写 outline/节拍单
 /writing-loop:showrunner-agent         # 验收原著拆解与大纲门，放行队列
-/writing-loop:episode-writer-agent      # 按集序拾取单集票、写正文、声明账本 delta
+/writing-loop:episode-writer-agent      # 按集序拾取单集票、写正文、声明结构化剧情事实 delta
 /writing-loop:reviewer-agent            # 逐集独立验收（三分类、断言带正文引文）
 /writing-loop:evaluator-agent           # 执行里程碑门（大纲定稿、一卡包、完本…）
 /writing-loop:script-doctor-agent       # 慢频轮换维度的剧级审计
@@ -196,7 +191,7 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 |---|---|---|
 | **总编剧** Showrunner | PM | north-star + outline 唯一维护者；立项/方向 intake；file 创作票；把大纲门；发起 milestone-eval 票；Backlog 闸门。 |
 | **细纲师** Story-Designer | senior-dev | 把 arc 票拆成逐集节拍单（含候选竞争 + 弃案）、spawn 单集子票、**亲写 keystone 集**、接 `Mode: direct-write` 升级、执行 punch-up。 |
-| **编剧** Episode-Writer | junior-dev | 拾取单集票，读节拍单 + 三账本 + 上一集，写正文，自检，声明账本 delta，交审读。 |
+| **编剧** Episode-Writer | junior-dev | 拾取单集票，读结构化节拍 + 有界资产 Context Pack + 上一集，写正文，自检，声明剧情事实 delta，交审读。 |
 | **审读** Reviewer | QA | 逐集独立验收：三分类、邻集对读、delta 逐条核对——**每条叙事断言必须带正文引文**。fail 走三级路由。 |
 | **剧本医生** Script-Doctor | Architect | 慢频、SHA 门控、轮换维度的剧级审计（伏笔闭环、钩型序列、五锚点、被动率滑窗、指纹一致性、账本回放）。只 file，不改字。 |
 | **评估官** Evaluator | — | 执行 milestone-eval 票：六道门、rubric、红线。报告分「机内断言 / 待实测」。 |
@@ -215,15 +210,9 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 
 ```
 <script-repo>/
-  bible/{north-star,characters,world}.md   # 冻结层——改动走 showrunner / 大纲门
-  outline.md                               # 总大纲：单元表 + 高潮五锚点 + 卡点规划
-                                           #   + 季级主线伏笔登记表 + 名场面 & 续季钩规划
-  arcs/arc-NN-<slug>.md                    # 逐集节拍单 + 候选竞争 & 弃案记录
-  ledgers/                                 # 活跃层（O_EXCL 锁；≤15KB rollup 纪律）
-    foreshadow.md                          #   伏笔账本（planted → refreshed → paid；含续集钩状态）
-    story-state.md                         #   当前态 + 逐集末态摘要 + 被动标记
-    production.md                          #   制作预算：场景/角色注册表 + 成本计数器
-    archive/arc-NN.md                      #   每 arc 滚存
+  bible/north-star.md                      # 创作宪章；Showrunner 单写者
+  story/outline.v1.json                    # 季/arc/逐集设计唯一事实源
+  story/assets.v1.json                     # 剧情事实图 + 双轨时间线唯一事实源
   episodes/ep-NNN.md                       # frontmatter 指纹（节拍单哈希 / model / 规则版本）+ 正文
   evaluation/                              # 里程碑报告 + 切片清单
   source/                                  # 改编：原著指纹/设计 + 三清单（原文不进 Git）
@@ -258,10 +247,10 @@ writing-loop 的设计从一部失败 AI 连续剧（citron-script）的尸检�
 
 | citron 症状 | writing-loop 机制 |
 |---|---|
-| 成稿时**看不到上一集** | 顺序前置（集 N 等 `ep-(N-1)` 落 main）+ 每集开写前必读上一集末帧与三账本。 |
-| **伏笔零表示**——埋了就忘 | `foreshadow.md` 三态账本 + 大纲季级登记表 + 医生的机器闭环审计（到期未收、未埋先收、>8 集未擦亮）。 |
+| 成稿时**看不到上一集** | 顺序前置（集 N 等 `ep-(N-1)` 落 main）+ 每集开写前必读上一集末帧与从 `story/assets.v1.json` 选择的本票 Context Pack。 |
+| **伏笔零表示**——埋了就忘 | 类型化伏笔资产 + lifecycle facts + 医生的机器闭环审计（到期未收、未埋先收、>8 集未擦亮）。 |
 | **成稿是唯一无 audit 的环节** | 每集由审读独立三分类验收，**每条叙事断言必须带正文引文**（不可引证 = inconclusive = 不 pass）。 |
-| **主角漂向被动** | 节拍单主动性字段 + `story-state` 累计标记 + 医生 10 集被动率滑窗（>30% 即 file Bug）。 |
+| **主角漂向被动** | `story/outline.v1.json` 主动性字段 + 结构化 facts/events + 医生 10 集被动率滑窗（>30% 即 file Bug）。 |
 | **骨架与成稿脱节**、高潮拍落地平淡 | 逐集节拍单是硬契约；keystone 集由细纲师亲笔；里程碑门对照 rubric 验收结构。 |
 
 完整对照（citron 十条教训 → 各自的机制载体）见
@@ -284,7 +273,7 @@ observe-and-file 契约、lessons + reflect 自进化闭环、本地文件板协
 | Ops | 市场监察 |
 | design doc | arc 节拍单 |
 | build/test 门 | 格式 + 叙事门禁 |
-| coverage 强制令 | 账本回写强制令 |
+| coverage 强制令 | 结构化剧情事实回写强制令 |
 | 自动回滚 | fail-revert 协议 |
 
 砍掉的：PR / auto-merge / deploy、多 repo change-gate（思想保留给医生）、

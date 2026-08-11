@@ -87,7 +87,6 @@ try {
   const repo = join(ws, "repo");
   mkdirSync(ticketsDir, { recursive: true });
   mkdirSync(join(repo, "episodes"), { recursive: true });
-  mkdirSync(join(repo, "ledgers"), { recursive: true });
   mkdirSync(join(repo, ".git"), { recursive: true });
   writeFileSync(join(ws, ".writing-loop", "config.json"), JSON.stringify({
     version: 1,
@@ -108,8 +107,8 @@ try {
   writeFileSync(join(ticketsDir, "WL-3.lock"), "holder pid=1 at 2026-07-18T00:00:00Z\n");
   utimesSync(join(ticketsDir, "WL-3.lock"), past, past);
   writeFileSync(join(proj, "wl-run.lock"), "holder pid=2 at 2026-07-18T00:00:00Z\n");
-  writeFileSync(join(repo, "ledgers", "foreshadow.md.lock"), "holder pid=3 at 2026-07-18T00:00:00Z\n");
-  utimesSync(join(repo, "ledgers", "foreshadow.md.lock"), past, past);
+  writeFileSync(join(repo, ".git", "story-assets.lock"), "holder pid=3 at 2026-07-18T00:00:00Z\n");
+  utimesSync(join(repo, ".git", "story-assets.lock"), past, past);
 
   const fire = (agent: string, exit: number | null, noop = false): string =>
     JSON.stringify({ agent, model: "opus", effort: "max", startedAt: "2026-07-18T08:00:00.000Z", endedAt: "2026-07-18T08:02:00.000Z", durationSeconds: 120.5, exitCode: exit, timedOut: false, noop, keystoneEscalated: false });

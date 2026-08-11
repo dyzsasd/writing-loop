@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { aggregate } from "./fires.ts";
 import { hasSymlinkComponent, readDirectoryNames, readRegularTextHead } from "./bounded-fs.ts";
 import { PROJECT_DOCUMENTS, listProjectEvaluationsBounded, listProjectReportsBounded } from "./project-detail.ts";
+import { readStoryDesign } from "./story-design.ts";
 import { episodeNumberFromFile, isCleanFire, listTickets, readFiresBounded, type FireRow, type Ticket } from "./status.ts";
 import { projectDataDir, projectEntries, resolveRepoPath, WsError, type Workspace, type WlProject } from "./workspace.ts";
 
@@ -57,7 +58,7 @@ export type ProjectSnapshot = {
     totalEpisodes: number | null;
     percent: number | null;
     latestFile: string | null;
-    arcs: number;
+    storyArcs: number;
     evaluations: number;
   };
   board: {
@@ -308,12 +309,11 @@ function projectSnapshot(ws: Workspace, key: string, project: WlProject, nowMs: 
   const evaluations = evaluationPathUnsafe ? { rows: [], truncated: false } : listProjectEvaluationsBounded(ws, key);
   if (reports.truncated) warnings.push({ source: "reports", code: "COUNT_TRUNCATED", message: "报告目录超过有界 snapshot 窗口" });
   if (evaluations.truncated) warnings.push({ source: "evaluations", code: "COUNT_TRUNCATED", message: "评估目录超过有界 snapshot 窗口" });
-  const arcsPathUnsafe = hasSymlinkComponent(repoPath, ["arcs"]);
-  const arcs = arcsPathUnsafe ? { count: 0, truncated: false } : countMatching(join(repoPath, "arcs"), /\.md$/);
+  let storyArcs = 0;
+  try { storyArcs = readStoryDesign(ws.root, key, ws.config)?.manifest.episodes.reduce((ids, episode) => ids.add(episode.arc), new Set<string>()).size ?? 0; }
+  catch { warnings.push({ source: "story-design", code: "INVALID_DOCUMENT", message: "结构化故事设计无法解析；详情见故事工作台" }); }
   const evaluationCount = evaluationPathUnsafe ? { count: 0, truncated: false } : countMatching(join(repoPath, "evaluation"), /\.md$/);
-  if (arcsPathUnsafe) warnings.push({ source: "arcs", code: "UNSAFE_PATH", message: "叙事单元目录含符号链接；拒绝 snapshot 内容" });
   if (evaluationPathUnsafe) warnings.push({ source: "evaluations", code: "UNSAFE_PATH", message: "评估目录含符号链接；拒绝 snapshot 内容" });
-  if (arcs.truncated) warnings.push({ source: "arcs", code: "COUNT_TRUNCATED", message: "叙事单元目录超过有界 snapshot 窗口" });
   if (evaluationCount.truncated && !evaluations.truncated) warnings.push({ source: "evaluations", code: "COUNT_TRUNCATED", message: "评估目录超过有界 snapshot 窗口" });
   const scheduler = readSchedulerView(dataDir, nowMs);
   const lastFire = fires.at(-1) ?? null;
@@ -343,7 +343,7 @@ function projectSnapshot(ws: Workspace, key: string, project: WlProject, nowMs: 
       totalEpisodes,
       percent: totalEpisodes && totalEpisodes > 0 ? Math.min(100, Math.round((episodes.frontier / totalEpisodes) * 100)) : null,
       latestFile: episodes.items.at(-1)?.file ?? null,
-      arcs: arcs.count,
+      storyArcs,
       evaluations: evaluationCount.count,
     },
     board: {

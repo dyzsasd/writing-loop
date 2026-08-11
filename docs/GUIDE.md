@@ -113,9 +113,9 @@ placeholders into config). For the adaptation track, be ready to answer:
 
 Then `add-script` automatically:
 
-- **SCAFFOLD**: generates `bible/` (north-star / characters / world), `outline.md`,
-  `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
-  `evaluation/`; `git commit`.
+- **SCAFFOLD**: generates the creative charter (`bible/north-star.md`) plus empty
+  `story/`, `episodes/` and `evaluation/` directories; it never creates parallel
+  Markdown bibles, outlines or ledgers. Story Designer later creates the two canonical JSON files.
 - **REGISTER**: registers the project in `~/dramas/.writing-loop/config.json`, creates the
   board dir `~/dramas/.writing-loop/my-drama/board/`, scaffolds the `lessons/` dir
   (one shared file + one per role).
@@ -139,8 +139,8 @@ analyzes one chunk per fire, aggregates the three worksheets, and hands them to 
 Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
 plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
-After the source gate, Story Designer keeps the human outline, strict
-`story/outline.v1.json`, and typed `story/assets.v1.json` graph in sync, running the deterministic
+After the source gate, Story Designer writes strict `story/outline.v1.json` and the typed
+`story/assets.v1.json` graph as the only story sources, running the deterministic
 `skeleton → beats → full` gates automatically. Operators do not need to run `story
 validate`: Studio exposes the same facts through Source / Story / Timeline / Story assets / Characters / Art /
 Episodes & quality. Each creative ticket receives a bounded Context Pack selected from character,
@@ -161,7 +161,7 @@ no-ops. Agents hand off **only through tickets** — you never pass work by hand
 ```
 /writing-loop:story-designer-agent    # first runs source-analysis: season range, chunks, three worksheets
 /writing-loop:showrunner-agent       # accepts the source gate and only then unlocks the outline
-/writing-loop:story-designer-agent    # writes outline.md + bible; then per-arc beat cards
+/writing-loop:story-designer-agent    # writes story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # dated genre-window assessment — the outline-lock gate's market layer depends on it; missing data makes that item inconclusive, and red-line cases park for you to supply it
 /writing-loop:evaluator-agent         # outline-lock gate (market + content pre-score + compliance)
 /writing-loop:episode-writer-agent    # writes episodes in order; keystone episodes are written by the Story-Designer
@@ -269,9 +269,8 @@ producing. This is your main control lever.
 ## Where the outputs are / how to check progress
 
 - **Scripts**: `~/dramas/my-drama/episodes/ep-001.md …`
-- **Outline & bible**: `outline.md`, `bible/`
-- **Foreshadow / state / production ledgers**: `ledgers/` (the core of anti-fracture
-  and anti-lost-foreshadow)
+- **Creative charter**: `bible/north-star.md`
+- **Story structure and facts**: `story/outline.v1.json`, `story/assets.v1.json`
 - **Evaluation reports**: `evaluation/`
 - **Ticket board** (what the team is working on):
   `~/dramas/.writing-loop/my-drama/board/tickets/*.md`
@@ -288,14 +287,14 @@ Because config uses **relative `repoPath`** and the runtime state lives inside t
 workspace, migrating everything (in-flight tickets included) is one copy:
 
 ```bash
-cp -r ~/dramas /new/place/dramas      # scripts + outlines + ledgers + in-flight board, together
+cp -r ~/dramas /new/place/dramas      # scripts + structured story graph + in-flight board, together
 ```
 
 - Use **`cp` (not `git clone`)**: a clone brings only one script repo's creative
   output, not the in-flight tickets.
 - To move only the **finished creative output** (no in-flight scheduling state):
-  `git clone ~/dramas/my-drama` — each script repo is self-contained (bible / outline
-  / ledgers / episodes all inside it).
+  `git clone ~/dramas/my-drama` — each script repo is self-contained (creative charter /
+  story JSON / episodes all inside it).
 - Don't put the workspace on a network share for concurrent multi-machine writing (it
   would race); sequential copy-to-migrate is fine.
 
@@ -303,7 +302,7 @@ cp -r ~/dramas /new/place/dramas      # scripts + outlines + ledgers + in-flight
 
 ## Upgrading the plugin (with a project in flight)
 
-**Upgrading migrates no data** — board/ledger/script-repo formats are stable, and every
+**Upgrading migrates no data** — board/structured-story/script-repo formats are stable, and every
 agent fire is stateless and re-reads the latest spec; upgrading = swap the plugin +
 restart the loops. Five steps:
 

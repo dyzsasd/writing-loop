@@ -90,7 +90,9 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 
 跑完后，`add-script` 自动：
 
-- **SCAFFOLD**：生成 `bible/`（north-star / characters / world）、`outline.md`、`ledgers/`（foreshadow / story-state / production + archive/）、`episodes/`、`evaluation/`；`git commit`。
+- **SCAFFOLD**：只生成创作宪章 `bible/north-star.md` 与空的 `story/`、`episodes/`、
+  `evaluation/` 目录；不再生成平行的人物/世界/大纲/台账 Markdown。Story Designer 后续
+  直接建立两个权威 JSON。
 - **REGISTER**：在 `~/dramas/.writing-loop/config.json` 登记项目，建看板目录 `~/dramas/.writing-loop/my-drama/board/`，铺 `lessons/` 目录骨架（全队共享一份 + 每角色一份）。
 - **第一张可执行票**：原创的大纲票为 Todo；改编在同一次确认中登记/分块原著、创建
   source-analysis Todo 票，并把大纲停在 `Backlog+source-pending`。
@@ -106,7 +108,7 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 聚合三清单后交 Showrunner 验收。`writing-loop source status --project my-drama` 是只读状态面；
 `source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
-拆书门通过后，Story Designer 会同时写人读大纲、严格的 `story/outline.v1.json` 和
+拆书门通过后，Story Designer 只写严格的 `story/outline.v1.json` 和
 `story/assets.v1.json` 资产图，并按
 `skeleton → beats → full` 自动运行确定性质量门。你不需要手工执行 `story validate`：打开
 Studio 项目页即可在“原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量”中查看同一事实。
@@ -126,7 +128,7 @@ skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 ```
 /writing-loop:story-designer-agent    # 先拾 source-analysis：选季范围、逐块拆书、聚合三清单
 /writing-loop:showrunner-agent       # 验收拆书门；通过后才解锁 outline
-/writing-loop:story-designer-agent    # 再写 outline.md + bible；随后逐 arc 写「逐集节拍单」
+/writing-loop:story-designer-agent    # 写 story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # 带日期的题材窗口评估——大纲定稿门的市场层评分依赖它；缺数据时该项 inconclusive，红线类会人工停靠等你补
 /writing-loop:evaluator-agent         # 大纲定稿门（市场层+内容层预评+合规）
 /writing-loop:episode-writer-agent    # 按集号顺序写正文；keystone 集由 story-designer 亲写
@@ -205,8 +207,8 @@ baseUrl、authTokenEnv、models——见 references/config-schema.md），跑一
 ## 产物在哪 / 怎么看进度
 
 - **正文**：`~/dramas/my-drama/episodes/ep-001.md …`
-- **大纲与圣经**：`outline.md`、`bible/`
-- **伏笔 / 状态 / 制作账本**：`ledgers/`（防割裂、防伏笔丢失的核心）
+- **创作宪章**：`bible/north-star.md`
+- **故事结构与剧情事实**：`story/outline.v1.json`、`story/assets.v1.json`
 - **评估报告**：`evaluation/`
 - **工单看板**（团队在忙什么）：`~/dramas/.writing-loop/my-drama/board/tickets/*.md`
 
@@ -221,19 +223,19 @@ baseUrl、authTokenEnv、models——见 references/config-schema.md），跑一
 文件夹（含在制工单）：
 
 ```bash
-cp -r ~/dramas /new/place/dramas      # 剧本 + 大纲 + 账本 + 在制看板一起搬
+cp -r ~/dramas /new/place/dramas      # 创作宪章 + 结构化故事 JSON + 剧本 + 在制看板一起搬
 ```
 
 - 用 **`cp`（不是 `git clone`）**：clone 只带单个剧本 repo 的创作成果，不带在制工单。
 - 只想搬**已完成的创作成果**（不要在制调度状态）：`git clone ~/dramas/my-drama` 即可——
-  每部剧本 repo 本身就自包含（bible / outline / ledgers / episodes 全在里面）。
+  每部剧本 repo 本身就自包含（North Star / story JSON / episodes 全在里面）。
 - 别把 workspace 放到网络盘上多机同时写（会 race）；顺序复制迁移没问题。
 
 ---
 
 ## 升级插件（有在跑项目时）
 
-**升级不需要迁移任何数据**——看板/账本/剧本 repo 的格式不变，agent 每次 fire 无状态、
+**升级不需要迁移任何数据**——看板/结构化故事/剧本 repo 的格式不变，agent 每次 fire 无状态、
 从头读最新规范；升级 = 换插件 + 重启循环，五步：
 
 1. **挑安全时机停循环**：每个 agent 的循环窗口等它打印完本次 fire（no-op 或 fire 结束）

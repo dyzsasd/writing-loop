@@ -58,11 +58,6 @@ try {
   }, null, 2));
 
   writeFileSync(join(repo, "bible", "north-star.md"), "# 北极星\n\n## 一句话故事\n一个失忆编剧发现自己写下的每一集都会在现实发生。\n");
-  writeFileSync(join(repo, "bible", "characters.md"), "# 人物圣经\n");
-  writeFileSync(join(repo, "bible", "world.md"), "# 世界圣经\n");
-  writeFileSync(join(repo, "outline.md"), "# 总大纲\n");
-  writeFileSync(join(repo, "ledgers", "story-state.md"), "# 状态\n");
-  writeFileSync(join(repo, "arcs", "arc-01.md"), "# 单元一\n");
   writeFileSync(join(repo, "evaluation", "milestone-01.md"), "# 评估\n");
   writeFileSync(join(repo, "episodes", "ep-001.md"), "---\narc: arc-01\nhook-type: reveal\nwords: 1320\n---\n# 消失的署名\n");
   writeFileSync(join(repo, "episodes", "ep-003.md"), `---\nwords: ${"9".repeat(180)}\n---\n# 倒写的第三集\n`);
@@ -113,7 +108,9 @@ try {
   ok(project.telemetry.totalFires === 3 && project.telemetry.successfulFires === 1 && project.telemetry.successRate === 33, "成功率排除虽 exit 0 但需要清理残留进程组的非 clean fire");
   ok(project.telemetry.totalFires === 3, "语法合法但不是 FireRow 对象的 JSONL 值不会让 snapshot 崩溃或污染统计");
   ok(project.telemetry.byAgent.reviewer?.ok === 0 && project.telemetry.byAgent.reviewer?.descendantDrains === 1, "按 agent 聚合单列 descendant drain 且不误报成功");
-  ok(project.documents.filter((doc) => doc.exists).length === 5, "剧情资产存在性投影");
+  ok(project.documents.length === 1 && project.documents[0]?.key === "north-star"
+    && project.documents[0].exists, "snapshot 只投影创作宪章，不把重复 Markdown 冒充剧情资产");
+  ok(project.progress.storyArcs === 0, "snapshot 不再从 arcs/*.md 推断结构成熟度");
   ok(snapshot.totals.episodes === 2 && snapshot.totals.runningAgents === 1 && snapshot.totals.needsAttention === 1, "workspace 汇总只计规范 ep-NNN 文件，不把数字别名算成重复分集");
   ok(Number.isFinite(project.progress.frontier) && JSON.stringify(project).includes('"frontier":3'),
   "超长集号文件名被忽略，不会把 Infinity 序列化为 null 或污染排序");

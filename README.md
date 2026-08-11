@@ -18,7 +18,7 @@ writer's own claims, and milestones are gated by a rubric you can read.
 > The single most useful doc — the complete, hands-on path from installing the
 > plugin to shipping your first deliverable (the 一卡包). Read this first.
 
-> How it works inside — the layers, the ledgers, the gate topology, the
+> How it works inside — the single-source story graph, the gate topology, the
 > anti-drift protocols: [`docs/DESIGN.md`](docs/DESIGN.md). This README is about
 > **using** it.
 
@@ -27,23 +27,15 @@ writer's own claims, and milestones are gated by a rubric you can read.
 ## What it is
 
 One folder = one project = one drama = one local board. Inside, a small team
-keeps a long serial coherent through four things citron-grade AI scripts skip:
+keeps a long serial coherent through three authorities citron-grade AI scripts skip:
 
-- **A story bible** (`bible/north-star.md` + characters + world) — the frozen
-  strategic layer: one-line story, positioning, the emotion engine, the ending
-  promise, and the creative red lines.
-- **A master outline** (`outline.md`) — unit table, the five climax anchors, the
-  paywall plan, the season-level foreshadow registry, and set-piece/sequel-hook
-  plans.
-- **Per-episode beat cards** (`arcs/arc-NN-*.md`) — the contract between skeleton
-  and final draft: every episode's hard hook, three-axis progression, payoff,
-  end-hook, foreshadow ops, and **do-not-write** boundaries, plus the losing
-  candidates and why they lost.
-- **Three ledgers** (`ledgers/`) — `foreshadow.md` (planted → refreshed → paid),
-  `story-state.md` (rebuildable state + per-episode end-state + passivity marks),
-  and `production.md` (scene/character registry + cost counters). Every episode
-  reads them before writing and writes a **delta declaration** back, line-cited,
-  in the same commit.
+- **A creative charter** (`bible/north-star.md`) — direction, audience, ending promise and red lines;
+  it deliberately contains no reusable story facts.
+- **One structured design** (`story/outline.v1.json`) — arcs, beats, episode hooks, cast/scene budgets
+  and adaptation decisions.
+- **One structured story graph** (`story/assets.v1.json`) — characters, world rules, locations,
+  foreshadowing, continuity and chronology/reveal order. Studio renders it directly and each harness
+  receives a bounded Context Pack. Parallel Markdown bibles, outlines and ledgers are rejected by S00.
 
 Milestones are gated by a **4-dimension / 16-indicator rubric** run by the
 Evaluator: a three-episode micro-gate, an outline lock gate, the
@@ -244,7 +236,7 @@ them in the natural order, or point external `cron` at them:
 ```
 /writing-loop:story-designer-agent     # adaptations: chunked source-analysis; then outline and beat cards
 /writing-loop:showrunner-agent        # accepts source/outline gates and promotes the queue
-/writing-loop:episode-writer-agent     # pulls episode tickets in order, writes drafts, declares ledger deltas
+/writing-loop:episode-writer-agent     # pulls episode tickets in order, writes drafts, declares structured story-fact deltas
 /writing-loop:reviewer-agent           # independent per-episode verification (three-way classification, cited assertions)
 /writing-loop:evaluator-agent          # runs milestone-eval gates (outline lock, first-paywall pack, finale …)
 /writing-loop:script-doctor-agent      # slow-cadence rotating series-level audit
@@ -270,9 +262,9 @@ prerequisite, and every fail routes through a three-tier path
 |---|---|---|
 | **Showrunner** 总编剧 | PM | Sole owner of the north-star + outline; intake and direction; files creative tickets; runs the design gate; triggers milestone-eval tickets; the Backlog gate. |
 | **Story-Designer** 细纲师 | senior-dev | Turns an arc ticket into per-episode beat cards (with candidate competition + rejected takes), spawns episode child-tickets, **writes keystone episodes personally**, takes `Mode: direct-write` escalations, runs punch-up. |
-| **Episode-Writer** 编剧 | junior-dev | Pulls an episode ticket, reads its beat card + ledgers + the previous episode, writes the draft, self-checks, declares the ledger delta, hands off for review. |
+| **Episode-Writer** 编剧 | junior-dev | Pulls an episode ticket, reads its structured beat + bounded asset Context Pack + the previous episode, writes the draft, self-checks, declares the story-fact delta, hands off for review. |
 | **Reviewer** 审读 | QA | Independent per-episode verification: three-way classification, adjacent-episode read, delta reconciliation — **every narrative assertion must carry a script quote**. Routes fails three ways. |
-| **Script-Doctor** 剧本医生 | Architect | Slow-cadence, SHA-gated, rotating series-level audit (foreshadow closure, hook sequences, five anchors, passivity slide, fingerprint consistency, ledger replay). Files, never edits. |
+| **Script-Doctor** 剧本医生 | Architect | Slow-cadence, SHA-gated, rotating series-level audit (foreshadow closure, hook sequences, five anchors, passivity slide, fingerprint consistency, asset-graph replay). Files, never edits. |
 | **Evaluator** 评估官 | — | Executes milestone-eval tickets: the six gates, the rubric, the red lines. Splits every report into *machine-assertable* vs *pending-live-data*. |
 | **Market-Watch** 市场监察 | Ops | Weekly trend-board + platform-policy scan; dated genre-window assessments; a closing/red-ocean window or new policy files a `needs-showrunner` ticket. |
 | **Reflect** | Reflect | Daily retrospective; curates the operator-level `lessons.md` from recurring evidence. |
@@ -290,15 +282,9 @@ Every project is a git repo where documents *are* the code:
 
 ```
 <script-repo>/
-  bible/{north-star,characters,world}.md   # frozen layer — changes go through the Showrunner / design gate
-  outline.md                               # master outline: unit table + five climax anchors + paywall plan
-                                           #   + season-level foreshadow registry + set-piece & sequel-hook plans
-  arcs/arc-NN-<slug>.md                    # per-episode beat cards + candidate competition & rejected takes
-  ledgers/                                 # active layer (O_EXCL locks; ≤15KB rollup discipline)
-    foreshadow.md                          #   foreshadow ledger (planted → refreshed → paid; sequel-hook state)
-    story-state.md                         #   current state + per-episode end-state summary + passivity marks
-    production.md                          #   production budget: scene/character registry + cost counters
-    archive/arc-NN.md                      #   per-arc rollup
+  bible/north-star.md                      # creative charter; Showrunner-owned
+  story/outline.v1.json                    # sole season/arc/episode design authority
+  story/assets.v1.json                     # sole story-fact graph + dual-order timeline
   episodes/ep-NNN.md                       # frontmatter fingerprint (beat-card hash / model / rules-version) + script
   evaluation/                              # milestone reports + clip lists
   source/                                  # adaptation: source fingerprint/brief + worksheets (no raw novel)
@@ -338,10 +324,10 @@ gets a mechanism, not an exhortation:
 
 | citron symptom | writing-loop mechanism |
 |---|---|
-| The draft is written **without seeing the previous episode** | Sequential prerequisite (episode N waits on `ep-(N-1)` in main) + every writer reads the previous end-frame and all three ledgers before writing. |
-| **Foreshadow has zero representation** — planted and forgotten | `foreshadow.md` three-state ledger + season-level registry in the outline + the Doctor's machine closure audit (overdue, paid-before-planted, >8 episodes unrefreshed). |
+| The draft is written **without seeing the previous episode** | Sequential prerequisite (episode N waits on `ep-(N-1)` in main) + every writer reads the previous end-frame and a ticket-scoped Context Pack from `story/assets.v1.json`. |
+| **Foreshadow has zero representation** — planted and forgotten | Typed foreshadow assets with lifecycle facts + the Doctor's machine closure audit (overdue, paid-before-planted, >8 episodes unrefreshed). |
 | The **final draft is the only un-audited step** | Every episode is independently verified by the Reviewer via three-way classification, with **every narrative assertion backed by a script quote** (unquotable = inconclusive = not pass). |
-| The **protagonist drifts passive** | A proactivity field on each beat card + cumulative `story-state` marks + the Doctor's 10-episode passivity slide (>30% files a Bug). |
+| The **protagonist drifts passive** | Episode agency in `story/outline.v1.json` + structured facts/events + the Doctor's 10-episode passivity slide (>30% files a Bug). |
 | **Skeleton and final draft come apart**; climax beats land flat | The per-episode beat card is a binding contract; keystone episodes are written by the Story-Designer personally; milestone gates verify structure against the rubric. |
 
 The full mapping (citron's ten lessons → their mechanical carriers) is in
@@ -365,7 +351,7 @@ local file-board protocol are all carried over. The mapping:
 | Ops | Market-Watch |
 | design doc | arc beat card |
 | build/test gates | format + narrative gates |
-| coverage mandate | ledger write-back mandate |
+| coverage mandate | structured story-fact write-back mandate |
 | auto-rollback | fail-revert protocol |
 
 What's dropped: PRs / auto-merge / deploy, the multi-repo change-gate (the idea

@@ -16,23 +16,23 @@
 citron-script 尸检结论：它不缺编剧知识，缺**「规划层与执行层之间的机制性保证」**
 ——剧本生成时看不到上一集、伏笔零表示、成稿是唯一无 audit 的环节。dev-loop 恰是
 一台「用工单状态机强制规划被执行」的机器：看板即通道（agent 只靠工单交接）、
-每次 fire 无状态（强制把故事状态 externalize 成账本——正中 AI 长篇叙事「显式状态
+每次 fire 无状态（强制把故事状态 externalize 成结构化 facts/events——正中 AI 长篇叙事「显式状态
 注入优于模型记忆」的研究结论）、验收即门禁（独立 owner 三分类，fail⇒close+follow-up）。
 
 citron 十教训 → 机制载体（v2 修订后）：
 
 | # | 教训 | 载体 |
 |---|---|---|
-| 1 | 骨架与成稿间要有逐集节拍单作契约 | arc 细纲 = 逐集节拍单（含禁写负向边界）；自检+审读双层按节拍单三分类验收 |
-| 2 | 故事状态账本每集前读后写，更新本身要过审 | ledgers/story-state.md；writer 交付「账本 delta 声明」（逐条+正文行号），reviewer 逐条核对（非抽查）；doctor 回放审计 |
-| 3 | 伏笔台账三态+阻断检查 | ledgers/foreshadow.md + outline 主线伏笔登记表（季级）；细纲排期、单集执行、doctor 机器闭环审计 |
+| 1 | 骨架与成稿间要有逐集节拍契约 | `story/outline.v1.json` 的 episode/beat（含禁写负向边界）；自检+审读双层验收 |
+| 2 | 故事事实每集前选择性读、写后过审 | `story/assets.v1.json`；writer 交付 fact/event delta（逐条+正文行号），reviewer 逐条核对；doctor 回放审计 |
+| 3 | 伏笔生命周期+阻断检查 | foreshadow assets + story design beats；细纲排期、单集执行、doctor 机器闭环审计 |
 | 4 | 验收清单含可判定叙事断言 | 节拍单逐项 = AC；机器检查明确定位为**格式门**，叙事实质验收 = reviewer 带引文断言 |
 | 5 | 审查资源按离观众距离倒置 | 单集/跨集/剧级三层阻断门；前 3 集全 keystone；前三集微门、一卡门、卡二门、卡三门、完本门 |
 | 6 | 集 N 开工前置 = 集 N-1 已验收 | pick 前置绑**票类**（集本位判定，绑所有 agent），Bug 修订开放时前向冻结 |
 | 7 | 产物携带生成配置指纹；重生成开邻集复核 | frontmatter：节拍单内容哈希+model/effort+规则版本；doctor 指纹与哈希审计；修订涟漪协议（引用图追溯，非半径1） |
 | 8 | 卡点/幕末集单列高价值工种 | keystone（前3集+卡点集±1+深谷+终局3集+S级名场面集）⇒ story-designer 亲写 |
 | 9 | lessons 模式复制到叙事端 | §14 lessons + reflect + 操作者点评闭环原样 |
-| 10 | 自查显式化 | 自检清单+账本 delta 声明写入工单评论；机器项与判断项分工序 |
+| 10 | 自查显式化 | 自检清单+剧情资产 delta 声明写入工单评论；机器项与判断项分工序 |
 
 ## 1. 角色 roster（9 agent + 1 操作者 skill）
 
@@ -40,9 +40,9 @@ citron 十教训 → 机制载体（v2 修订后）：
 |---|---|---|---|
 | **showrunner 总编剧** | PM | opus/max | north-star+outline 唯一维护者；立项/方向 intake；file 各类创作票；大纲门验收；里程碑监测与 milestone-eval 票发起；Backlog 闸门 |
 | **story-designer 细纲师** | senior-dev | opus/max | arc 设计票→逐集节拍单（含候选竞争与弃案）→spawn 子票；keystone 亲写；升级接管（Mode: direct-write）；arc punch-up 执行 |
-| **episode-writer 编剧** | junior-dev | sonnet/high | 单集票→读节拍单+账本+上集→写正文→自检门→账本 delta 声明→In Review |
+| **episode-writer 编剧** | junior-dev | sonnet/high | 单集票→读结构化节拍+有界资产 Context Pack+上集→写正文→自检门→剧情资产 delta 声明→In Review |
 | **reviewer 审读** | QA | ≥writer 档（受治理配置，默认 opus/high） | 单集独立验收（三分类+邻集对读+delta 逐条核对，断言必须带正文引文）；fail 三级路由；修订复核；邻集复核票 |
-| **script-doctor 剧本医生** | Architect | opus/xhigh | 慢频轮换维度剧级审计（伏笔闭环/钩型序列/五锚点/同构/声纹/指纹一致性/被动率/账本回放），结构地标区间强制定维 |
+| **script-doctor 剧本医生** | Architect | opus/xhigh | 慢频轮换维度剧级审计（伏笔闭环/钩型序列/五锚点/同构/声纹/指纹一致性/被动率/资产图回放），结构地标区间强制定维 |
 | **evaluator 评估官** | （新增） | opus/xhigh | 执行 milestone-eval 票：前三集微门/大纲定稿门/一卡门/卡二门/卡三门/完本门；rubric+红线；报告分「机内断言/待实测」 |
 | **market-watch 市场监察** | Ops | sonnet/high | 慢频（周）扫榜+平台政策：带日期的题材窗口评估；窗口/政策变化⇒needs-showrunner 票。evaluator 市场层打分必须引用其评估（过期⇒inconclusive） |
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
@@ -54,7 +54,7 @@ citron 十教训 → 机制载体（v2 修订后）：
 
 **升级链（v2 修订）**：reviewer 对单集 fail 的**三级路由**——
 ① 默认 = notes 回炉：close+follow-up 修订票回原 episode-writer（附结构化 notes：
-位置+症状+诊断+候选 fix），至多 2 轮；② 结构性 miss（写错拍位/违反禁写/账本事实
+位置+症状+诊断+候选 fix），至多 2 轮；② 结构性 miss（写错拍位/违反禁写/结构化事实
 冲突）或 2 轮用尽 ⇒ 升级 story-designer（跟进票带 `Mode: direct-write` 机读行）；
 ③ 任何 `Mode: direct-write` 票再 fail ⇒ fix-exhausted ⇒ human-park。keystone 首稿
 （本就是 designer 写的）fail ⇒ 允许一次同层 `Mode: direct-write` 重试，再 fail 即
@@ -64,33 +64,25 @@ human-park。fail 计数的机械载体 = Mode 行 + supersede 链，不靠记�
 
 ```
 <script-repo>/
-  bible/{north-star,characters,world}.md    # 冻结层（改动走 showrunner/大纲门）
-  outline.md                                 # 总大纲 + 单元表 + 高潮五锚点 + 卡点规划(备卡)
-                                             # + 主线伏笔登记表(季级) + 名场面规划 + 续季钩规划
-  arcs/arc-NN-<slug>.md                      # 逐集节拍单 + 候选竞争弃案记录
-  ledgers/                                   # 活跃层（O_EXCL 锁；≤15KB rollup 纪律）
-    foreshadow.md                            # 伏笔账本（含 sequel-hook 状态）
-    story-state.md                           # 当前态 + 逐集末态摘要（可重建任意时点）+ 被动标记
-    production.md                            # 制作预算账本：场景/角色注册表 + 打斗群戏特效计数
-    archive/arc-NN.md                        # 每 arc 滚存
+  bible/north-star.md                        # 创作宪章；方向/红线，showrunner 单写者
+  story/outline.v1.json                      # 季/arc/逐集结构唯一事实源
+  story/assets.v1.json                       # 人物/世界/伏笔/连续性/双轨时间线唯一事实源
   episodes/ep-NNN.md                         # frontmatter 指纹（节拍单哈希/model/规则版本）+ 正文
   evaluation/                                # 里程碑评估报告 + 切片清单
   source/                                    # 改编：原著指纹/设计+三清单（原文只在 workspace runtime）
                                              # 原创：对标剧轻量拆解
-  story/outline.v1.json                      # 严格结构伴随文件；派生人物/场景资产与质量门
-  story/assets.v1.json                       # 结构化剧情资产图、双轨时间线、provenance 与 context policy
 ```
 
-**版本纪律（反「已过门工件静默改写」）**：单集 frontmatter 记 arc 文件**内容哈希**；
-doctor 每轮比对即得全部过期集清单。大纲门之后改 arc/outline 必须走 **delta 复审**：
+**版本纪律（反「已过门工件静默改写」）**：单集 frontmatter 记结构 JSON **内容哈希**；
+doctor 每轮比对即得全部过期集清单。大纲门之后改 story design 必须走 **delta 复审**：
 列改动条目 → 机器算受影响已 Done 集 → showrunner 局部重验 R 序列 → 自动开复核票。
 outline 定稿后的结构性变更（结局/卡点/单元表）重过 evaluator 对应分项。
 
-**账本纪律**：① 单 commit 原子性——单集正文+全部账本更新必须同一 commit，工单转态
-在 commit 之后；② fail ⇒ revert——reviewer Cancel 时记录 commit sha，跟进票强制
-第一步 revert 失败稿（正文+账本一体回滚），sweep 稽核「Canceled 且未 revert」；
-③ 并发——每账本文件 O_EXCL 锁（60min 过期强清），Bug 修订在制时冻结前向新集拾取；
-④ rollup——story-state 只留当前值+本 arc 窗口，每 arc 滚存 archive/。
+**结构化事实纪律**：① 单 commit 原子性——单集正文+`story/assets.v1.json` delta 必须同一
+commit，工单转态在 commit 之后；② fail ⇒ revert——reviewer Cancel 时记录 commit sha，
+跟进票强制第一步 revert 失败稿（正文+facts/events 一体回滚），sweep 稽核「Canceled 且未
+revert」；③ 并发——`.git/story-assets.lock` 保护从读取 revision 到 commit 的窗口，
+Bug 修订在制时冻结前向新集拾取；④ 历史由 validity/timeline 表达，不另建 Markdown rollup。
 
 ## 3. 工单体系要点（全文见 conventions §3-§5）
 
@@ -112,28 +104,28 @@ outline 定稿后的结构性变更（结局/卡点/单元表）重过 evaluator
   执行、showrunner 验收）；arc-(k+1) 设计票在前方有未 Done 的 milestone-eval 时出生即
   `blocked` + `Blocked-by: <id>` 机读行；一卡门后操作者决策点 = eval 跟进票 park
   （external-prereq，走通知轨道）。大纲票 Done 以定稿门 eval 票 Done 为 Blocked-by 前置。
-- **修订涟漪协议**：Done 集的修订票交付义务含**涟漪分析**（grep 账本 ID/事实在后续集
+- **修订涟漪协议**：Done 集的修订票交付义务含**涟漪分析**（查询 fact/event 在后续集
   的全部引用→受影响集清单）；涟漪超邻集 ⇒ 不自动开票，blocked+needs-showrunner
   裁决（批量返工 or 接受偏差记入 Decisions）；自动邻集复核 = `Bug+continuity+
   owner=reviewer+tier=episode-writer`，递归 ≤2 跳，超限人裁。
 - **已投放水位**：config `airedThrough`；ep≤水位的修订票机械转型 = 前向修补 or
-  human-park，禁止追溯改已投放正文与其账本记录。
+  human-park，禁止追溯改已投放正文与其已生效 facts/events。
 
 ## 4. 门禁体系（v2：否决门 + 增强 pass + 剧级门补全）
 
 | 门/工序 | 执行者 | 要点 |
 |---|---|---|
-| 自检门 | writer | 格式 schema/字数带/场景与角色∈production 注册表/合规 lint；节拍单三分类自证；**账本 delta 声明**（逐条+行号）；金句候选。机器检查=格式门定位 |
-| 审读门 | reviewer | 独立三分类（**EXTRA 判据收窄 = 仅禁写违反+账本事实冲突**，其余创作增量合法且鼓励）；邻集对读；delta 逐条核对+越声明扫描；R 断言**必须带正文引文**（不可引证=inconclusive=不 pass）；合规 lint；改编项目名场面集加原著对照断言 |
+| 自检门 | writer | 格式 schema/字数带/场景与角色∈结构化注册表/合规 lint；节拍单三分类自证；**剧情资产 delta 声明**（逐条+行号）；金句候选。机器检查=格式门定位 |
+| 审读门 | reviewer | 独立三分类（**EXTRA 判据收窄 = 仅禁写违反+结构化事实冲突**，其余创作增量合法且鼓励）；邻集对读；delta 逐条核对+越声明扫描；R 断言**必须带正文引文**（不可引证=inconclusive=不 pass）；合规 lint；改编项目名场面集加原著对照断言 |
 | 大纲门 | showrunner | R1-R6 结构审计（**对照本项目 genre profile 参数**）+ 判断断言：逐集**狠点子**新鲜度比对、不可逆事件删除测试、禁写清单完备性（机器）、被动率预算、制作预算余量（机器）、季级伏笔到期已排入、切片候选≥3（前10集）、剧级回看（本 arc 在五锚点曲线的兑现）；显式保留「合规但平庸」否决位（引用弃案要求换案） |
-| **punch-up 增强 pass**（新增） | story-designer | 每 arc 全集 Done ⇒ showrunner file `Improvement+punch-up`：结构冻结、只准增强（金句/callback/情绪峰值/table-read 式节奏），禁改结构与账本事实；reviewer 轻量复核 |
+| **punch-up 增强 pass**（新增） | story-designer | 每 arc 全集 Done ⇒ showrunner file `Improvement+punch-up`：结构冻结、只准增强（金句/callback/情绪峰值/table-read 式节奏），禁改结构与剧情事实；reviewer 轻量复核 |
 | 前三集微门（新增） | evaluator | ep3 Done 触发：第1集反常识冲突/第3集首次高潮/尾钩序列专项，fail 即修 |
 | 大纲定稿门 | evaluator | 市场层（引用 market-watch 带日期评估）+内容层预评+合规红线+改编「名场面-卡点对齐表」核对；红线一票否决 ⇒ human-park（不是修订票） |
 | 一卡门 | evaluator | 钩子/卡点结构断言（机内）+完播率结构代理（待实测栏）+切片清单（阈值不达标⇒punch-up 票）+制作层累计+窗口期复核 |
 | 卡二门 | evaluator | 中段结构 + 制作层累计 + 市场层复核 |
 | **卡三门**（新增） | evaluator | 2/3 深谷落位与深度、换轨成立性、终局总动员资产盘点（逐项核正文出处） |
 | 完本门 | evaluator | 全量 rubric+定级+续季钩兼容断言 |
-| doctor 轮换审计 | doctor | 伏笔闭环/钩型序列/五锚点/同构/声纹/**指纹与哈希一致性**/**被动率滑窗**/**story-state 回放**；结构地标区间强制定维 |
+| doctor 轮换审计 | doctor | 伏笔闭环/钩型序列/五锚点/同构/声纹/**指纹与哈希一致性**/**被动率滑窗**/**资产图回放**；结构地标区间强制定维 |
 
 **writer 创造力通道**：节拍修正提案（工单评论+needs-designer 标签，designer 下 fire
 裁决，不阻塞交付）——writer 不是填表机器，「合法且更狠」的写法有上行通道。
@@ -157,7 +149,7 @@ outline 定稿后的结构性变更（结局/卡点/单元表）重过 evaluator
 - 市场层：market-watch 供数（带日期）；无数据 ⇒ evaluator 输出「无法评估+置疑」，
   一票否决类红线在无数据时升级操作者裁决。
 - 六红线机器化（v2 修正）：受众画像→立项必填；完播率→结构代理断言+待实测回填；
-  卡点落差→R4.5 断言；**主角被动→节拍单主动性字段+story-state 累计+doctor 滑窗**
+  卡点落差→R4.5 断言；**主角被动→结构化 episode agency/facts+doctor 滑窗**
   （承认单集三轴推进不是被动性的有效代理）；题材打压期→market-watch 持续监控
   （非仅立项一次）；情绪过时→同上。
 - **合规红线**（新增第 7 线）：违法未惩/价值观/敏感题材——自检+审读 lint、每道
@@ -206,8 +198,7 @@ doctor/reflect/sweep ~1-2 ⇒ 实测预估 3.5-5 fires/集，80 集约 300-400 f
 references/{conventions,script-format,craft-rules,evaluation-rubric,config-schema}.md
 skills/{showrunner,story-designer,episode-writer,reviewer,script-doctor,evaluator,
         market-watch,reflect,sweep}-agent/SKILL.md + add-script/SKILL.md
-templates/{north-star,outline,arc-beat-card,episode,characters,world,
-           foreshadow-ledger,story-state,production-ledger,evaluation-report}.md
+templates/{north-star,episode,evaluation-report}.md
 templates/deconstruction/README.md
 docs/DESIGN.md docs/RESEARCH/*.md（12 份调研归档）
 docs/HARNESS{,.zh-CN,.fr}.md（Claude/Codex/OpenCode 运行合同）
@@ -218,8 +209,8 @@ docs/HARNESS{,.zh-CN,.fr}.md（Claude/Codex/OpenCode 运行合同）
 **照搬**：三铁律、boot、状态机、三分类、§5a、claim、dedupe、blocked 协议、查询纪律、
 dry-run、lessons、§17、§18 local 板、§21a 结构、§22 报告点评、§24 Codex 加速器
 （图像生成 + 独立审查）、§25 三 Harness 可移植性（Claude/Codex/OpenCode）。
-**替换**：build 门→格式与叙事门禁；coverage→账本回写强制令；sensitive→keystone；
-design doc→arc 节拍单；strategyDoc→north-star；Ops→market-watch；
+**替换**：build 门→格式与叙事门禁；coverage→结构化剧情事实回写强制令；sensitive→keystone；
+design doc→`story/outline.v1.json`；strategyDoc→north-star；Ops→market-watch；
 自动回滚→fail-revert 协议；档位→CLI 无关抽象等级（Claude↔Codex 映射；OpenCode
 使用 `provider/model`）。
 **砍掉**：PR/autoMerge/deploy、多 repo §19（change-gate 思想保留给 doctor）、
@@ -231,10 +222,10 @@ Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 p
 ## 12. v1→v2 评审决策日志（38 findings 裁决）
 
 全部 38 条 findings（6 critical / 23 major / 9 minor）**全部接受**并落地：
-- [0][12] 账本单 commit + fail-revert + O_EXCL 锁 → §2 账本纪律
+- [0][12] 剧情事实单 commit + fail-revert + O_EXCL 锁 → §2 结构化事实纪律
 - [1][23] 修订涟漪协议（引用图/前向冻结/递归上限/逐集快照）→ §3
 - [2][7] 节拍单内容哈希 + 生成指纹 + delta 复审 → §2 版本纪律
-- [3] 账本 delta 声明逐条核对 + doctor 回放审计 → §4
+- [3] 剧情资产 delta 声明逐条核对 + doctor 回放审计 → §4
 - [4] §评审补全（reviewer≥writer 档；断言带引文；机器检查=格式门）→ §1/§4
 - [5] outline 主线伏笔登记表 + arc 门到期断言 → §2/§4
 - [6][24] 候选竞争+弃案、狠点子字段、判断断言、「合规但平庸」否决位 → §4
@@ -246,7 +237,7 @@ Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 p
 - [15] 邻集复核票四元组定义 → §3
 - [16] Mode: direct-write 计数载体 → §1 升级链
 - [17] 大纲票禁自领 → conventions
-- [18] 账本 rollup ≤15KB → §2
+- [18] 旧账本 rollup 已由有界 Context Pack + fact validity/timeline 取代 → §2
 - [19] comms 配置 + fallback 声明 → §8
 - [20][28][36] punch-up 一等工序 + EXTRA 收窄 + 切片/金句字段与阈值 + 提案通道 → §4
 - [21] fail 三级路由（notes 回炉默认）→ §1
@@ -254,7 +245,7 @@ Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 p
 - [27][30] market-watch agent + 数据依赖分级 + 无数据置疑 → §1/§6
 - [29] 卡三门 + arc 门剧级回看 + doctor 强制定维 → §4
 - [31] 合规红线全链路 → §6
-- [32] production.md 预算账本 + 三层强制 → §2/§4
+- [32] 制作约束进入 story design + production read model 三层强制 → §2/§4
 - [33] 前三集全 keystone + 前三集微门 → §4
 - [34] 主动性字段 + 被动率滑窗 → §6
 - [35] 改编断言（对齐表/名场面 keystone/原著对照/忠实度入节拍单）→ §4

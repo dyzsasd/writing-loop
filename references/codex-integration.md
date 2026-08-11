@@ -34,7 +34,7 @@ codex exec \
 
 ## 2. 图像生成（§24a，`codex.imageGen`）— story-designer 用
 
-**用途**：写完 `bible/characters.md` / `world.md` 后，把视觉 token 变成概念图，落到
+**用途**：`story/assets.v1.json` 的人物/世界视觉 facts 过门后，把视觉 token 变成概念图，落到
 `codex.assetsDir`（默认 `assets/concept/`），作为下游制作/生图管线的定位参考。
 
 **load-bearing 机制**：`image_generation` 工具**总是**把 PNG 存到
@@ -42,7 +42,7 @@ codex exec \
 文件名/尺寸，且 Codex 自报的「saved to …」是编造的。所以必须**定位真实文件再拷出**：
 
 ```bash
-# 1) 生成（workspace-write 必需；prompt 用 characters.md 的视觉 token）
+# 1) 生成（workspace-write 必需；prompt 用 story/assets.v1.json 中选择出的视觉 token）
 codex exec -C "<repo>" --sandbox workspace-write --ask-for-approval never \
   "Use the image_generation tool to render a character concept art:
    <粘贴该角色的视觉 token：发型/服装/形态/明星参考>. After generating, copy the produced
@@ -54,7 +54,7 @@ img=$(ls -t "$latest"ig_*.png 2>/dev/null | head -1)
 [ -n "$img" ] && cp "$img" "<repo>/assets/concept/<角色key>.png"
 ```
 
-**门禁**：生成的静态图是 §15 交付义务**豁免**（正文/账本照常；图是附带资产，交付评论注明
+**门禁**：生成的静态图是 §15 交付义务**豁免**（正文/结构化剧情事实照常；图是附带资产，交付评论注明
 路径即可）。生成失败**绝不**阻塞剧本推进——优雅降级，记一行继续。
 
 （可扩展：evaluator 一卡门可同法为切片清单生成**切片视觉/分镜关键帧**；v1 先只做
@@ -66,9 +66,9 @@ story-designer 的人物/场景概念图。）
 
 ```bash
 codex exec -C "<repo>" --sandbox read-only --ask-for-approval never \
-  "Adversarially review episode <ep-NNN> against its beat card <arcs/arc-NN.md#ep-NNN> and
+  "Adversarially review episode <ep-NNN> against <story/outline.v1.json#episode-NNN> and
    the ledgers. Classify each finding severity Critical/High/Medium/Low. Focus on: 承接断裂,
-   账本事实冲突, 伏笔到期未回收, 人设/战力矛盾, 节奏拖沓. Output findings only, no edits." < /dev/null
+   结构化事实冲突, 伏笔到期未回收, 人设/战力矛盾, 节奏拖沓. Output findings only, no edits." < /dev/null
 ```
 
 **裁决**（reviewer / doctor 侧）：

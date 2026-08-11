@@ -72,7 +72,7 @@ Sections: §0 §0a §1 §2 §11 §12a §13 §14 §15 §16 §17 §18 §20 §21 §
   字数带默认与制作层预算表。
 - **规模**：`totalEpisodes`、`paywall`（备卡集号，`card1 ⊂ [8..12]`，R4.5 参数从此
   读）、`episodeWordBand`（按 format 默认可覆盖）、`maxPrimaryScenes` /
-  `maxNamedCharacters`（制作预算上限，production 账本从此初始化）。
+  `maxNamedCharacters`（制作预算上限，进入结构化 story policy）。
 - **流程/可选**：`ticketPrefix`、`intakeMode`（autonomous|passive）、`mode`（live|dry-run）、
   `assetLibrary`、`marketDataPath`。两层创作与 keystone 判定由 §21a 决定，不采集。
 
@@ -127,7 +127,7 @@ source-analysis 票 owner 均为 showrunner、执行层为 story-designer；本 
 - §2 安全边界：只授权 core 创建一个新 repo、本项目数据目录及索引内本剧条目；绝不碰
   他剧。目标已存在/歧义就停，不以手工 fallback 扩权。
 - 边界（对照 §21 观察型）：本 skill 不直接创建文件；core 只落操作者确认的 north-star/
-  source 元数据、模板骨架与 config 制作上限，绝不写分集正文或擅造剧情/账本事实（§15/§21a）。
+  source 元数据、最小脚手架与 config 制作上限，绝不写分集正文或擅造结构化剧情事实（§15/§21a）。
   未明确同意原著分块由所选 Harness 处理时，改编 plan 必须零写拒绝。
 - §17 不自改治理文件：绝不改 conventions/SKILL/规则本体/**genre profile 参数表**；
   UNCALIBRATED 只警告不定参（校准走 §17 workspace 系统改进收件箱，绝不创建项目

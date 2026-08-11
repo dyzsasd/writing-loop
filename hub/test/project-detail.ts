@@ -150,8 +150,8 @@ state: In Progress → In Review。commit abc1234。
   unlinkSync(join(repo, "bible"));
   renameSync(join(repo, "bible-original"), join(repo, "bible"));
 
-  writeFileSync(join(repo, "bible", "characters.md"), "x".repeat(1024 * 1024 + 500));
-  const large = readProjectResource(ws, "demo", "document", "characters");
+  writeFileSync(join(repo, "bible", "north-star.md"), "x".repeat(1024 * 1024 + 500));
+  const large = readProjectResource(ws, "demo", "document", "north-star");
   ok(large.truncated && Buffer.byteLength(large.content) === 1024 * 1024 && large.bytes > Buffer.byteLength(large.content), "详情读取严格限制 1 MiB 并显式标 truncated");
 } finally {
   rmSync(tmp, { recursive: true, force: true });

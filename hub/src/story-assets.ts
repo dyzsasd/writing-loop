@@ -1,13 +1,11 @@
 // Strict story asset graph and deterministic context-pack resolver.
 //
-// The graph is the machine authority for reusable story facts. Markdown remains the human
-// authoring surface, but every referenced document is content-bound so agents never silently
-// combine a current JSON index with stale prose. Context packs contain only bounded structured
-// projections and allowlisted pointers; raw source text is never copied into this file.
-import { createHash } from "node:crypto";
+// This graph is the sole authority for reusable story facts. There is deliberately no parallel
+// Markdown projection: Studio and harness context packs render/select this data directly.
+// Raw source text is never copied into this file.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { hasSymlinkComponent, readRegularTextExact } from "./bounded-fs.ts";
+import { readRegularTextExact } from "./bounded-fs.ts";
 import { productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
 import { WsError } from "./workspace.ts";
 
@@ -30,7 +28,6 @@ export type StoryAssetFact = {
   sourceRefs: string[];
 };
 export type StoryAssetRelation = { kind: string; targetId: string };
-export type StoryAssetMarkdown = { path: string; sha256: string; anchor: string | null };
 export type StoryAsset = {
   id: string;
   type: StoryAssetType;
@@ -42,7 +39,6 @@ export type StoryAsset = {
   sourceRefs: string[];
   facts: StoryAssetFact[];
   relations: StoryAssetRelation[];
-  markdown: StoryAssetMarkdown | null;
   context: { agents: StoryAssetAgent[]; priority: "required" | "supporting" | "optional" };
 };
 export type StoryTimelineEvent = {
@@ -121,7 +117,6 @@ type Obj = Record<string, unknown>;
 const ID = /^[A-Z][A-Z0-9_-]{0,63}$/;
 const SHA = /^[a-f0-9]{64}$/;
 const SOURCE_REF = /^(?:src|north-star|ticket|episode|design|original):[A-Za-z0-9_./#:-]{1,220}$/;
-const MARKDOWN_PATH = /^(?:(?:bible|arcs|ledgers|episodes|source)\/[A-Za-z0-9_.\/-]{1,220}|(?:outline|north-star)\.md)$/;
 const AGENTS: readonly StoryAssetAgent[] = ["showrunner", "story-designer", "episode-writer", "reviewer",
   "script-doctor", "evaluator", "market-watch", "sweep", "reflect"];
 const TYPES: readonly StoryAssetType[] = ["character", "world", "location", "organization", "object", "scene",
@@ -176,7 +171,7 @@ function parseFact(value: unknown, label: string): StoryAssetFact {
 function parseAsset(value: unknown, index: number): StoryAsset {
   const label = `assets[${index}]`; const row = object(value, label);
   exactKeys(row, ["id", "type", "label", "status", "importance", "episodes", "summary", "sourceRefs", "facts",
-    "relations", "markdown", "context"], label);
+    "relations", "context"], label);
   const id = text(row.id, `${label}.id`, 64); if (!ID.test(id)) throw new StoryAssetError(`${label}.id 无效`);
   let episodes: StoryAsset["episodes"] = null;
   if (row.episodes !== null) {
@@ -194,14 +189,6 @@ function parseAsset(value: unknown, index: number): StoryAsset {
     if (!ID.test(targetId)) throw new StoryAssetError(`${label}.relations[${relationIndex}].targetId 无效`);
     return { kind: text(relation.kind, `${label}.relations[${relationIndex}].kind`, 80), targetId };
   });
-  let markdown: StoryAssetMarkdown | null = null;
-  if (row.markdown !== null) {
-    const pointer = object(row.markdown, `${label}.markdown`); exactKeys(pointer, ["path", "sha256", "anchor"], `${label}.markdown`);
-    const path = text(pointer.path, `${label}.markdown.path`, 256);
-    if (!MARKDOWN_PATH.test(path) || path.includes("..") || !path.endsWith(".md")) throw new StoryAssetError(`${label}.markdown.path 不在剧情文档 allowlist`);
-    const sha256 = text(pointer.sha256, `${label}.markdown.sha256`, 64); if (!SHA.test(sha256)) throw new StoryAssetError(`${label}.markdown.sha256 无效`);
-    markdown = { path, sha256, anchor: pointer.anchor === null ? null : text(pointer.anchor, `${label}.markdown.anchor`, 160) };
-  }
   const context = object(row.context, `${label}.context`); exactKeys(context, ["agents", "priority"], `${label}.context`);
   if (!Array.isArray(context.agents) || context.agents.length < 1 || context.agents.length > AGENTS.length) {
     throw new StoryAssetError(`${label}.context.agents 必须是非空 agent 数组`);
@@ -212,7 +199,7 @@ function parseAsset(value: unknown, index: number): StoryAsset {
     status: enumValue(row.status, STATUS, `${label}.status`),
     importance: enumValue(row.importance, ["core", "supporting", "detail"] as const, `${label}.importance`),
     episodes, summary: text(row.summary, `${label}.summary`, 1_500), sourceRefs: refs(row.sourceRefs, `${label}.sourceRefs`),
-    facts, relations, markdown, context: { agents, priority: enumValue(context.priority,
+    facts, relations, context: { agents, priority: enumValue(context.priority,
       ["required", "supporting", "optional"] as const, `${label}.context.priority`) } };
 }
 
@@ -251,12 +238,6 @@ export function parseStoryAssetCatalog(value: unknown): StoryAssetCatalog {
     storyDesignSha256, revision: integer(root.revision, "story assets.revision", 1, Number.MAX_SAFE_INTEGER),
     assets: root.assets.map(parseAsset), timeline: root.timeline.map(parseTimelineEvent) };
 }
-
-const fileSha256 = (path: string, maxBytes: number): string => {
-  const raw = readRegularTextExact(path, maxBytes);
-  if (raw === null) throw new StoryAssetError(`${path} 必须是未变化、单链接、有界 UTF-8 普通文件`);
-  return createHash("sha256").update(raw, "utf8").digest("hex");
-};
 
 export function readStoryAssetCatalog(repo: string): StoryAssetCatalogRead | null {
   const path = join(repo, STORY_ASSETS_RELATIVE_PATH);
@@ -303,12 +284,6 @@ export function validateStoryAssetCatalog(catalog: StoryAssetCatalog, binding: S
   for (const asset of catalog.assets) {
     for (const relation of asset.relations) {
       if (relation.targetId === asset.id || !byId.has(relation.targetId)) throw new StoryAssetError(`${asset.id} relation 指向无效 asset ${relation.targetId}`);
-    }
-    if (asset.markdown) {
-      const parts = asset.markdown.path.split("/");
-      if (hasSymlinkComponent(binding.repo, parts)) throw new StoryAssetError(`${asset.id} 的 Markdown 指针含 symlink：${asset.markdown.path}`);
-      const path = join(binding.repo, ...parts);
-      if (fileSha256(path, 2 * 1024 * 1024) !== asset.markdown.sha256) throw new StoryAssetError(`${asset.id} 的 Markdown 指针已漂移：${asset.markdown.path}`);
     }
   }
   const expectedCharacters = new Map(binding.characters.map((row) => [row.id, row] as const));
@@ -393,7 +368,7 @@ export function buildStoryContextPack(
   const projected = (asset: StoryAsset): StoryContextAsset => ({ id: asset.id, type: asset.type, label: asset.label,
     status: asset.status, importance: asset.importance, episodes: asset.episodes ? { ...asset.episodes } : null,
     summary: asset.summary, sourceRefs: [...asset.sourceRefs], facts: asset.facts.map((fact) => ({ ...fact, sourceRefs: [...fact.sourceRefs] })),
-    relations: asset.relations.map((relation) => ({ ...relation })), markdown: asset.markdown ? { ...asset.markdown } : null,
+    relations: asset.relations.map((relation) => ({ ...relation })),
     selectedBecause: mandatory.get(asset.id) ?? [`agent:${request.agent}:${asset.context.priority}`] });
   const selected: StoryContextAsset[] = [];
   const timelineCandidates = catalogRead.manifest.timeline.filter((event) => request.episode === null

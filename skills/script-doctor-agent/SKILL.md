@@ -17,7 +17,7 @@ description: >-
 
 盯**整部剧随集数累积的叙事健康**——生产型 agent 各盯本票，没人盯整体。你按**轮换
 维度**审计全剧，file 带证据的修订/打磨票交生产型 agent 消化（§21 observe-and-file）：
-绝不改一字正文/账本/大纲，绝不 commit，绝不验收——对剧本 **READ-ONLY**。每 fire 只审
+绝不改一字正文、故事 JSON 或创作宪章，绝不 commit，绝不验收——对剧本 **READ-ONLY**。每 fire 只审
 一个维度、file 有 per-run cap；靠 `episodes/` 的 SHA change-gate（§19）不重审没动过
 的树。慢频运行（daily-ish）——剧级审计昂贵、叙事健康变化慢。
 
@@ -75,44 +75,44 @@ Sections: §0 §0a §2 §3 §4 §5 §5a §6 §7 §8 §10 §11 §12 §14 §15 §1
 每 fire 只审**一个**维度（一次全维度剧级审计是无界的）。维度集（§21）：
 
 **机器可检（1-4）：**
-1. **伏笔闭环**——`ledgers/foreshadow.md` 闭环审计（R2.3/R2.5）：到期未回收（预定
+1. **伏笔闭环**——`story/assets.v1.json` 中 `type=foreshadow` 的 lifecycle fact 闭环审计（R2.3/R2.5）：到期未回收（预定
    回收集 ≤ 当前生产集号但状态 ≠ `paid` 且未改标 `dropped→续集钩`）、未埋先收、
-   回收距离 >8 集无擦亮集、`outline.md` 主线伏笔登记表与账本失配。
+   回收距离 >8 集无擦亮事件、story design beat 与 asset lifecycle 失配。
 2. **钩型序列**——从每集 frontmatter 导出全剧 `hook-type` 序列，校验 R1.2（强钩占比
    ≥ profile 阈值——强钩定义按本项目 profile，附录 A；连续 2 集不得同钩型）、R1.3
    （H0 弱钩：连续 ≤2、禁连续 3 集）。参数一律写「本项目 profile 的 X」，不写死。
-3. **指纹与哈希一致性**——已 Done 集 frontmatter 的 `beat-card-hash` 与当前 arc 文件
-   哈希比对；失配 ⇒「依据已过期」集清单。另查季内 `model`/`rules-version` 断层。
-4. **主角被动率滑窗**——读 `ledgers/story-state.md` 逐集末态的「主角主动性」字段，
+3. **指纹与哈希一致性**——已 Done 集 frontmatter 的 `beat-card-hash` 与当前
+   `story/outline.v1.json` 哈希比对；失配 ⇒「依据已过期」集清单。另查季内 `model`/`rules-version` 断层。
+4. **主角被动率滑窗**——读 story design episodes 的 `agency` 字段，
    滑窗 10 集「纯被动」占比 >30% ⇒ 命中（红线⑥前移为随集监控）。
 
 **判断类（5-7；每条断言必附正文引文，§3）：**
-5. **高潮曲线五锚点回归**——对照 `outline.md` 实测：第 1 集三件事（R6.3）、卡点结构
+5. **高潮曲线五锚点回归**——对照 `story/outline.v1.json` 实测：第 1 集三件事（R6.3）、卡点结构
    （R4.5，卡点集号从 config `paywall` 读）、2/3 处体系性深谷（R4.2）、终局总动员
    （禁新元素解终局，R4.4）、末集主题闭环（R1.6）。
-6. **story-state 回放**——抽 1 集，正文 vs 账本断言逐项比对（防敷衍账本）：信息差
+6. **资产事实回放**——抽 1 集，正文 vs 本集 current facts/timeline 逐项比对（防敷衍 delta）：信息差
    表位阶、数字锚点、角色当前状态。
 7. **同构疲劳与声纹漂移**——同构情节连续 >2 集（R6.2）、voice 相对
-   `bible/characters.md` 人设卡漂移、口头禅堆积。
+   结构化人物 facts 漂移、口头禅堆积。
 
 **定维**：按 `cursor % 7` 选，然后 `cursor++` 持久化。**强制定维（结构地标区）**：
 当前生产集号处于卡点集 ±2、全剧 2/3 深谷区 ±2、或终局 5 集 ⇒ 本 fire 强制审维度 5
 （游标仍自增）——地标区是全剧成败集中处，值得每次测锚点。
 
 ### Job 2 — 审该维度（read-only）+ §19 版本纪律稽核（常驻）
-**先读基线**再判漂移，别凭空发明「应该长什么样」：略读 north-star、`outline.md`、
-相关节拍单——它们声明正文应遵循的结构。再按选定维度 grep/读正文与账本，收集**具体**
-发现，每条带集号 + 正文引文/账本行。偏好高信号、耐久的发现。
+**先读基线**再判漂移，别凭空发明「应该长什么样」：读 North Star 所需小节，再运行
+`writing-loop story context` 取得本集结构与资产事实。按选定维度读正文和 pack，收集**具体**
+发现，每条带集号 + 正文引文/asset id。偏好高信号、耐久的发现。
 
 **§19 版本纪律稽核**（每个非 no-op fire 常驻，是 change-gate 已算哈希的副产品）：
-- **delta 复审被跳过**：大纲门后改了 `arcs/`/`outline.md`（失配集清单来自维度 3）
-  却无文件头 changelog 条目、或受影响已 Done 集无对应 `continuity` 复核票 ⇒ file
+- **delta 复审被跳过**：结构门后改了 `story/outline.v1.json`（失配集清单来自维度 3）
+  却未提升受影响子票 `Design-hash`、或受影响已 Done 集无对应 `continuity` 复核票 ⇒ file
   continuity Bug（附失配集清单与缺失证据）。
-- **被否稿账本残留污染 canon（文档侧）**：单集票 `Canceled`（fail-revert，§15）后
-  其伏笔/状态条目仍在活跃账本而正文已 revert ⇒ file continuity Bug（附残留行与被
+- **被否稿 asset 残留污染 canon（文档侧）**：单集票 `Canceled`（fail-revert，§15）后
+  其事实/事件仍在资产图而正文已 revert ⇒ file continuity Bug（附 asset id 与被
   revert 的 commit）。
-- **分工（与 sweep）**：doctor 管**文档侧**（哈希失配、changelog 缺条目、复核票
-  缺失、账本残留）；sweep 管**板侧**（Canceled 票 commit 未 revert 的生命周期稽核，
+- **分工（与 sweep）**：doctor 管**文档侧**（哈希失配、Design-hash 未刷新、复核票
+  缺失、asset 残留）；sweep 管**板侧**（Canceled 票 commit 未 revert 的生命周期稽核，
   §15/§18）。互补不重叠。
 
 ### Job 3 — file Bug/Improvement（狠 dedupe，capped，落 Backlog）
@@ -125,18 +125,18 @@ file）；查现实（确认问题在当前 HEAD 仍在）。
 - **缺陷类** ⇒ **Bug**：`writing-loop` + `Bug` + 子类型（`foreshadow`/`hook`/
   `continuity`/`pacing`）+ tier=`episode-writer`（§6/§21a）。**owner 按有无 `Episode:` 行分流
   （§4，patch WL-34 · 2026-07-17）：单集正文缺陷（带 `Episode: <N>`）⇒ owner=`reviewer`；
-  无 `Episode:` 行的设计层缺陷（季级账本/大纲，命中 outline/arc）⇒ owner=`showrunner`。**
+  无 `Episode:` 行的设计层缺陷（命中季级结构/资产图）⇒ owner=`showrunner`。**
   单集类必带 `Episode: <N>`（§5 顺序前置判定依据）；优先级按 §5 rank（`continuity` = rank 3）。
 - **非缺陷打磨类**（未踩硬规则的软趋势）⇒ **Improvement**：owner=`showrunner`
   （§4）；tier 可不带——由 showrunner 在 §5a 放行前赋予，停在 Backlog 不算搁浅。
 
 **一律落 `Backlog`（§5a）**，doctor 不自放行。票体：精确出处（集号+场号/行号+引文
-或账本行）、症状、深层诊断、可给候选 fix 方向——**指路不代写**。**per-run cap
+或结构化 fact/event）、症状、深层诊断、可给候选 fix 方向——**指路不代写**。**per-run cap
 （默认 ≤4 张/fire）**：超出作为候选写进报告留下一 fire。file 完成后写回
 `doctor-state.json`：`lastAuditSha` + 自增后的 `cursor`。
 
 ## 2. Guardrails
-- 只观察 + file（§21）：绝不改正文/账本/大纲、绝不 commit、绝不验收、绝不互相触发；
+- 只观察 + file（§21）：绝不改正文、故事 JSON 或创作宪章、绝不 commit、绝不验收、绝不互相触发；
   唯一板写 = file/评论 Bug（→reviewer）与 Improvement（→showrunner），一律 Backlog。
 - 对剧本 READ-ONLY：read/grep/parse/哈希比对；绝不 edit、绝不跑改动工作树的命令。
 - change-gate + 轮换限界（§19）：每 fire 一维；SHA 未变 ⇒ no-op；地标区强制定维 5。

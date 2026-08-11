@@ -115,9 +115,8 @@ répondre :
 
 Ensuite `add-script` automatiquement :
 
-- **SCAFFOLD** : génère `bible/` (north-star / characters / world), `outline.md`,
-  `ledgers/` (foreshadow / story-state / production + archive/), `episodes/`,
-  `evaluation/` ; `git commit`.
+- **SCAFFOLD** : génère la charte `bible/north-star.md` et les répertoires vides
+  `story/`, `episodes/`, `evaluation/` ; aucun miroir Markdown de bible, plan ou registre.
 - **REGISTER** : enregistre le projet dans `~/dramas/.writing-loop/config.json`, crée le
   répertoire de tableau `~/dramas/.writing-loop/my-drama/board/`, échafaude le
   répertoire `lessons/` (un fichier partagé + un par rôle).
@@ -163,7 +162,7 @@ rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les
 ```
 /writing-loop:story-designer-agent    # source-analysis : fenêtre de saison, chunks, trois fiches
 /writing-loop:showrunner-agent       # accepte la porte source, puis seulement déverrouille outline
-/writing-loop:story-designer-agent    # écrit outline.md + bible, puis les fiches de beats par arc
+/writing-loop:story-designer-agent    # écrit story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # évaluation datée de la fenêtre de genre — la couche marché de la porte de verrou du plan en dépend ; données manquantes = item inconclusive, et les cas ligne-rouge se garent en attendant que vous les fournissiez
 /writing-loop:evaluator-agent         # porte de verrou du plan (marché + pré-notation contenu + conformité)
 /writing-loop:episode-writer-agent    # écrit les épisodes dans l'ordre ; les épisodes pivots sont écrits par le Story-Designer
@@ -278,9 +277,8 @@ réelles, ou continuer à produire. C'est votre principal levier de contrôle.
 ## Où sont les sorties / comment suivre l'avancement
 
 - **Scénarios** : `~/dramas/my-drama/episodes/ep-001.md …`
-- **Plan & bible** : `outline.md`, `bible/`
-- **Registres préfiguration / état / production** : `ledgers/` (le cœur de
-  l'anti-fracture et de l'anti-préfiguration-perdue)
+- **Charte créative** : `bible/north-star.md`
+- **Structure et faits narratifs** : `story/outline.v1.json`, `story/assets.v1.json`
 - **Rapports d'évaluation** : `evaluation/`
 - **Tableau de tickets** (ce sur quoi l'équipe travaille) :
   `~/dramas/.writing-loop/my-drama/board/tickets/*.md`
@@ -297,14 +295,14 @@ Comme le config utilise un **`repoPath` relatif** et que l'état d'exécution vi
 le workspace, tout migrer (tickets en cours compris) tient en une copie :
 
 ```bash
-cp -r ~/dramas /nouvel/endroit/dramas   # scénarios + plans + registres + tableau en cours, ensemble
+cp -r ~/dramas /nouvel/endroit/dramas   # charte + JSON narratifs structurés + scénarios + tableau en cours
 ```
 
 - Utilisez **`cp` (pas `git clone`)** : un clone n'apporte que la sortie créative d'un
   seul repo de scénario, pas les tickets en cours.
 - Pour ne déplacer que la **sortie créative finie** (sans l'état d'ordonnancement en
-  cours) : `git clone ~/dramas/my-drama` — chaque repo de scénario est autonome (bible
-  / outline / ledgers / episodes, tout à l'intérieur).
+  cours) : `git clone ~/dramas/my-drama` — chaque repo de scénario est autonome (charte
+  / JSON narratifs structurés / épisodes, tout à l'intérieur).
 - Ne mettez pas le workspace sur un partage réseau pour une écriture multi-machine
   concurrente (cela ferait une race) ; une copie-migration séquentielle est correcte.
 
@@ -312,7 +310,7 @@ cp -r ~/dramas /nouvel/endroit/dramas   # scénarios + plans + registres + table
 
 ## Mettre à niveau le plugin (avec un projet en cours)
 
-**La mise à niveau ne migre aucune donnée** — les formats tableau/registres/repo sont
+**La mise à niveau ne migre aucune donnée** — les formats tableau/JSON narratifs/repo sont
 stables, et chaque fire d'agent est sans état et relit la spec la plus récente ; mettre
 à niveau = remplacer le plugin + redémarrer les boucles. Cinq étapes :
 

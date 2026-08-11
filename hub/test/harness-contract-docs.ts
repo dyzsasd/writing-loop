@@ -71,8 +71,8 @@ ok(storyDesigner.includes("story/outline.v1.json")
   && showrunner.includes("--stage full")
   && evaluator.includes("story validate --project <project> --stage full --json")
   && read("references", "story-design-schema.md").includes("skipped` 表示阶段未到")
-  && read("references", "config-schema.md").includes("结构化故事伴随文件与质量门"),
-"Story Designer 写严格 companion，Showrunner/Evaluator 独立重验，阶段未到不伪绿");
+  && read("references", "config-schema.md").includes("结构化故事唯一事实源与质量门"),
+"Story Designer 写唯一结构化事实源，Showrunner/Evaluator 独立重验，阶段未到不伪绿");
 ok(storyDesigner.includes("story/assets.v1.json") && storyDesigner.includes("chronologyIndex")
   && episodeWriter.includes("story context --project <project> --ticket <ID> --agent episode-writer")
   && reviewer.includes("story context --project <project> --ticket <ID> --agent")

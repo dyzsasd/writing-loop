@@ -111,7 +111,7 @@ CLI 的根解析。
       "airedThrough": 0,                   // 已投放水位：ep≤此值的修订票机械转型为「前向修补」或 human-park，
                                            //   禁止追溯改已投放正文及其账本记录
       "episodeWordBand": [900, 1300],      // 按 format profile 默认，可覆盖
-      "maxNamedCharacters": 20,            // production.md 预算账本的上限来源
+      "maxNamedCharacters": 20,            // story design 制作约束的上限来源
       "maxPrimaryScenes": 5,
       "assetLibrary": null,                // 公司 AI 资产库清单路径（或 null=无）——rubric 资产复用度的打分输入
       "marketDataPath": null,              // 操作者投喂的市场数据目录（榜单快照/政策摘要）；market-watch 优先读取
@@ -528,10 +528,10 @@ register 将原始 bytes 与 chunks 以 mode 0600 发布到
 `source finalize`。只有 control.phase=`review-ready` 且 showrunner 将 source-analysis 票 Done，
 通用 Blocked-by resolver 才能解锁 outline。任何外部拆书 skill 产物都不能替代这条证据链。
 
-### 结构化故事伴随文件与质量门
+### 结构化故事唯一事实源与质量门
 
-source-analysis 通过后，Story Designer 同步维护人读 `outline.md` / `arcs/*.md` 与严格的
-`story/outline.v1.json`，并维护 `story/assets.v1.json`。前者绑定 source plan、改编处置、角色
+source-analysis 通过后，Story Designer 只维护严格的 `story/outline.v1.json` 与
+`story/assets.v1.json`。前者绑定 source plan、改编处置、角色
 tier、场景复用、季级 beats 与逐集 hook/agency/资产引用；后者是人物、世界、地点、组织、
 道具、场景、伏笔与连续性事实的唯一机读图，并分别记录 chronology 与 reveal order。
 
@@ -597,8 +597,8 @@ workspace；unscoped POST 直接 409，防止立项或启停落入错误 workspa
 工作区内详情 API 为
 `[/w/<workspace-id>]/api/projects/<key>/resources/<ticket|document|episode|report|evaluation>/<id>`。
 服务端 registry
-把 ID 解析到本项目的已登记文件：Ticket 来自本板；document 只允许 north-star、characters、
-world、outline、foreshadow、story-state、production；episode 只接受数字集号；report/evaluation
+把 ID 解析到本项目的已登记文件：Ticket 来自本板；document 只允许创作宪章 north-star；
+结构、人物、资产和时间线由 Story API/页面直接从 JSON 渲染；episode 只接受数字集号；report/evaluation
 只能引用各自目录扫描出的 opaque ID。客户端不能传路径；读取拒绝 symlink/越界/非普通文件，
 单份 Markdown 最多返回前 1 MiB，并以 `truncated` 和 ETag 明示。
 
@@ -641,15 +641,16 @@ malformed cursor、workspace/fleet 类型串用或跨 workspace cursor 均 400�
 新机器运行 `writing-loop workspace add /new/place` 重建本机指针；同机移动时须先确保旧路径
 已消失再 add。若原件仍在，不要把带同一 `workspace.json` identity 的副本登记成第二个 room。
 
-## 剧本 repo 内文档树（由 add-script scaffold；详见 conventions §19）
+## 剧本 repo 内文档树（由 add-script scaffold）
 
 ```
-bible/{north-star,characters,world}.md   outline.md   arcs/
-ledgers/{foreshadow,story-state,production}.md   ledgers/archive/（滚存目录）
+bible/north-star.md
+story/{outline.v1.json,assets.v1.json}
 episodes/   evaluation/   source/（改编立项）
 ```
 
-（三个活跃账本 foreshadow/story-state/production + archive/ 滚存目录，§19 单一真相源。）
+人物、世界、伏笔、连续性、场景与时间线只存在于 `story/assets.v1.json`；季结构只存在于
+`story/outline.v1.json`。旧 Markdown 镜像由 S00 拒绝。
 
 ## Server-only production runtime（不属于 workspace config）
 

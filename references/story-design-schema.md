@@ -1,15 +1,15 @@
-# Story design companion v1
+# Story design authority v1
 
-`story/outline.v1.json` 是 `outline.md` / `arcs/*.md` 的严格机读伴随文件。Markdown 供编剧阅读，
-JSON 供 Story Designer、Showrunner、Evaluator、Studio 与确定性质量门共享同一事实。它不是第二份
-模型报告，也不能含原著正文或对白草稿。
+`story/outline.v1.json` 是季结构、arc、节拍和分集设计的**唯一事实源**。Story Designer、
+Showrunner、Evaluator、Studio 与确定性质量门直接读取它；不存在平行的 `outline.md` 或
+`arcs/*.md`。它不能含原著正文或对白草稿。
 
 可复用剧情事实、双轨时间线与选择性 Harness context 不放在本文件，统一进入
 [`story/assets.v1.json`](story-assets-schema.md)。outline 是结构权威，assets 是事实/路由权威；
 人物与场景身份必须精确一致，二者以 `storyDesignSha256` 绑定。
 
-正常操作者不手工创建或维护它。Story Designer 在 source-analysis 通过后写入，并在同一个 Git
-commit 中同步人读大纲；Showrunner 和 Evaluator 用 `writing-loop story validate` 独立重验。
+正常操作者不手工创建或维护它。Story Designer 在 source-analysis 通过后写入；Studio 直接
+把结构渲染成人读视图，Showrunner 和 Evaluator 用 `writing-loop story validate` 独立重验。
 
 ## 顶层契约
 
@@ -55,7 +55,7 @@ commit 中同步人读大纲；Showrunner 和 Evaluator 用 `writing-loop story 
 
 场景精确字段：`id/name/primary/variantOf/reusePlan/productionNotes`。一次性使用的场景必须写
 `reusePlan`；`variantOf` 显式表达同一空间的时代、天气或状态变体。Studio 的美术资产页只从这里
-派生，禁止模型另写一份会漂移的场景 registry。
+派生，禁止模型另写会漂移的场景 registry。
 
 节拍精确字段：`id/episode/weight/label/setup/payoff`。`weight` 为 `major | minor`；主节拍之间
 不能超过 `maxBeatGap`。
@@ -100,3 +100,9 @@ writing-loop story validate --project KEY --stage full --json
 
 `writing-loop story validate` 同时验证 outline 与 assets；`writing-loop story context --project
 KEY --ticket ID --agent AGENT --json` 生成有界、可复现、ticket-scoped Context Pack。
+
+## 单一事实源门
+
+下列旧路径一旦存在，S00 必须失败且 scheduler 不得进入分集写作：`outline.md`、
+`bible/characters.md`、`bible/world.md`、`ledgers/foreshadow.md`、
+`ledgers/story-state.md`、`ledgers/production.md`。Git 历史负责审计，不用 Markdown 镜像存副本。

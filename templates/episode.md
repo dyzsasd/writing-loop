@@ -1,7 +1,7 @@
 ---
 ep: {N}
 arc: arc-{NN}
-beat-card: arcs/arc-{NN}-{slug}.md#ep-{NNN}
+beat-card: story/outline.v1.json#episode-{NNN}
 beat-card-hash: {sha256 前 12 位——arc 文件在写作时刻的内容哈希；doctor 比对即知「所依据的节拍单已被改过」}
 hook-type: {H1-H7|H0}
 words: {自检时填实际字数}
@@ -26,8 +26,8 @@ rules-version: craft-rules@{ver} script-format@{ver}
 ▲ 【画面定格】{尾钩画面——必须与 frontmatter hook-type 一致}
 
 <!-- 交付义务（conventions §15）：
-     1. 单 commit 原子性：本文件 + ledgers/ 全部更新必须在同一个 commit；工单转态在 commit 之后。
-     2. 账本 delta 声明：在工单评论逐条列出本集产生的状态/关系/信息差/数字锚点变化，
+     1. 单 commit 原子性：本文件 + story/assets.v1.json 本集 facts/events 更新必须在同一个 commit；工单转态在 commit 之后。
+     2. 剧情资产 delta 声明：在工单评论逐条列出本集产生的状态/关系/信息差/数字锚点变化，
         每条附正文行号引用——reviewer 逐条核对（漏项 = MISSING = fail）。
-     3. production.md：本集场景/具名角色必须 ∈ 注册表；打斗/群戏/特效计数累加。
+     3. 结构化制作约束：本集场景/具名角色必须 ∈ story design/assets 注册表；打斗/群戏/特效计数符合设计上限。
      4. 自检清单显式写入工单评论（机器项 + 三分类自证 + 金句候选）。 -->

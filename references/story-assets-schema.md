@@ -2,10 +2,10 @@
 
 `story/assets.v1.json` 是剧情事实与上下文路由的唯一机读资产图。它与
 `story/outline.v1.json` 分工：outline 管季结构、节拍和逐集引用；assets 管可复用的
-人物、世界、地点、组织、道具、场景、伏笔、连续性事实和时间事件。Markdown 仍是人读创作面，
-但任何被资产图引用的 Markdown 都必须用相对路径、section anchor 与 SHA-256 绑定。
+人物、世界、地点、组织、道具、场景、伏笔、连续性事实和时间事件。它是这些事实唯一的
+存储位置；Studio 直接渲染 JSON，Harness 通过 Context Pack 选择性加载。
 
-正常操作者不手填此文件。Story Designer 在同一 Git commit 中同步 JSON 和 Markdown；
+正常操作者不手填此文件。Story Designer 与 Episode Writer 在各自受控 commit 中推进 revision；
 Showrunner、Reviewer、Evaluator 与 Studio 都调用同一个 parser/resolver。
 
 ## 顶层
@@ -26,9 +26,8 @@ Showrunner、Reviewer、Evaluator 与 Studio 都调用同一个 parser/resolver�
 ```
 
 不得把原著路径、原文或任意本地/网络 URL 填入资产。`sourceRefs` 只接受结构化 provenance：
-`src:`、`north-star:`、`ticket:`、`episode:`、`design:`、`original:`。Markdown path 只允许
-项目内 `bible/`、`arcs/`、`ledgers/`、`episodes/`、`source/` 下面的 `.md`，或
-`outline.md` / `north-star.md`；禁止 `..`、symlink、特殊文件和 hash 漂移。
+`src:`、`north-star:`、`ticket:`、`episode:`、`design:`、`original:`。schema 不接受 Markdown
+path/anchor/hash 字段；重新加入任何平行文档指针都会因 unknown key 被拒绝。
 
 ## Asset
 
@@ -53,7 +52,6 @@ Showrunner、Reviewer、Evaluator 与 Studio 都调用同一个 parser/resolver�
     "sourceRefs": ["north-star:core"]
   }],
   "relations": [{ "kind": "rival", "targetId": "C02" }],
-  "markdown": { "path": "bible/characters.md", "sha256": "<64 hex>", "anchor": "角色名" },
   "context": { "agents": ["episode-writer", "reviewer"], "priority": "required" }
 }
 ```
@@ -97,6 +95,6 @@ writing-loop story context --project KEY --ticket WL-12 --agent episode-writer -
 timeline 及相关前置事件；按稳定顺序填入默认 64 KiB（可配置 4–256 KiB）预算。输出包含
 catalog/design SHA、选择原因、omitted IDs、实际字节和稳定 digest。
 
-required asset 或本集 timeline 放不进预算、引用不闭合、事实冲突、Markdown 漂移、ticket 未授权
-当前 agent 时硬停。绝不回退成全文扫 bible/ledger，也不把原著正文放入 pack。票里的 Markdown
-`## Context-pack` 仅是人读预览，不能替代这份确定性输出。
+required asset 或本集 timeline 放不进预算、引用不闭合、事实冲突、ticket 未授权当前 agent
+时硬停。绝不回退成全文扫 bible/ledger，也不把原著正文放入 pack。票里的 `## Context-pack`
+仅是人读预览，不能替代这份确定性输出。

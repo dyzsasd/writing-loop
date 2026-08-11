@@ -655,9 +655,8 @@ export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number): string[
 // reviewer（SKILL §0）：∃ In Review（**任意**——owner:reviewer 主队列与 punch-up 双签、
 // 档位待升的 keystone 票等全部形态的保守超集；agent 侧再精滤）∪ Ⅰ needs-reviewer ∪
 // Ⅱ孤儿（In Review 认领陈旧，§7）∪ Job C change-gate（`git diff <上次审计 sha>..HEAD --
-// episodes/ ledgers/` 非空；不可判 ⇒ 保守命中）。判据现行版 = reviewer-state gateNote
-// 现场裁定（fire #177 实测）：旧「episodes/ HEAD 比对」对**账本-only 修订**结构性不可见
-// （假阴性），而账本-only 恰是修订的主导形状——Job C 职责本含账本抽检（SKILL Job C）。
+// episodes/ story/assets.v1.json` 非空；不可判 ⇒ 保守命中）。结构化资产-only 修订也必须
+// 唤醒 reviewer，避免正文与事实图脱钩。
 export function laneReviewer(tickets: LaneTicket[], nowMs: number, changedSinceAudit: boolean | null): string[] {
   const hits: string[] = [];
   const ir = tickets.find((t) => t.state === "In Review");
@@ -666,8 +665,8 @@ export function laneReviewer(tickets: LaneTicket[], nowMs: number, changedSinceA
   if (needs) hits.push(fmtHit("needs-reviewer 求助（§9）", needs));
   const orphan = tickets.find((t) => t.state === "In Review" && t.assignee !== null && claimStale(t, nowMs));
   if (orphan) hits.push(fmtHit("孤儿 In Review（§7 认领陈旧）", orphan));
-  if (changedSinceAudit === null) hits.push("episodes/∪ledgers/ 自上次审计的 diff 不可判——保守命中（Job C change-gate）");
-  else if (changedSinceAudit) hits.push("episodes/∪ledgers/ 自上次审计 sha 有改动（Job C change-gate）");
+  if (changedSinceAudit === null) hits.push("episodes/∪story/assets.v1.json 自上次审计的 diff 不可判——保守命中（Job C change-gate）");
+  else if (changedSinceAudit) hits.push("episodes/∪story/assets.v1.json 自上次审计 sha 有改动（Job C change-gate）");
   return hits;
 }
 
@@ -719,7 +718,7 @@ export function laneShowrunner(
 }
 
 // sweep（SKILL §0 + 操作者裁定五枝）：∃ In Progress（孤儿回收候选面）∨ ∃ 任何 .lock
-// （板票锁/账本锁/repo 写锁——Job 3 陈旧锁清理）∨ 错标即时枝（SKILL §0 逃逸口②前半，
+// （板票锁/结构化剧情资产锁/repo 写锁——Job 3 陈旧锁清理）∨ 错标即时枝（SKILL §0 逃逸口②前半，
 // frontmatter 机械可判：非终态票缺全部九个 tier 标签或 owner 字段缺失——Fix 轮 1 前靠
 // cadence 枝兜底，interval<30min 配置下会延迟清理）∨ keystone-stall（In Review+keystone 且
 // updated 陈旧 >30min——比 SKILL 判据少 assignee 合取，更保守）∨ 兜底节拍（距上次 sweep
@@ -734,7 +733,7 @@ export function laneSweep(
   const ip = tickets.find((t) => t.state === "In Progress");
   if (ip) hits.push(fmtHit("∃ In Progress", ip));
   if (anyLock === null) hits.push("锁扫描不可判——保守命中");
-  else if (anyLock) hits.push("∃ .lock 文件（板/账本/repo）");
+  else if (anyLock) hits.push("∃ .lock 文件（板/剧情资产/repo）");
   const mislabeled = tickets.find((t) => !TERMINAL_STATES.has(t.state)
     && (t.owner === null || !t.labels.some((l) => AGENT_ORDER.includes(l))));
   if (mislabeled) hits.push(fmtHit("错标：非终态票缺 owner/tier 标签（SKILL §0 逃逸口②）", mislabeled));
@@ -861,22 +860,24 @@ export function newestMtimeUnder(path: string, budget = 512): number | null {
   return newest;
 }
 
-// sweep 锁扫描：板票锁 board/tickets/*.lock + 账本锁 <repo>/ledgers/*.md.lock + repo 写锁
-// <repo>/.git/repo.lock（§18/§15.5/§15.6 三类）。wl-run.lock 在项目数据目录顶层、不在扫描
+// sweep 锁扫描：板票锁 board/tickets/*.lock + 结构化剧情资产锁
+// <repo>/.git/story-assets.lock + repo 写锁 <repo>/.git/repo.lock（§18/§15.5/§15.6）。wl-run.lock 在项目数据目录顶层、不在扫描
 // 面——那是调度器自己的锁。读取失败 ⇒ null（保守）；目录 ENOENT = 无锁可证明。
 export function sweepLockScan(ticketsDir: string, repoPath: string): boolean | null {
   let undetermined = false;
-  for (const dir of [ticketsDir, join(repoPath, "ledgers")]) {
+  for (const dir of [ticketsDir]) {
     try {
       if (readdirSync(dir).some((fn) => fn.endsWith(".lock"))) return true;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
     }
   }
-  try {
-    if (statSync(join(repoPath, ".git", "repo.lock")).isFile()) return true;
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
+  for (const name of ["story-assets.lock", "repo.lock"]) {
+    try {
+      if (statSync(join(repoPath, ".git", name)).isFile()) return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
+    }
   }
   return undetermined ? null : false;
 }
@@ -978,19 +979,18 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       break;
     case "reviewer": {
       // Job C change-gate 现行判据（reviewer-state gateNote 现场裁定，fire #177 实测）：
-      // 有 prev sha ⇒ `git diff --quiet <prev>..HEAD -- episodes/ ledgers/`（任一路径非空
-      // 即开门——账本-only 修订对旧「episodes/ HEAD 比对」判据结构性不可见，假阴性）。
+      // 有 prev sha ⇒ `git diff --quiet <prev>..HEAD -- episodes/ story/assets.v1.json`。
       // base 键序对齐 gateNote：先 lastAuditSha（现行基点），后 lastAuditedEpisodesSha
-      // （旧 schema fallback）。首跑（state 缺失）且 episodes/∪ledgers/ 确证零 commit ⇒
+      // （旧 schema fallback）。首跑（state 缺失）且 episodes/∪story assets 确证零 commit ⇒
       // 可证明无 Job C 活（不是含糊）；其余任何不可判恒保守命中。
       const diff = io.gitDiff ?? gitDiffChanged;
       const prev = stateStr(readStateJson(statePath("reviewer-state.json")), "lastAuditSha", "lastAuditedEpisodesSha");
       let changed: boolean | null;
       if (prev === null) {
-        const cur = git(io.repoPath, "episodes/", "ledgers/");
+        const cur = git(io.repoPath, "episodes/", "story/assets.v1.json");
         changed = cur === null ? null : cur !== "";
       } else {
-        changed = diff(io.repoPath, prev, ["episodes/", "ledgers/"]);
+        changed = diff(io.repoPath, prev, ["episodes/", "story/assets.v1.json"]);
       }
       reasons.push(...laneReviewer(snap.tickets, nowMs, changed));
       break;

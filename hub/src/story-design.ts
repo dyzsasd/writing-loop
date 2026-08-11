@@ -1,6 +1,5 @@
-// Canonical story-design companion for writing-loop. Markdown remains the human-readable
-// screenplay asset; this strict JSON file gives the scheduler, quality gates and Studio one
-// shared, deterministic view of structure, provenance and production constraints.
+// Canonical story design for writing-loop. This strict JSON file is the single source of truth
+// for structure, provenance and production constraints; Studio renders it directly.
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -14,6 +13,10 @@ import { projectEntries, resolveRepoPath, type WlConfig, WsError } from "./works
 
 export const STORY_DESIGN_RELATIVE_PATH = "story/outline.v1.json";
 export const MAX_STORY_DESIGN_BYTES = 4 * 1024 * 1024;
+export const LEGACY_STORY_DUPLICATE_PATHS = [
+  "outline.md", "bible/characters.md", "bible/world.md", "ledgers/foreshadow.md",
+  "ledgers/story-state.md", "ledgers/production.md",
+] as const;
 
 export type StoryDesignStage = "skeleton" | "beats" | "full";
 export type StoryHookType = "H0" | "H1" | "H2" | "H3" | "H4" | "H5" | "H6" | "H7";
@@ -331,15 +334,20 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
   } catch (error) { warnings.push(`原著状态不可读：${error instanceof Error ? error.message : String(error)}`); }
   let story: StoryStudioReadModel["story"] = null;
   let gates: StoryGate[] = [];
+  const entry = projectEntries(config).find(([candidate]) => candidate === key);
+  if (!entry) throw new StoryDesignError(`config.json 无项目 '${key}'`);
+  // S00 duplicate scanning must work before a legacy/minimal project has a complete story policy.
+  // Production-limit validation is deferred until the canonical story JSON exists.
+  const repo = resolveRepoPath(root, entry[1]);
+  const duplicatePaths = LEGACY_STORY_DUPLICATE_PATHS.filter((path) => existsSync(join(repo, path)));
   try {
     const read = readStoryDesign(root, key, config);
     if (read) {
       gates = validateStoryDesign(read.manifest, read.policy, "full");
-      const repo = projectPolicy(root, key, config).repo;
       let catalog: StoryAssetCatalogRead | null = null; let catalogError: string | null = null;
       try { catalog = readStoryAssetCatalog(repo); }
       catch (error) { catalogError = error instanceof Error ? error.message : String(error); }
-      if (catalogError) gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "fail", catalogError));
+      if (catalogError) gates.push(gate("A01", "资产图与故事结构精确绑定", "skeleton", "fail", catalogError));
       else if (!catalog) gates.push(gate("A00", "结构化剧情资产图已建立", "skeleton", "fail", `等待 story-designer 创建 ${STORY_ASSETS_RELATIVE_PATH}`));
       else {
         try {
@@ -350,14 +358,14 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
             scenes: read.manifest.scenes.map((row) => ({ id: row.id, name: row.name })),
             episodes: read.manifest.episodes.map((row) => ({ number: row.number,
               characterIds: [...row.characterIds], sceneIds: [...row.sceneIds] })) });
-          gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "pass",
+          gates.push(gate("A01", "资产图与故事结构精确绑定", "skeleton", "pass",
             `${catalog.manifest.assets.length} assets · revision ${catalog.manifest.revision}`));
           const covered = new Set(catalog.manifest.timeline.map((row) => row.reveal.episode));
           gates.push(gate("A02", "叙事揭示时间线覆盖全部分集", "full",
             covered.size === read.policy.totalEpisodes ? "pass" : "fail",
             `${covered.size}/${read.policy.totalEpisodes} 集有结构化 timeline event`));
         } catch (error) {
-          gates.push(gate("A01", "资产图与大纲及 Markdown 精确绑定", "skeleton", "fail",
+          gates.push(gate("A01", "资产图与故事结构精确绑定", "skeleton", "fail",
             error instanceof Error ? error.message : String(error)));
         }
       }
@@ -367,6 +375,11 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
     }
     else gates = [gate("S00", "结构化故事资产已建立", "skeleton", "fail", `等待 story-designer 创建 ${STORY_DESIGN_RELATIVE_PATH}`)];
   } catch (error) { gates = [gate("S00", "结构化故事资产可解析", "skeleton", "fail", error instanceof Error ? error.message : String(error))]; }
+  gates.unshift(gate("S00", "剧情事实只有一个结构化事实源", "skeleton",
+    duplicatePaths.length === 0 ? "pass" : "fail",
+    duplicatePaths.length === 0
+      ? `${STORY_DESIGN_RELATIVE_PATH} + ${STORY_ASSETS_RELATIVE_PATH}`
+      : `删除重复 Markdown：${duplicatePaths.join("、")}`));
   const passed = gates.filter((row) => row.state === "pass").length;
   const failed = gates.filter((row) => row.state === "fail").length;
   const skipped = gates.filter((row) => row.state === "skipped").length;

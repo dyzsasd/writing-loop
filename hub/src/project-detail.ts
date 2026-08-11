@@ -10,13 +10,7 @@ import { episodeNumberFromFile, parseTicketFrontmatter, type Ticket } from "./st
 import { assertProjectKey, projectDataDir, projectEntries, resolveRepoPath, WsError, type Workspace, type WlProject } from "./workspace.ts";
 
 export const PROJECT_DOCUMENTS = [
-  ["north-star", "北极星", "bible/north-star.md"],
-  ["characters", "人物圣经", "bible/characters.md"],
-  ["world", "世界圣经", "bible/world.md"],
-  ["outline", "总大纲", "outline.md"],
-  ["foreshadow", "伏笔账本", "ledgers/foreshadow.md"],
-  ["story-state", "故事状态", "ledgers/story-state.md"],
-  ["production", "制作账本", "ledgers/production.md"],
+  ["north-star", "创作宪章", "bible/north-star.md"],
 ] as const;
 
 const DETAIL_LIMIT = 1024 * 1024;

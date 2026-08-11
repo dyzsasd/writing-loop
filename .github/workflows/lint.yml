@@ -19,7 +19,7 @@ jobs:
         run: |
           python3 scripts/context-bill.py | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: board-lock 自检（acquire / contend / stale-reclaim / release / 多锁序）
+      - name: board-lock 自检（acquire / contend / stale-reclaim / release / 结构化资产锁）
         run: bash scripts/board-lock.sh --self-test
 
       # 0.5.0 起 wl-run 是 hub/ 的原生 TS 调度器（scripts/test-wl-run.py 已随 Python 版一并

@@ -187,7 +187,7 @@ export function episodeFrontier(repo: string): { max: number; file: string | nul
   return { max, file };
 }
 
-// ─── 陈旧锁扫描：board/*.lock（含 tickets/）、<repo>/ledgers/*.lock、
+// ─── 陈旧锁扫描：board/*.lock（含 tickets/）、<repo>/.git/story-assets.lock、
 //     <repo>/.git/repo.lock、wl-run.lock —— mtime > 60min 标 STALE ────────────────
 export function scanLocks(root: string, projData: string, repo: string, now = Date.now()): LockInfo[] {
   const found: string[] = [];
@@ -196,8 +196,7 @@ export function scanLocks(root: string, projData: string, repo: string, now = Da
   };
   globLocks(join(projData, "board"));
   globLocks(join(projData, "board", "tickets"));
-  globLocks(join(repo, "ledgers"));
-  for (const f of [join(repo, ".git", "repo.lock"), join(projData, "wl-run.lock")]) {
+  for (const f of [join(repo, ".git", "story-assets.lock"), join(repo, ".git", "repo.lock"), join(projData, "wl-run.lock")]) {
     try { if (statSync(f).isFile()) found.push(f); } catch { /* 不在 ⇒ 跳过 */ }
   }
   const out: LockInfo[] = [];

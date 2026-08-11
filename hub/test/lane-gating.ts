@@ -60,7 +60,7 @@ function testParse(): void {
     "---\nid: WL-12\ntitle: x\nstate: In Review\nowner: reviewer\n" +
     "labels: [writing-loop, Feature, episode, reviewer, episode-writer]\n" +
     "assignee: episode-writer (run 3f2a)\nupdated: 2026-07-15T11:00:00Z\n---\n" +
-    "Episode: 12\nDesign: arcs/arc-02.md\nBlocked-by: WL-9\n## Comments\n" +
+    "Episode: 12\nDesign: story/outline.v1.json#episode-012\nBlocked-by: WL-9\n## Comments\n" +
     "Notified: 2026-07-14T00:00:00Z\nNotified: 2026-07-15T00:00:00Z\n", "WL-12.md", 123);
   check("解析：flow labels + 机读行全字段", !t1.malformed && t1.id === "WL-12" && t1.state === "In Review"
     && t1.labels.includes("episode-writer") && t1.assignee === "episode-writer (run 3f2a)"
@@ -160,7 +160,7 @@ function testReviewer(): void {
     laneReviewer([tk({ state: "Todo", labels: ["writing-loop", "blocked", "needs-reviewer"] })], NOW, false).length > 0);
   check("reviewer 孤儿正例：In Review 认领陈旧（§7）",
     laneReviewer([tk({ state: "In Review", assignee: "reviewer (run bb)", updatedMs: NOW - 2 * HOUR })], NOW, false).length > 0);
-  check("reviewer Job C 正例：episodes/∪ledgers/ 自上次审计有改动 ⇒ 命中", laneReviewer([], NOW, true).length > 0);
+  check("reviewer Job C 正例：episodes/∪story assets 自上次审计有改动 ⇒ 命中", laneReviewer([], NOW, true).length > 0);
   check("reviewer Job C 保守：diff 不可判（git 失败/base 无效）⇒ 命中", laneReviewer([], NOW, null).length > 0);
   check("reviewer 反例：板空 + 零 diff ⇒ 谓词为空", laneReviewer([], NOW, false).length === 0);
   check("reviewer 反例：Todo 票不触发（验收门只看 In Review）",
@@ -214,7 +214,7 @@ function testSweep(): void {
   // 标齐 owner+tier 的整洁票（错标即时枝的反面基底）
   const clean: Partial<LaneTicket> = { owner: "reviewer", labels: ["writing-loop", "Feature", "episode", "episode-writer"] };
   check("sweep 正例：∃ In Progress", laneSweep([tk({ state: "In Progress", ...clean })], NOW, false, fresh).length > 0);
-  check("sweep 正例：∃ .lock（板/账本/repo）", laneSweep([], NOW, true, fresh).length > 0);
+  check("sweep 正例：∃ .lock（板/剧情资产/repo）", laneSweep([], NOW, true, fresh).length > 0);
   check("sweep 保守：锁扫描不可判 ⇒ 命中", laneSweep([], NOW, null, fresh).length > 0);
   const ks = ["writing-loop", "Feature", "episode", "keystone", "reviewer", "story-designer"];
   check("sweep 正例：keystone-stall（In Review 停滞 >30min，§1 护栏）",
@@ -382,7 +382,7 @@ function testStateAndGitSeams(): void {
   mkdirSync(join(w.projData, "state"), { recursive: true });
 
   // reviewer Job C：state sha × git diff 接缝（Fix 轮 1 major④：现行判据 =
-  // git diff <prev>..HEAD -- episodes/ ledgers/，任一非空即开门）
+  // git diff <prev>..HEAD -- episodes/ story/assets.v1.json，任一非空即开门）
   writeFileSync(join(w.projData, "state", "reviewer-state.json"),
     JSON.stringify({ lastAuditedEpisodesSha: "aaa111" }));
   const diffSpy: string[][] = [];
@@ -390,10 +390,10 @@ function testStateAndGitSeams(): void {
     diffSpy.push([base, ...paths]);
     return ret;
   };
-  check("reviewer：episodes/∪ledgers/ 零 diff ⇒ gated", !evalLaneGate("reviewer", w.io({ gitDiff: spy(false) })).open);
+  check("reviewer：episodes/∪story assets 零 diff ⇒ gated", !evalLaneGate("reviewer", w.io({ gitDiff: spy(false) })).open);
   check("reviewer：diff 判据收到旧 schema fallback 基点 + 双 pathspec",
-    diffSpy.length === 1 && diffSpy[0].join(" ") === "aaa111 episodes/ ledgers/", JSON.stringify(diffSpy));
-  check("reviewer：有 diff（账本-only 修订同样可见）⇒ open", evalLaneGate("reviewer", w.io({ gitDiff: spy(true) })).open);
+    diffSpy.length === 1 && diffSpy[0].join(" ") === "aaa111 episodes/ story/assets.v1.json", JSON.stringify(diffSpy));
+  check("reviewer：有 diff（assets-only 修订同样可见）⇒ open", evalLaneGate("reviewer", w.io({ gitDiff: spy(true) })).open);
   check("reviewer：diff 不可判（git 失败/base 无效）⇒ 保守 open", evalLaneGate("reviewer", w.io({ gitDiff: spy(null) })).open);
   writeFileSync(join(w.projData, "state", "reviewer-state.json"),
     JSON.stringify({ lastAuditSha: "ccc333", lastAuditedEpisodesSha: "aaa111" }));
@@ -402,7 +402,7 @@ function testStateAndGitSeams(): void {
   check("reviewer：基点键序对齐 gateNote——lastAuditSha 优先于旧 lastAuditedEpisodesSha",
     diffSpy.length === 1 && diffSpy[0][0] === "ccc333", JSON.stringify(diffSpy));
   rmSync(join(w.projData, "state", "reviewer-state.json"));
-  check("reviewer：state 缺失 + episodes/∪ledgers/ 确证零 commit ⇒ 可证明无活，gated",
+  check("reviewer：state 缺失 + episodes/∪story assets 确证零 commit ⇒ 可证明无活，gated",
     !evalLaneGate("reviewer", w.io({ gitSha: () => "" })).open);
   check("reviewer：state 缺失 + 有 commit ⇒ 保守 open",
     evalLaneGate("reviewer", w.io({ gitSha: () => "abc" })).open);
@@ -471,9 +471,8 @@ function testReflectLessonsMigration(): void {
   rmSync(w.ws, { recursive: true, force: true });
 }
 
-// Fix 轮 1 major④回归：账本-only 修订必须对 Job C change-gate 可见（fire #177 实测旧
-// 「episodes/ HEAD 比对」判据假阴性）。真 git 仓库、不注接缝——判据全链路真跑。
-function testJobCLedgersOnlyCommit(): void {
+// 结构化资产-only 修订必须对 Job C change-gate 可见。真 git 仓库、不注接缝。
+function testJobCStructuredAssetsOnlyCommit(): void {
   const w = gateWorld();
   const g = (...a: string[]): { status: number | null; stdout: string } => {
     const r = spawnSync("git", ["-C", w.repo, "-c", "user.email=t@t.t", "-c", "user.name=t",
@@ -481,7 +480,7 @@ function testJobCLedgersOnlyCommit(): void {
     return { status: r.status, stdout: (r.stdout ?? "").trim() };
   };
   if (g("--version").status !== 0) {
-    check("Job C ledgers-only：本机无 git —— 门控本会保守放行，用例跳过", true);
+    check("Job C assets-only：本机无 git —— 门控本会保守放行，用例跳过", true);
     rmSync(w.ws, { recursive: true, force: true });
     return;
   }
@@ -494,11 +493,11 @@ function testJobCLedgersOnlyCommit(): void {
   mkdirSync(join(w.projData, "state"), { recursive: true });
   writeFileSync(join(w.projData, "state", "reviewer-state.json"), JSON.stringify({ lastAuditSha: base }));
   check("Job C（真 git）：审计基点后零改动 ⇒ gated", !evalLaneGate("reviewer", io).open);
-  mkdirSync(join(w.repo, "ledgers"), { recursive: true });
-  writeFileSync(join(w.repo, "ledgers", "story-state.md"), "ep-001 末态\n");
-  g("add", "-A"); g("commit", "-q", "-m", "ledgers-only 修订");
+  mkdirSync(join(w.repo, "story"), { recursive: true });
+  writeFileSync(join(w.repo, "story", "assets.v1.json"), "{\"revision\":1}\n");
+  g("add", "-A"); g("commit", "-q", "-m", "structured-assets-only 修订");
   const gOpen = evalLaneGate("reviewer", io);
-  check("Job C（真 git）：ledgers-only commit ⇒ open（旧 episodes/ HEAD 判据的假阴性已修）",
+  check("Job C（真 git）：structured-assets-only commit ⇒ open",
     gOpen.open && gOpen.reasons.some((r) => r.includes("Job C")), gOpen.reasons.join("；"));
   writeFileSync(join(w.projData, "state", "reviewer-state.json"),
     JSON.stringify({ lastAuditSha: g("rev-parse", "HEAD").stdout.slice(0, 7) }));  // 7 位短 sha 实测形
@@ -535,11 +534,10 @@ function testSweepLocksAndShowrunnerBaseline(): void {
   writeFileSync(join(w.boardDir, "WL-1.md.lock"), "holder pid=1 at 2026-07-15T11:00:00Z\n");
   check("sweep：板票锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
   rmSync(join(w.boardDir, "WL-1.md.lock"));
-  mkdirSync(join(w.repo, "ledgers"), { recursive: true });
-  writeFileSync(join(w.repo, "ledgers", "foreshadow.md.lock"), "x");
-  check("sweep：账本锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
-  rmSync(join(w.repo, "ledgers", "foreshadow.md.lock"));
   mkdirSync(join(w.repo, ".git"), { recursive: true });
+  writeFileSync(join(w.repo, ".git", "story-assets.lock"), "x");
+  check("sweep：结构化剧情资产锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
+  rmSync(join(w.repo, ".git", "story-assets.lock"));
   writeFileSync(join(w.repo, ".git", "repo.lock"), "x");
   check("sweep：repo 写锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
   rmSync(join(w.repo, ".git", "repo.lock"));
@@ -759,7 +757,7 @@ const cases: Array<[string, () => void]> = [
   ["testEdgeShapeUnidirectional", testEdgeShapeUnidirectional],
   ["testStateAndGitSeams", testStateAndGitSeams],
   ["testReflectLessonsMigration", testReflectLessonsMigration],
-  ["testJobCLedgersOnlyCommit", testJobCLedgersOnlyCommit],
+  ["testJobCStructuredAssetsOnlyCommit", testJobCStructuredAssetsOnlyCommit],
   ["testSweepCadenceKnob", testSweepCadenceKnob],
   ["testSweepLocksAndShowrunnerBaseline", testSweepLocksAndShowrunnerBaseline],
   ["testConfigKnob", testConfigKnob],

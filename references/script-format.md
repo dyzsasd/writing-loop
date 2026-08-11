@@ -10,7 +10,7 @@
 剧本头 + 第一付费卡点前的全部正文（通常前 10 集）——writing-loop 的第一个里程碑
 「一卡包」即此物，用于先投放测数据、达标再续产。
 
-剧本头字段（由 `bible/` 与 `outline.md` 汇编生成，不手写第二份）：
+剧本头字段（由 North Star 与 `story/*.json` 确定性渲染，不手写第二份）：
 
 | 字段 | 要求 | 示例来源 |
 |---|---|---|
@@ -25,7 +25,7 @@
 | 人设卡 | 见 §2 | 通例 |
 | 分段大纲 | 按集区间的宏观走向（1-8 / 8-23 / …） | 《村霸》迷你圣经 |
 
-## 2. 人设卡规格（`bible/characters.md`）
+## 2. 人设规格（`story/assets.v1.json` 的 character assets）
 
 每个具名角色一张卡，字段：
 
@@ -82,12 +82,11 @@ AI 漫剧 profile 附加：正文以**【画面】为原子单元**——每个�
 ---
 ep: 12
 arc: arc-02
-beat-card: arcs/arc-02.md#ep-012      # 本集节拍单指针
-beat-card-hash: a3f29c01d4e2           # 写作时刻 arc 文件的内容哈希（sha256 前 12 位）——
-                                       #   doctor 比对当前 arc 文件即得「依据已过期」的集清单
+beat-card: story/outline.v1.json#episode-012
+beat-card-hash: a3f29c01d4e2           # 写作时刻结构 JSON 的内容哈希（sha256 前 12 位）
 hook-type: H1                          # 集尾钩型（craft-rules R1 八类）
 words: 1043
-foreshadow-ops: [refresh F-03]         # 本集账本操作（plant/refresh/payoff + ID）
+foreshadow-ops: [refresh F-03]         # 本集 asset lifecycle 操作（plant/refresh/payoff + ID）
 keystone: paywall-1-minus-1            # 关键集标记（无则省略）
 mode: direct-write                     # 仅升级重写票标注（fail 计数的机械载体）
 written-by: episode-writer (run 3f2a)  # 生成指纹
@@ -98,16 +97,16 @@ rules-version: craft-rules@1 script-format@1
 
 自检门校验（机器，格式门定位——**叙事实质验收是 reviewer 的带引文断言，机读块
 自报字段不作叙事证据**）：frontmatter 完整、`hook-type` 与正文尾钩一致、
-`foreshadow-ops` 与 `ledgers/foreshadow.md` 的当集条目一致、`words` 在 profile
-字数带内、场景/具名角色 ∈ `ledgers/production.md` 注册表。
+`foreshadow-ops` 与 `story/assets.v1.json` 的当集 lifecycle 一致、`words` 在 profile
+字数带内、场景/具名角色 ∈ `story/outline.v1.json` 注册表。
 
 ## 5. 一致性 spec（防跨集漂移）
 
-- **战力表 + 表现规则**（`bible/world.md`）：每个力量层级配可拍摄的表现规则
+- **战力表 + 表现规则**（world assets/facts）：每个力量层级配可拍摄的表现规则
   （如「同级打斗 ≥10 拍，跨大级秒杀 ≤3 拍」「打斗时长=实力差」）。审读按表校验，
   禁止战力忽高忽低。
-- **数字锚点**：贯穿性数值（欠款五十万、心跳 60、融合率 80%）在账本登记，
-  每次出现必须与 `ledgers/story-state.md` 当前值一致。
+- **数字锚点**：贯穿性数值（欠款五十万、心跳 60、融合率 80%）作为 asset facts 登记，
+  每次出现必须与当前 `state=current` 值一致。
 - **重叠帧承接**：下集开场重放上集末 1-2 拍（可逐字重复）后再推进——集间承接的
   默认手法；跳时间用【字幕：三天后】显式声明。
 

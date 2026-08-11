@@ -75,9 +75,6 @@ try {
     },
   }, null, 2) + "\n");
   writeFileSync(join(repo, "bible", "north-star.md"), "## 一句话故事\n她写下的每一场戏都会成真。\n");
-  writeFileSync(join(repo, "bible", "characters.md"), "# 《{片名}》人物卡\n\n## {主角名}\n");
-  writeFileSync(join(repo, "bible", "world.md"), "# 《{片名}》世界观\n\n{时代/地点/社会规则}\n");
-  writeFileSync(join(repo, "outline.md"), "# 《{片名}》总大纲\n\n## 分段大纲\n");
   writeFileSync(join(repo, "episodes", "ep-001.md"), "# 第一集：纸上的雨\n");
   writeFileSync(join(tickets, "WL-1.md"), `---
 id: WL-1
@@ -149,11 +146,12 @@ Episode: 1
 
   const page = await fetch(`${base}/p/demo?notice=${encodeURIComponent("<img src=x onerror=alert(1)>")}`);
   const pageHtml = await page.text();
+  if (page.status !== 200) console.error(`project page ${page.status}: ${pageHtml}`);
   ok(page.status === 200 && pageHtml.includes("故事脊柱") && pageHtml.includes("等待你的决定") && pageHtml.includes("审读正在工作"), "项目页呈现创作成熟度、人工门与 live agent");
   ok(pageHtml.includes("原著分析") && pageHtml.includes("故事结构") && pageHtml.includes("人物设定")
     && pageHtml.includes("美术资产") && pageHtml.includes("分集与质量"),
   "项目概览提供完整的创作工作台信息架构，不再只呈现看板");
-  ok(pageHtml.includes("一句话故事已定") && pageHtml.includes("总大纲尚未过门"), "成熟度使用真实创作信号，不把已生成的大纲模板当作过门");
+  ok(pageHtml.includes("一句话故事已定") && pageHtml.includes("故事结构尚未过门"), "成熟度使用结构化创作信号，不把脚手架当作过门");
   ok(!pageHtml.includes("<img src=x") && pageHtml.includes("&lt;img src=x"), "notice 参数不会注入 HTML");
 
   writeFileSync(join(repo, "bible", "north-star.md"), "## 一句话故事（Vision）\n<!-- 等待立项采访写入 -->\n");
@@ -190,8 +188,7 @@ Episode: 1
   "project-scoped activity API 合并 Ticket 历史、live overlay，并诚实标成本未知");
   ok((await fetch(`${base}/api/projects/demo/activity?before=not-json`)).status === 400, "损坏 activity cursor 属于客户端 400，而非配置冲突 409");
   ok((await fetch(`${base}/api/projects/demo/resources/ticket/%252e%252e`)).status === 400, "资源 API 在 registry 查询前拒绝双编码 dot-dot id");
-  rmSync(join(repo, "bible", "characters.md"));
-  ok((await fetch(`${base}/api/projects/demo/resources/document/characters`)).status === 404, "allowlisted 文档在扫描后消失时返回 404 而非原始 500");
+  ok((await fetch(`${base}/api/projects/demo/resources/document/characters`)).status === 404, "旧人物 Markdown 不再属于文档 registry");
 
   ok(await rawStatus(port, "evil.example") === 400, "Host guard 阻断 DNS rebinding 风格请求");
   const crossed = await fetch(`${base}/p/demo/toggle`, {

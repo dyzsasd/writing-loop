@@ -14,8 +14,8 @@ description: >-
 
 ## 使命
 
-从 `Todo` 拾自己 tier（`episode-writer`）的单集票：先读节拍单与账本，写正文，过自检门，
-一个原子 commit 交付（正文 + 账本），贴账本 delta 声明，交 reviewer 在 In Review 验收。
+从 `Todo` 拾自己 tier（`episode-writer`）的单集票：先读结构化节拍与有界资产 Context Pack，写正文，过自检门，
+一个原子 commit 交付（正文 + `story/assets.v1.json` delta），贴剧情资产 delta 声明，交 reviewer 在 In Review 验收。
 一切协作只经工单 state + label + comment + 机读行（§0）。你**从不**设计节拍单、spawn
 子票、路由工作；spec 或 `Design:` 指针缺失/断裂 ⇒ 停靠（block），绝不猜。
 
@@ -74,19 +74,18 @@ fire 每次转态都写后必读、labels 重传全集（§10）。起草预期�
 ### Step 3 — 先读（写字之前，缺一即误写风险）
 ⓪ 先运行 `writing-loop story context --project <project> --ticket <ID> --agent episode-writer
 --json`。它按票面 Episode、outline 引用、资产关系、timeline 与字节预算生成唯一结构化
-Context Pack；只从 pack 的 assets/timeline/Markdown 指针取本票上下文。命令失败、digest/
+Context Pack；只从 pack 的 assets/timeline 取本票上下文。命令失败、digest/
 引用漂移或 required asset 超预算 ⇒ block：`needs-designer` + `Bail-shape: info-needed`，绝不
-退回扫描整份 bible/ledger。随后读票面 `## Context-pack`（§6）——它是建票方的人读导读，
+退回扫描整份创作宪章或资产图。随后读票面 `## Context-pack`（§6）——它是建票方的人读导读，
 **优先按包读**（指针清单 + 可直接采信
 的关键事实 + 禁读提示）；越包读大文件不违纪，但须在交付评论说明理由（信号回流建票方）。
-包有误不豁免你对 ground truth 的核对义务（§6）。① `Design:` 指向节拍单的 `#ep-NNN` 节
+包有误不豁免你对 ground truth 的核对义务（§6）。① `Design:` 必须指向
+`story/outline.v1.json#episode-NNN`
 ——指针断（行缺/文件缺/节缺）⇒ block：`blocked` +
 `needs-designer`，评论首行 `Bail-shape: info-needed`，清 assignee 回 `Todo`，取下一候选
-（§9 节拍类断针路由 designer）。② 三账本不再整份通读：只读结构化 pack 列出的精确
-Markdown 指针/锚点；`ledgers/{foreshadow,story-state,production}.md` 的未选部分明确禁读。
-③ `episodes/ep-(N-1).md` 末帧（重叠帧原料，script-format §5）。④ bible 冻结层相关节
-（characters **声纹卡**——本集在场主要角色的语域/禁忌语/样句/表演提示锚，节拍卡
-「声纹锚」字段引用它——+ 弧光、world 战力与数字锚点）；north-star **只读「创作红线
+（§9 节拍类断针路由 designer）。② 人物、世界、地点、伏笔、连续性和当前状态只读 pack；
+禁止回退扫描旧 bible/ledger/outline Markdown。③ `episodes/ep-(N-1).md` 末帧（重叠帧原料，
+script-format §5）。④ north-star **只读「创作红线
 （Non-goals）」+「定位」两节**（其余节明示不读——那是 showrunner/设计层的上下文税）。
 ⑤ 本项目 genre profile
 （craft-rules 附录 A——门禁只认「本项目 profile 的 X」，不写死数值）。
@@ -99,16 +98,16 @@ Markdown 指针/锚点；`ledgers/{foreshadow,story-state,production}.md` 的未
   三轴推进 ≥2、R6.3 第 1 集黄金 3 秒、R6.4 爽点密度、R8.2 每集 1-2 句候选金句。
 - 重叠帧承接：开场重放上集末 1-2 拍再推进；跳时间【字幕】显式声明（script-format §5）。
 - 三分类边界（§3）：节拍单未列但不越界的创作增量合法且鼓励；EXTRA 收窄 = 仅「违反本集
-  禁写」+「与账本事实冲突」。
+  禁写」+「与结构化 asset fact 冲突」。
 - 「合法但不够狠」⇒ 照写不误 + 评论「节拍修正提案」+ `needs-designer` 标签，不阻塞交付
-  （§21a-episode.3）；你绝不自改 `arcs/` 节拍单。
+  （§21a-episode.3）；你绝不自改 `story/outline.v1.json` 的设计契约。
 
 **修订票（Bug）额外义务**：
 - fail-revert 义务只属 `review failed:` supersede 跟进票：第一步 = `git revert` 失败稿
   commit（§15.4；revert 亦是落 commit——repo 写锁内做，§15.6），再按 notes 改写。
   doctor/evaluator 对已 Done 集 file 的修订 Bug **绝不 revert 已验收 canon**——按 §19
-  涟漪协议在现有正文与账本上正常修改。
-- §19 涟漪分析：改前 grep 将改动的账本条目在 `ep-(N+1)..` 的全部引用，评论列**受影响集
+  涟漪协议在现有正文与结构化事实图上正常修改。
+- §19 涟漪分析：改前查询将改动的 asset/fact 在 `ep-(N+1)..` 的全部引用，评论列**受影响集
   清单**；⊆ ep-N±1 ⇒ 完成修订（邻集复核票由 reviewer file，你不开）；超邻集 ⇒ 转
   `blocked` + `needs-showrunner`（`Bail-shape: scope-design`，§19.3），绝不自行开票。
 - 已投放水位：`Episode ≤ airedThrough` 禁追溯改——改写为前向修补票或人工停靠（§19.7）。
@@ -117,18 +116,18 @@ Markdown 指针/锚点；`ledgers/{foreshadow,story-state,production}.md` 的未
 
 ### Step 5 — 自检门（§15.3）
 结果显式写入工单评论（自述作定位不作证据，§3）。机器项：frontmatter 完整实符 + 字数带 +
-场景/具名角色 ∈ production 注册表（script-format §4 校验清单）、格式反面 lint
+场景/具名角色 ∈ story design 注册表（script-format §4 校验清单）、格式反面 lint
 （script-format §6）、合规 lint（R10a）。三分类自证（EXTRA 收窄，§3）+ 金句候选（R8.2）。
 任一机器项红 ⇒ 修正再自检；修不动 ⇒ 按 §9 block，不带病交付。
 
 ### Step 6 — 交付（§15 交付义务，缺一 = 审读门 MISSING fail）
-① 账本先更新（三账本全部回写）；账本锁走 §15.5 固定序（`scripts/board-lock.sh`；拿不到
-⇒ 票留 In Progress 下 fire 续）。② 单 commit 原子性（§15.1）：正文 + 账本同一 commit、
-message 带票号；stage+commit 包在 repo 写锁内（§15.6）；工单转态永远在 commit 之后。
-③ 账本 delta 声明（§15.2）：按列断言真值、每列附正文行号（账本不得自证 §15——
+① 更新 `story/assets.v1.json` 中本集事实、伏笔生命周期与 timeline（revision +1），然后运行
+`writing-loop story status --project <project> --json`。② 单 commit 原子性（§15.1）：正文 +
+结构化事实 delta 同一 commit、message 带票号；stage+commit 包在 repo 写锁内（§15.6）。
+③ 结构化 delta 声明（§15.2）：按 fact/event 断言真值、每项附正文行号（资产图不得自证 §15——
 「无冲突」以正文为准，热列必重读正文），「无变化」也显式声明。④ 转 In Review：
 owner 恒 `reviewer`（§4），重传全集 labels，评论记 commit sha，写后重读验证。
-frontmatter 指纹全字段按 script-format §4（`beat-card-hash` = 写作时刻 arc 文件内容
+frontmatter 指纹全字段按 script-format §4（`beat-card-hash` = 写作时刻 `story/outline.v1.json`
 哈希，等）。回 Step 1 直到本 fire 上限。
 
 > 验收 fail 你不驱动，但要知道走向：§21a-fail 三级路由（notes 回炉票回你——直进 Todo、
@@ -142,11 +141,11 @@ frontmatter 指纹全字段按 script-format §4（`beat-card-hash` = 写作时�
 - 每 fire 至多 N 张（默认 2）；廉价梳理结果（block/跳过/Duplicate）不计上限。
 - 一票 = 一集 = 一个原子 commit（§15.1）；绝不裹挟无关改动。
 - 只拾自己 tier；keystone、未标 tier、`Backlog` 暂存、`Mode: direct-write` 都不碰。
-- 先读节拍单再动笔；指针断即 block（§9），绝不猜节拍。
+- 先读结构化本集设计再动笔；指针断即 block（§9），绝不猜节拍。
 - 执行层不设计不路由：设计决定 ⇒ block 路由 `needs-designer`/`needs-showrunner`（§9）；
   绝不 spawn 子票、file 升级票、或「悄悄设计」绕过欠 spec 的票。
-- 写作范围仅限本票该集及其账本 delta：不改 bible 冻结层、outline、别集正文、`arcs/`
-  节拍单（那是 designer 的 design doc），不追溯改已投放集（§19.7）。
+- 写作范围仅限本票该集及其 `story/assets.v1.json` fact/event delta：不改
+  `story/outline.v1.json`、别集正文或创作宪章，不追溯改已投放集（§19.7）。
 - §17 不自改治理文件（conventions/SKILL/规则本体/genre profile）；结构性诉求走 workspace
   系统改进收件箱，绝不创建项目 Ticket。
 - dry-run（§12）：不写板、不 commit、不推送；人类专属决定以停靠票呈现（§9），不聊天等待。
@@ -154,4 +153,4 @@ frontmatter 指纹全字段按 script-format §4（`beat-card-hash` = 写作时�
 ## 3. 收尾报告（§22）
 
 daily 一行（agent/时间/干了什么/票号）：写了哪几集、交付票 + commit sha、跳过前置的候选、
-block 与路由去向、账本锁竞争顺延。纯 no-op fire 不写行；dry-run 标注 preview。
+block 与路由去向、asset revision 冲突顺延。纯 no-op fire 不写行；dry-run 标注 preview。

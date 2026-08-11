@@ -280,10 +280,25 @@ function lane(project: ProjectSnapshot, state: string, color: string, base: stri
   return `<section class="lane"><h3><i style="--state:${color}"></i>${esc(STATE_LABEL[state] ?? state)}<span>${tickets.length}</span></h3>${tickets.length ? tickets.map((ticket) => task(base, project.key, ticket)).join("") : `<div class="lane-empty">这一栏现在是空的。</div>`}</section>`;
 }
 
-function docsPanel(project: ProjectSnapshot, base: string): string {
-  return `<section class="panel"><div class="panel-head"><h2>剧情资产</h2><span class="aside">${project.documents.filter((doc) => doc.exists).length}/${project.documents.length}</span></div><div class="doc-list">${project.documents.map((doc) => doc.exists
-    ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/document/${enc(doc.key)}`))}"><i class="doc-mark"></i><div><b>${esc(doc.label)}</b><small>${esc(doc.path)}</small></div><span>${Math.max(1, Math.round(doc.bytes / 1024))} KB</span></a>`
-    : `<div class="doc-row"><i class="doc-mark"></i><div><b>${esc(doc.label)}</b><small>${esc(doc.path)}</small></div><span>未建立</span></div>`).join("")}</div></section>`;
+function storyAuthorityPanel(project: ProjectSnapshot, story: StoryStudioReadModel | undefined, base: string): string {
+  const charter = project.documents[0];
+  const design = story?.story;
+  const catalog = design?.catalog;
+  const rows = [
+    charter?.exists
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/document/north-star`))}"><i class="doc-mark"></i><div><b>创作宪章</b><small>bible/north-star.md · 方向与红线，不存剧情事实</small></div><span>${Math.max(1, Math.round(charter.bytes / 1024))} KB</span></a>`
+      : `<div class="doc-row"><i class="doc-mark"></i><div><b>创作宪章</b><small>bible/north-star.md</small></div><span>未建立</span></div>`,
+    design
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>故事结构</b><small>story/outline.v1.json · 唯一结构事实源</small></div><span>${design.manifest.episodes.length} 集</span></a>`
+      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>故事结构</b><small>story/outline.v1.json</small></div><span>待建立</span></a>`,
+    catalog
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>剧情资产图</b><small>story/assets.v1.json · 人物、世界、伏笔与连续性</small></div><span>${catalog.manifest.assets.length} 项</span></a>`
+      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>剧情资产图</b><small>story/assets.v1.json</small></div><span>待建立</span></a>`,
+    catalog
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/timeline`))}"><i class="doc-mark"></i><div><b>双轨时间线</b><small>由同一资产图直接渲染</small></div><span>${catalog.manifest.timeline.length} 事件</span></a>`
+      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/timeline`))}"><i class="doc-mark"></i><div><b>双轨时间线</b><small>不再维护独立台账</small></div><span>待建立</span></a>`,
+  ];
+  return `<section class="panel"><div class="panel-head"><h2>故事事实源</h2><p>一个事实只写一次</p><span class="aside">${catalog ? "STRUCTURED" : "BUILDING"}</span></div><div class="doc-list">${rows.join("")}</div></section>`;
 }
 
 function roomPanel(project: ProjectSnapshot): string {
@@ -416,12 +431,12 @@ function storyCockpit(model: StoryStudioReadModel | undefined): string {
 
 export function projectPage(snapshot: WorkspaceSnapshot, project: ProjectSnapshot, notice?: string, extras: ProjectPageExtras = {}, base = ""): string {
   // add-script 会先生成完整模板，因此“文件存在”不等于创作成熟度。这里只展示可证实的
-  // 创作信号：一句话故事、已过门的大纲/实际 arc、正文，以及定稿或评估记录。
+  // 创作信号：一句话故事、已过门的结构化设计、正文，以及定稿或评估记录。
   const doneWithLabel = (label: string): boolean => project.board.tickets.some((ticket) =>
     ticket.state === "Done" && ticket.labels.includes(label));
   const northStarReady = project.logline !== null;
   const outlineTicketDone = doneWithLabel("outline");
-  const outlineReady = project.progress.arcs > 0 || outlineTicketDone;
+  const outlineReady = project.progress.storyArcs > 0 || outlineTicketDone;
   const storyReady = project.progress.frontier > 0;
   const reviewedEpisode = project.board.tickets.some((ticket) =>
     ticket.state === "Done" && (ticket.episode !== null || ticket.labels.includes("episode")));
@@ -435,8 +450,8 @@ export function projectPage(snapshot: WorkspaceSnapshot, project: ProjectSnapsho
   <section class="project-hero"><div><div class="eyebrow">${esc(format(project))}${project.genre ? ` · ${esc(project.genre)}` : ""}</div><h1>${esc(project.title)}</h1><p class="logline">${esc(project.logline ?? "一句话故事仍待总编剧定稿。")}</p><div class="path">${esc(project.repoPath)}</div></div><div class="folio"><strong>${String(project.progress.frontier).padStart(2, "0")}</strong><span>CURRENT EPISODE / ${total ?? "OPEN"}</span><div class="mini-progress"><i style="width:${progressWidth}%"></i></div><span>${pct(project.progress.percent)} COMPLETE</span></div></section>
   ${projectNav(project, "overview", base)}${storyCockpit(extras.story)}
   <div class="toolbar"><form method="post" action="${esc(at(base, `/p/${enc(project.key)}/toggle`))}"><input type="hidden" name="enabled" value="${project.enabled ? "false" : "true"}"><button class="btn${project.enabled ? " danger" : ""}" type="submit">${project.enabled ? "暂停这部剧" : "恢复创作"}</button></form><a class="btn" href="${esc(at(base, `/api/snapshot?project=${enc(project.key)}`))}">查看 JSON</a><span class="chip">${project.enabled ? "正在创作" : "已暂停"}</span>${project.warnings.length ? `<span class="chip warn">${project.warnings.length} 项有界读取提示</span>` : ""}</div>
-  <section class="panel" style="margin-bottom:20px"><div class="panel-head"><h2>故事脊柱</h2><p>不是工程阶段，而是创作成熟度</p></div><div class="spine"><div class="spine-item ${northStarReady ? "ok" : "warn"}"><b>核心方向</b><span>${northStarReady ? "一句话故事已定" : "核心方向仍待定"}</span></div><div class="spine-item ${outlineReady ? "ok" : "warn"}"><b>结构与卡点</b><span>${project.progress.arcs > 0 ? `${project.progress.arcs} 个叙事单元已建立` : outlineTicketDone ? "总大纲已过定稿门" : "总大纲尚未过门"}</span></div><div class="spine-item ${storyReady ? "ok" : "warn"}"><b>分集正文</b><span>${storyReady ? `推进到第 ${project.progress.frontier} 集` : "等待第一集落笔"}</span></div><div class="spine-item ${reviewReady ? "ok" : "warn"}"><b>审读与评估</b><span>${project.progress.evaluations > 0 ? `${project.progress.evaluations} 份里程碑评估` : reviewedEpisode ? "已有分集定稿记录" : "尚未形成验收记录"}</span></div></div></section>
-  <div class="workspace-grid"><div class="stack"><section class="panel"><div class="panel-head"><h2>创作任务</h2><p>从灵感到定稿</p><span class="aside">${project.board.open} open</span></div><div class="lanes">${lane(project, "Backlog", "var(--muted)", base)}${lane(project, "Todo", "var(--gold)", base)}${lane(project, "In Progress", "var(--blue)", base)}${lane(project, "In Review", "var(--accent)", base)}</div></section>${episodesPanel(project, base)}${productionPanel(extras.production, extras.productionControl)}${activityPanel(project, extras.activity, base)}</div><aside class="stack"><section class="panel"><div class="panel-head"><h2>等待你的决定</h2><span class="aside">${project.board.needsAttention.length}</span></div>${notices}</section>${roomPanel(project)}${docsPanel(project, base)}${reportsPanel(project, extras.reports, extras.evaluations, base)}</aside></div>`;
+  <section class="panel" style="margin-bottom:20px"><div class="panel-head"><h2>故事脊柱</h2><p>不是工程阶段，而是创作成熟度</p></div><div class="spine"><div class="spine-item ${northStarReady ? "ok" : "warn"}"><b>核心方向</b><span>${northStarReady ? "一句话故事已定" : "核心方向仍待定"}</span></div><div class="spine-item ${outlineReady ? "ok" : "warn"}"><b>结构与卡点</b><span>${project.progress.storyArcs > 0 ? `${project.progress.storyArcs} 个结构化叙事单元已建立` : outlineTicketDone ? "故事结构已过定稿门" : "故事结构尚未过门"}</span></div><div class="spine-item ${storyReady ? "ok" : "warn"}"><b>分集正文</b><span>${storyReady ? `推进到第 ${project.progress.frontier} 集` : "等待第一集落笔"}</span></div><div class="spine-item ${reviewReady ? "ok" : "warn"}"><b>审读与评估</b><span>${project.progress.evaluations > 0 ? `${project.progress.evaluations} 份里程碑评估` : reviewedEpisode ? "已有分集定稿记录" : "尚未形成验收记录"}</span></div></div></section>
+  <div class="workspace-grid"><div class="stack"><section class="panel"><div class="panel-head"><h2>创作任务</h2><p>从灵感到定稿</p><span class="aside">${project.board.open} open</span></div><div class="lanes">${lane(project, "Backlog", "var(--muted)", base)}${lane(project, "Todo", "var(--gold)", base)}${lane(project, "In Progress", "var(--blue)", base)}${lane(project, "In Review", "var(--accent)", base)}</div></section>${episodesPanel(project, base)}${productionPanel(extras.production, extras.productionControl)}${activityPanel(project, extras.activity, base)}</div><aside class="stack"><section class="panel"><div class="panel-head"><h2>等待你的决定</h2><span class="aside">${project.board.needsAttention.length}</span></div>${notices}</section>${roomPanel(project)}${storyAuthorityPanel(project, extras.story, base)}${reportsPanel(project, extras.reports, extras.evaluations, base)}</aside></div>`;
   return shell(project.title, body, snapshot, project, base);
 }
 
@@ -455,7 +470,7 @@ function sourceSection(model: StoryStudioReadModel): string {
 
 function storySection(model: StoryStudioReadModel): string {
   const story = model.story;
-  if (!story) return `${sectionHeader("Story architecture", "故事结构", "等待 Story Designer 把人读大纲投影成严格的 story/outline.v1.json。", "0", "EPISODES MAPPED")}<section class="panel"><div class="empty">质量门 S00 尚未通过；看板仍是当前任务真相源。</div></section>`;
+  if (!story) return `${sectionHeader("Story architecture", "故事结构", "等待 Story Designer 直接建立唯一结构事实源 story/outline.v1.json。", "0", "EPISODES MAPPED")}<section class="panel"><div class="empty">质量门 S00 尚未通过；看板仍是当前任务真相源。</div></section>`;
   const decisions = (["keep", "cut", "merge", "risks"] as const).flatMap((kind) => story.manifest.adaptation[kind].map((row) => ({ kind, ...row })));
   const decisionLabels = { keep: "保留", cut: "删除", merge: "合并", risks: "风险" } as const;
   return `${sectionHeader("Story architecture", "故事结构", story.manifest.adaptation.core, String(story.assets.counts.episodes), "EPISODES MAPPED")}

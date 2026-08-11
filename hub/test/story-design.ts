@@ -76,11 +76,23 @@ try {
   ok(!studio.summary.readyForEpisodes && studio.gates.some((row) => row.id === "A00" && row.state === "fail")
     && studio.story?.assets.counts.episodes === 6,
   "只有大纲、没有结构化剧情资产图时 Studio fail-closed，不把半套事实源伪装成可写分集");
+  mkdirSync(join(tmp, "waiting"), { recursive: true });
+  const waiting = buildStoryStudioReadModel(tmp, "waiting", {
+    version: 1, projects: { waiting: { title: "等待结构", repoPath: "waiting" } },
+  });
+  ok(waiting.story === null && waiting.gates.some((row) => row.id === "S00" && row.state === "pass"),
+  "尚无结构 JSON 的存量项目可先做单一来源扫描，不因缺制作 policy 让 Studio 整页失败");
   writeFileSync(join(tmp, "repo", "story", "assets.v1.json"), "{\"version\":1,\"broken\":true}\n");
   const corruptAssets = buildStoryStudioReadModel(tmp, "demo", config);
   ok(corruptAssets.story?.manifest.episodes.length === 6
     && corruptAssets.gates.some((row) => row.id === "A01" && row.state === "fail"),
   "资产图损坏时保留可读大纲并单独把 A01 标红，不让整个 Story Studio 消失");
+  mkdirSync(join(tmp, "repo", "bible"), { recursive: true });
+  writeFileSync(join(tmp, "repo", "bible", "characters.md"), "# 重复人物表\n");
+  const duplicateSource = buildStoryStudioReadModel(tmp, "demo", config);
+  ok(duplicateSource.gates.some((row) => row.id === "S00" && row.state === "fail"
+    && row.detail.includes("bible/characters.md")) && !duplicateSource.summary.readyForEpisodes,
+  "旧 Markdown 镜像一旦出现就触发单一事实源门并阻断分集写作");
 } finally { rmSync(tmp, { recursive: true, force: true }); }
 
 console.log(fails === 0 ? "\nSTORY_DESIGN_OK" : `\n${fails} 项检查失败`);

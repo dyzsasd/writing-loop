@@ -2,7 +2,7 @@
 // ticket/episode selection, relation closure, stable digest and bounded output.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,10 +19,7 @@ const throws = (fn: () => unknown, pattern: RegExp, message: string): void => {
 const clone = <T>(value: T): T => structuredClone(value);
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "wl-story-assets-")));
 try {
-  const repo = join(tmp, "repo"); mkdirSync(join(repo, "story"), { recursive: true }); mkdirSync(join(repo, "bible"), { recursive: true });
-  const markdown = "# 人物圣经\n\n## 主角\n从相信预测走向相信可校验证据。\n";
-  writeFileSync(join(repo, "bible", "characters.md"), markdown);
-  const mdSha = createHash("sha256").update(markdown).digest("hex");
+  const repo = join(tmp, "repo"); mkdirSync(join(repo, "story"), { recursive: true });
   const binding: StoryAssetDesignBinding = { project: "demo", repo, sourcePlanId: "wlsrc_demo",
     storyDesignSha256: "a".repeat(64), totalEpisodes: 2,
     characters: [{ id: "C01", name: "周砚衡", firstEpisode: 1, lastEpisode: 2 },
@@ -35,14 +32,14 @@ try {
     episodes: { first: number; last: number } | null, priority: "required" | "supporting" | "optional" = "supporting") => ({
     id, type, label, status: "active" as const, importance: priority === "required" ? "core" as const : "supporting" as const,
     episodes, summary: `${label} 的结构化剧情事实。`, sourceRefs: ["src:chunk-001"], facts: [], relations: [],
-    markdown: null, context: { agents: [...agents], priority },
+    context: { agents: [...agents], priority },
   });
   const catalog: StoryAssetCatalog = { version: 1, kind: "writing-loop/story-assets", project: "demo",
     sourcePlanId: "wlsrc_demo", storyDesignSha256: "a".repeat(64), revision: 1,
     assets: [
       { ...asset("C01", "character", "周砚衡", { first: 1, last: 2 }, "required"),
         facts: [{ id: "F_C01_GOAL", key: "goal", value: "建立可校验制度", state: "current", basis: "original", sourceRefs: ["north-star:core"] }],
-        relations: [{ kind: "rival", targetId: "C02" }], markdown: { path: "bible/characters.md", sha256: mdSha, anchor: "主角" } },
+        relations: [{ kind: "rival", targetId: "C02" }] },
       asset("C02", "character", "季鹤声", { first: 1, last: 2 }),
       asset("S01", "scene", "未来听证厅", { first: 1, last: 1 }, "optional"),
       asset("S02", "scene", "旧档案库", { first: 2, last: 2 }),
@@ -77,8 +74,8 @@ try {
   ok(pack.timeline.some((row) => row.id === "T02" && row.selectedBecause === "revealed-in-target-episode")
     && pack.budget.usedBytes === Buffer.byteLength(JSON.stringify(pack), "utf8")
     && pack.budget.usedBytes <= pack.budget.maxBytes, "Context Pack 带本集 timeline 及精确可审计字节预算");
-  ok(!JSON.stringify(pack).includes("官居一品.txt") && pack.assets.every((row) => row.markdown === null || row.markdown.path.endsWith(".md")),
-  "Context Pack 只含结构化事实和 allowlisted Markdown 指针，不携原著文件/正文");
+  ok(!JSON.stringify(pack).includes("官居一品.txt") && !JSON.stringify(pack).includes("markdown"),
+  "Context Pack 只含结构化事实，不携原著正文或平行 Markdown 指针");
 
   const orphan = clone(parsed); orphan.assets[0].relations[0].targetId = "MISSING";
   throws(() => validateStoryAssetCatalog(orphan, binding), /不存在|无效/, "孤儿关系 fail-closed");
@@ -86,17 +83,9 @@ try {
   throws(() => validateStoryAssetCatalog(conflict, binding), /冲突活跃事实/, "同 key 的冲突 current/planned 事实被拒绝");
   const collision = clone(parsed); collision.timeline[1].reveal = { ...collision.timeline[0].reveal };
   throws(() => validateStoryAssetCatalog(collision, binding), /timeline reveal .*重复/, "同一集同一 reveal order 的时间事件被拒绝");
-  const badPath = clone(parsed); badPath.assets[0].markdown!.path = "../官居一品.txt";
-  throws(() => parseStoryAssetCatalog(badPath), /allowlist/, "asset graph 不接受任意文件或原著路径");
-  writeFileSync(join(repo, "bible", "characters.md"), markdown + "漂移\n");
-  throws(() => validateStoryAssetCatalog(parsed, binding), /Markdown 指针已漂移/, "人读 Markdown 漂移会使结构化资产门失败");
-  writeFileSync(join(repo, "bible", "characters.md"), markdown);
-  const external = join(tmp, "outside"); mkdirSync(external); writeFileSync(join(external, "outside.md"), "# 外部\n");
-  symlinkSync(external, join(repo, "arcs"));
-  const linked = clone(parsed); linked.assets.find((row) => row.id === "W01")!.markdown = {
-    path: "arcs/outside.md", sha256: createHash("sha256").update("# 外部\n").digest("hex"), anchor: null,
-  };
-  throws(() => validateStoryAssetCatalog(linked, binding), /symlink/, "Markdown allowlist 仍拒绝中间目录 symlink 越界");
+  const duplicateProjection = clone(parsed) as unknown as { assets: Array<Record<string, unknown>> };
+  duplicateProjection.assets[0].markdown = { path: "bible/characters.md", sha256: "a".repeat(64), anchor: "主角" };
+  throws(() => parseStoryAssetCatalog(duplicateProjection), /字段必须精确/, "asset schema 拒绝重新引入平行 Markdown 剧情投影");
   throws(() => buildStoryContextPack(read, binding, { project: "demo", ticketId: "DEMO-2", agent: "episode-writer", episode: 2, maxBytes: 4_096 }),
     /budget 无法容纳 required asset/, "required 资产放不进预算时硬停，不静默裁剪关键事实");
 

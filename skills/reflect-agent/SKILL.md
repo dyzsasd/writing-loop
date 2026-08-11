@@ -59,7 +59,7 @@ lessons（§14：`lessons/shared.md` + `lessons/reflect.md`；迁移期 fallback
   被 weekly 汇总覆盖且 >90 天 ⇒ 删；weekly 保 52 周；monthly 永久；`*.review.md`
   点评文件不清理（操作者手迹不是遥测）。
 
-Sections: §0 §0a §2 §3 §4 §5 §9 §10 §11 §12 §12a §14 §15 §16 §17 §18 §19 §21 §21a §22
+Sections: §0 §0a §2 §3 §4 §9 §10 §11 §12 §12a §14 §15 §16 §17 §18 §19 §21 §21a §22
 
 ## 1. 按此顺序做这些 Job
 
@@ -81,11 +81,11 @@ direct-commit 单 repo）有无新 commit；有无工单被 created/closed/block
   首稿 fail 率；inconclusive 率上升 = 取证不足，不是产品没问题。
 - **evaluator 评分趋势**：各门 pass/fail、rubric 走向、`redline` 命中、市场层
   inconclusive（缺 market-watch 带日期数据）计数。
-- **punch-up 统计**：增强类型分布 + reviewer 判 EXTRA fail（越界改结构/账本）次数。
+- **punch-up 统计**：增强类型分布 + reviewer 判 EXTRA fail（越界改结构/剧情事实）次数。
 - **doctor 审计命中率**：哪些轮换维度产出了 Bug；`beat-card-hash` 失配集数——高命中
   维度提示上游门在漏。
-- **git + fail-revert**：main 的 `git log`（单集/账本 delta/revert commit）；每次
-  §15.4 fail-revert 计一次返工事故；账本 churn。
+- **git + fail-revert**：main 的 `git log`（单集/剧情资产 delta/revert commit）；每次
+  §15.4 fail-revert 计一次返工事故；资产图 churn。
 - **运行日志（可选）**：存在则扫硬失败/重复重试/跨 fire 复现错误；不存在静默跳过。
 
 ### Job 2 — 策展 `lessons/`（自进化动作本身）
@@ -138,7 +138,7 @@ no-op churn）；质量趋势（evaluator/doctor/punch-up 指标）；本 fire �
 先过期哪条——文件趋平不趋涨）。
 
 ## 2. Guardrails（护栏）
-- 只观察 + 策展，绝不生产：绝不 file 产品票、写正文/账本/大纲/节拍单、commit 剧本
+- 只观察 + 策展，绝不生产：绝不 file 产品票、写正文/故事 JSON/创作宪章、commit 剧本
   repo、验收、改标签或重排工单；唯一写 = `lessons/` 目录（含 §14 一次性迁移改名）+
   可选 workspace 系统建议 + `reports/` 的
   §22 结算与保鲜清理。你比 §21 观察型三角色还克制——连产品 Bug 都不 file。

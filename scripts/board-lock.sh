@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# writing-loop 板/账本锁助手 —— conventions §7/§15.5/§18 锁法术的可调用实现。
+# writing-loop 板/结构化剧情资产锁助手 —— conventions §7/§15.5/§18 锁法术的可调用实现。
 #
-# 双轨权威声明：conventions 的散文（§15.5 账本锁纪律、§15.6 repo 写锁、§18 票锁与
+# 双轨权威声明：conventions 的散文（§15.5 剧情资产锁纪律、§15.6 repo 写锁、§18 票锁与
 # 陈旧锁规则）仍是权威——无 shell 的运行环境按散文手工执行即可；本脚本只是同一语义的
-# 可审计单一实现（O_EXCL 独占创建、mtime >60min 陈旧强清、固定多锁序 foreshadow →
-# story-state → production → repo、拿不到下一把先释放已持有的全部锁）。repo 写锁
-# （`<repoPath>/.git/repo.lock`，§15.6）走通用 acquire/release——固定序末位，最后拿、
+# 可审计单一实现（O_EXCL 独占创建、mtime >60min 陈旧强清）。结构化事实写入使用
+# `<repoPath>/.git/story-assets.lock`，stage+commit 使用 `<repoPath>/.git/repo.lock`；二者都在
+# `.git/` 内，永不污染创作目录。repo 写锁（§15.6）固定序末位，最后拿、
 # 最先放（秒级 stage+commit，持有最短）。两者语义一字不差；若有出入，
 # 以散文为准并修本脚本。SKILL 只描述锁「什么」；「怎么锁」引 conventions §7 的指针。
 #
 # 用法：
 #   board-lock.sh acquire <lock-path> [stale-min]   独占创建；陈旧锁先清（记一行日志）再试一次
 #   board-lock.sh release <lock-path>               释放（幂等）
-#   board-lock.sh acquire-ledgers <ledgers-dir> [stale-min]
-#                                                   固定序拿三把账本锁；任一失败 ⇒ 反序全释放、退出非零
-#   board-lock.sh release-ledgers <ledgers-dir>     反序全释放
-#   board-lock.sh --self-test                       临时目录自证 acquire/contend/stale-reclaim/release/多锁序/两道防线
+#   board-lock.sh acquire-story <git-dir> [stale-min]
+#                                                   获取单一结构化剧情资产锁
+#   board-lock.sh release-story <git-dir>           释放结构化剧情资产锁
+#   board-lock.sh --self-test                       临时目录自证 acquire/contend/stale-reclaim/release/资产锁/两道防线
 #
 # 防线（WL-53：acquire 传错参曾把 151 行 lessons.md 抹成一行 holder 文本）：
 #   语法防线   acquire/release 拒绝一切不以 .lock 结尾的路径——传的必须是锁文件、不是被保护文件。
@@ -28,7 +28,7 @@
 set -u
 
 STALE_MIN_DEFAULT=60
-LEDGER_ORDER="foreshadow.md.lock story-state.md.lock production.md.lock"  # §15.5 固定序
+STORY_LOCK="story-assets.lock"
 
 log() { printf '%s\n' "board-lock: $*" >&2; }
 
@@ -81,25 +81,8 @@ release() { # 幂等；同受两道防线（WL-53）
   rm -f "$1"
 }
 
-acquire_ledgers() { # $1=ledgers-dir $2=stale-min
-  local dir="$1" stale="${2:-$STALE_MIN_DEFAULT}" name held=""
-  for name in $LEDGER_ORDER; do
-    if acquire "$dir/$name" "$stale"; then
-      held="$name $held"   # 前插 ⇒ held 即反序
-    else
-      log "拿不到 $dir/$name ⇒ 先释放已持有的全部锁再退出（§15.5 绝不持锁 bail）"
-      local h; for h in $held; do release "$dir/$h"; done
-      return 1
-    fi
-  done
-  return 0
-}
-
-release_ledgers() { # 反序释放
-  local dir="$1" name rev=""
-  for name in $LEDGER_ORDER; do rev="$name $rev"; done
-  for name in $rev; do release "$dir/$name"; done
-}
+acquire_story() { acquire "$1/$STORY_LOCK" "${2:-$STALE_MIN_DEFAULT}"; }
+release_story() { release "$1/$STORY_LOCK"; }
 
 self_test() {
   local tmp pass=0 fail=0
@@ -138,19 +121,12 @@ self_test() {
   cmp -s "$tmp/fake.lock" "$tmp/lessons.orig"; check "holder 防线：release 拒绝后文件逐字节未动" 0 $?
   rm -f "$tmp/fake.lock" "$tmp/lessons.md" "$tmp/lessons.orig"
 
-  mkdir -p "$tmp/ledgers"
-  acquire_ledgers "$tmp/ledgers"; check "acquire-ledgers：固定序三锁全获" 0 $?
-  [ -e "$tmp/ledgers/foreshadow.md.lock" ] && [ -e "$tmp/ledgers/story-state.md.lock" ] \
-    && [ -e "$tmp/ledgers/production.md.lock" ]; check "三把账本锁在盘" 0 $?
-  release_ledgers "$tmp/ledgers"
-  # 不用 ls 的退出码判「无匹配」——GNU ls 对无匹配 glob 退 2、BSD ls 退 1（平台耦合）。
-  leftover=0; for f in "$tmp/ledgers"/*.lock; do [ -e "$f" ] && leftover=1; done
-  check "release-ledgers：无残锁" 0 "$leftover"
-
-  : > "$tmp/ledgers/story-state.md.lock"   # 竞争者预持中间那把
-  acquire_ledgers "$tmp/ledgers"; check "多锁序：中间被占 ⇒ 整组失败" 1 $?
-  [ -e "$tmp/ledgers/foreshadow.md.lock" ]; check "失败后已获的 foreshadow 锁被释放（绝不持锁 bail）" 1 $?
-  rm -f "$tmp/ledgers/story-state.md.lock"
+  mkdir -p "$tmp/.git"
+  acquire_story "$tmp/.git"; check "acquire-story：结构化剧情资产锁获取成功" 0 $?
+  [ -e "$tmp/.git/story-assets.lock" ]; check "剧情资产锁只写在 .git 元数据目录" 0 $?
+  acquire_story "$tmp/.git"; check "acquire-story：并发竞争者被拒" 1 $?
+  release_story "$tmp/.git"
+  [ ! -e "$tmp/.git/story-assets.lock" ]; check "release-story：无残锁" 0 $?
 
   echo "self-test: $pass pass, $fail fail"
   [ "$fail" = 0 ]
@@ -159,8 +135,8 @@ self_test() {
 case "${1:-}" in
   acquire)          shift; [ $# -ge 1 ] || { log "用法：acquire <lock-path> [stale-min]"; exit 2; }; acquire "$@" ;;
   release)          shift; [ $# -ge 1 ] || { log "用法：release <lock-path>"; exit 2; }; release "$@" ;;
-  acquire-ledgers)  shift; [ $# -ge 1 ] || { log "用法：acquire-ledgers <ledgers-dir> [stale-min]"; exit 2; }; acquire_ledgers "$@" ;;
-  release-ledgers)  shift; [ $# -ge 1 ] || { log "用法：release-ledgers <ledgers-dir>"; exit 2; }; release_ledgers "$@" ;;
+  acquire-story)    shift; [ $# -ge 1 ] || { log "用法：acquire-story <git-dir> [stale-min]"; exit 2; }; acquire_story "$@" ;;
+  release-story)    shift; [ $# -ge 1 ] || { log "用法：release-story <git-dir>"; exit 2; }; release_story "$@" ;;
   --self-test)      self_test ;;
-  *) log "用法：board-lock.sh {acquire|release|acquire-ledgers|release-ledgers|--self-test}"; exit 2 ;;
+  *) log "用法：board-lock.sh {acquire|release|acquire-story|release-story|--self-test}"; exit 2 ;;
 esac

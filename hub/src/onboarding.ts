@@ -546,9 +546,7 @@ function usualEpisodeWarning(format: string, monetization: string, total: number
 
 function planFiles(input: OnboardingInput): string[] {
   const files = [
-    "README.md", "bible/north-star.md", "bible/characters.md", "bible/world.md", "outline.md",
-    "ledgers/foreshadow.md", "ledgers/story-state.md", "ledgers/production.md",
-    "arcs/.gitkeep", "episodes/.gitkeep", "evaluation/.gitkeep", "ledgers/archive/.gitkeep",
+    "README.md", "bible/north-star.md", "story/.gitkeep", "episodes/.gitkeep", "evaluation/.gitkeep",
   ];
   if (input.kind === "original") files.push("source/benchmarks.md");
   else files.push("source/mainline.md", "source/highlights.md", "source/characters-function.md");
@@ -556,10 +554,7 @@ function planFiles(input: OnboardingInput): string[] {
 }
 
 function onboardingTemplateDigest(): string {
-  const names = [
-    "north-star.md", "characters.md", "world.md", "outline.md", "foreshadow-ledger.md",
-    "story-state.md", "production-ledger.md", "deconstruction/README.md",
-  ];
+  const names = ["north-star.md", "deconstruction/README.md"];
   return hash(names.map((name) => `${name}\0${template(name)}`).join("\0"));
 }
 
@@ -629,7 +624,7 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
     sourceIntake,
     outlineTicket: {
       id: ticketId,
-      title: `完成《${input.title}》总大纲与冻结层`,
+      title: `建立《${input.title}》结构化故事事实源`,
       state: input.kind === "adaptation" ? "Backlog" : "Todo",
       path: join(dataPath, "board", "tickets", `${ticketId}.md`),
     },
@@ -692,13 +687,13 @@ ${plan.input.logline}
 | 路径 | 用途 | 维护与门禁 |
 |---|---|---|
 | \`bible/north-star.md\` | 方向、受众、红线与当前进度 | showrunner；方向级变更需操作者批准 |
-| \`bible/characters.md\` / \`world.md\` | 人物与世界冻结层 | showrunner / 大纲门内的 story-designer |
-| \`outline.md\` | 全剧结构、卡点与主线伏笔 | story-designer 起草，showrunner + evaluator 过门 |
-| \`arcs/\` | 单元细纲与逐集节拍 | 大纲门 |
+| \`story/outline.v1.json\` | 全剧结构、arc、分集节拍与制作约束的唯一事实源 | story-designer 起草，showrunner + evaluator 过门 |
+| \`story/assets.v1.json\` | 人物、世界、伏笔、连续性与双轨时间线的唯一事实源 | 与结构同批维护；\`writing-loop story status\` 校验 |
 | \`episodes/\` | 分集正文 | writer → reviewer → evaluator |
-| \`ledgers/\` | 伏笔、故事状态、制作预算 | 与正文同批更新并经审读核对 |
 | \`evaluation/\` | 里程碑评估与 superseded 历史 | evaluator；文件名含片名与里程碑 |
 | \`source/\` | 对标拆解或授权原著拆书清单 | 只作证据，不混入未授权 IP |
+
+人物、世界、伏笔、状态、时间线与季结构不得另建 Markdown 镜像；Studio 直接渲染上述 JSON。
 
 运行态、看板与报告不进 Git，位于：
 
@@ -736,35 +731,10 @@ function scaffoldSource(repoStage: string, input: OnboardingInput): void {
 
 function scaffoldRepo(stage: string, plan: OnboardingPlan): void {
   const input = plan.input;
-  const values = {
-    "{片名}": input.title,
-    "{config.maxPrimaryScenes}": String(input.maxPrimaryScenes),
-    "{config.maxNamedCharacters}": String(input.maxNamedCharacters),
-    "{live-action | ai-anime | reelshort-en}": input.format,
-    "{NNN}": "000",
-    "{NN}": "00",
-    "{N}": String(input.totalEpisodes),
-    "{8-9}": String(input.paywall.card1[0] ?? 9),
-    "{9-10}": String(input.paywall.card1[1] ?? input.paywall.card1[0] ?? 10),
-    "{10-11}": String(input.paywall.card1[2] ?? input.paywall.card1.at(-1) ?? 11),
-    "{9/10/11}": input.paywall.card1.join("/") || "无硬卡点",
-    "{26-30}": input.paywall.card2.join("/") || "无硬卡点",
-    "{~60}": input.paywall.card3.join("/") || "无硬卡点",
-  };
   mkdirSync(stage, { recursive: true });
   writeNew(join(stage, "README.md"), renderRepoReadme(plan));
   writeNew(join(stage, "bible", "north-star.md"), renderNorthStar(input));
-  for (const [source, target] of [
-    ["characters.md", "bible/characters.md"],
-    ["world.md", "bible/world.md"],
-    ["outline.md", "outline.md"],
-    ["foreshadow-ledger.md", "ledgers/foreshadow.md"],
-    ["story-state.md", "ledgers/story-state.md"],
-    ["production-ledger.md", "ledgers/production.md"],
-  ] as const) {
-    writeNew(join(stage, ...target.split("/")), replaceAll(template(source), values));
-  }
-  for (const dir of ["arcs", "episodes", "evaluation", "ledgers/archive"]) {
+  for (const dir of ["story", "episodes", "evaluation"]) {
     writeNew(join(stage, ...dir.split("/"), ".gitkeep"), "");
   }
   scaffoldSource(stage, input);
@@ -801,23 +771,23 @@ updated: ${createdAt}
 ---
 ## Context
 
-北极星与空白创作骨架已由立项服务建立。第一步是完成 \`outline.md\`，并补齐
-\`bible/characters.md\` 与 \`bible/world.md\` 的冻结层；showrunner 只验收，不自领起草。
+北极星已由立项服务建立。第一步是直接创建 \`story/outline.v1.json\` 与
+\`story/assets.v1.json\`；showrunner 只验收，不自领起草。禁止另建人物、世界、大纲或台账 Markdown 镜像。
 ${needsSource ? "\n改编项目在原著登记和 source-analysis 票通过前不得起草大纲；空白三清单不是分析结果。" : ""}
 
 ## Context-pack
 
-必读（≤8 指针）：\`bible/north-star.md\` 全文、\`outline.md\`、\`bible/characters.md\`、
-\`bible/world.md\`、\`ledgers/production.md\`、\`source/\` 下的结构化拆解。
+必读（≤8 指针）：\`bible/north-star.md\` 全文、\`source/\` 下的结构化拆解，以及
+\`writing-loop story status --project ${input.key} --json\` 的当前门状态。
 
 关键事实：
 ${facts}${adaptation}
 
 ## Acceptance criteria
 
-- outline 分段大纲、单元表、高潮五锚点、卡点规划完整。
-- 主线伏笔登记表含必备四件套，名场面与续季钩有明确规划。
-- characters/world 冻结层补齐，制作预算不超过 config 上限。
+- \`story/outline.v1.json\` 的分段、节拍、分集、卡点与高潮锚点完整。
+- \`story/assets.v1.json\` 登记人物、世界、场景、伏笔、连续性和双轨时间线。
+- 两个 JSON 互相精确绑定，制作预算不超过 config 上限，且不存在旧 Markdown 镜像。
 - 另 file milestone-eval 大纲定稿门，并以 Blocked-by 建立前置关系。
 
 ## How to verify
@@ -1869,9 +1839,10 @@ export function verifyOnboarding(root: string, key: string): OnboardingVerificat
     add("config-entry", false, error instanceof Error ? error.message : String(error));
   }
 
-  const requiredRepo = [
-    "README.md", "bible/north-star.md", "bible/characters.md", "bible/world.md", "outline.md",
-    "ledgers/foreshadow.md", "ledgers/story-state.md", "ledgers/production.md",
+  const requiredRepo = ["README.md", "bible/north-star.md"];
+  const forbiddenRepo = [
+    "outline.md", "bible/characters.md", "bible/world.md", "ledgers/foreshadow.md",
+    "ledgers/story-state.md", "ledgers/production.md",
   ];
   const invalidRepo: string[] = [];
   if (repo) {
@@ -1888,6 +1859,9 @@ export function verifyOnboarding(root: string, key: string): OnboardingVerificat
         }
         const info = lstatSync(cursor);
         if (!info.isFile() || !within(repoReal, realpathSync(cursor))) throw new OnboardingError(`${file} 不是 repo 内普通文件`);
+      }
+      for (const file of forbiddenRepo) {
+        if (existsSync(join(repo, ...file.split("/")))) throw new OnboardingError(`${file} 是被禁止的重复剧情事实源`);
       }
     } catch (error) { invalidRepo.push(error instanceof Error ? error.message : String(error)); }
   } else invalidRepo.push("config/receipt 未解析出 repo");

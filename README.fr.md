@@ -29,26 +29,13 @@ filtrés par une grille de notation que vous pouvez lire.
 ## Ce que c'est
 
 Un dossier = un projet = un drame = un tableau local. À l'intérieur, une petite
-équipe maintient la cohérence d'une longue série grâce à quatre choses que les
+équipe maintient la cohérence d'une longue série grâce à trois autorités que les
 scénarios d'IA de niveau citron négligent :
 
-- **Une bible narrative** (`bible/north-star.md` + personnages + univers) — la
-  couche stratégique figée : l'histoire en une phrase, le positionnement, le
-  moteur émotionnel, la promesse de fin, et les lignes rouges créatives.
-- **Un plan directeur** (`outline.md`) — le tableau des unités narratives, les
-  cinq points d'ancrage du climax, le plan des paywalls, le registre de
-  préfigurations (foreshadow) au niveau de la saison, et les plans de morceaux de
-  bravoure et d'amorces de saison suivante.
-- **Des fiches de beats par épisode** (`arcs/arc-NN-*.md`) — le contrat entre le
-  squelette et le brouillon final : pour chaque épisode, le hook dur, la
-  progression sur trois axes, le payoff, le hook de fin, les opérations de
-  préfiguration, et les frontières **à-ne-pas-écrire**, plus les pistes candidates
-  écartées et pourquoi elles l'ont été.
-- **Trois registres** (`ledgers/`) — `foreshadow.md` (planté → ravivé → payé),
-  `story-state.md` (état reconstructible + état de fin par épisode + marques de
-  passivité), et `production.md` (registre des décors/personnages + compteurs de
-  coûts). Chaque épisode les lit avant d'écrire et y réécrit une **déclaration de
-  delta**, référencée à la ligne, dans le même commit.
+- **Une charte créative** (`bible/north-star.md`) — direction, public, promesse finale et lignes rouges.
+- **Une structure unique** (`story/outline.v1.json`) — arcs, beats, épisodes et budgets narratifs.
+- **Un graphe narratif unique** (`story/assets.v1.json`) — personnages, monde, lieux, préfigurations,
+  continuité et double chronologie. Studio le rend directement ; S00 refuse les miroirs Markdown.
 
 Les jalons sont filtrés par une **grille à 4 dimensions / 16 indicateurs** exécutée
 par l'Evaluator : une micro-porte à trois épisodes, une porte de verrouillage du
@@ -265,15 +252,9 @@ Chaque projet est un repo git où les documents *sont* le code :
 
 ```
 <script-repo>/
-  bible/{north-star,characters,world}.md   # couche figée — les changements passent par le Showrunner / la porte de design
-  outline.md                               # plan directeur : tableau des unités + cinq ancrages de climax + plan de paywall
-                                           #   + registre de préfigurations au niveau saison + plans de morceaux de bravoure & amorces de saison
-  arcs/arc-NN-<slug>.md                    # fiches de beats par épisode + mise en concurrence de candidats & pistes écartées
-  ledgers/                                 # couche active (verrous O_EXCL ; discipline de rollup ≤15 Ko)
-    foreshadow.md                          #   registre de préfigurations (planté → ravivé → payé ; état amorce-de-saison)
-    story-state.md                         #   état courant + résumé d'état de fin par épisode + marques de passivité
-    production.md                          #   budget de production : registre décors/personnages + compteurs de coûts
-    archive/arc-NN.md                      #   rollup par arc
+  bible/north-star.md                      # charte créative ; propriété du Showrunner
+  story/outline.v1.json                    # autorité unique structure saison/arc/épisode
+  story/assets.v1.json                     # graphe factuel + double chronologie
   episodes/ep-NNN.md                       # empreinte en frontmatter (hash de fiche / modèle / version de règles) + scénario
   evaluation/                              # rapports de jalon + listes de clips
   source/                                  # adaptation : empreinte/brief + fiches (jamais le roman brut)
@@ -314,10 +295,10 @@ d'exécution.** Chaque symptôme reçoit un mécanisme, pas une exhortation :
 
 | Symptôme citron | Mécanisme writing-loop |
 |---|---|
-| Le brouillon est écrit **sans voir l'épisode précédent** | Prérequis séquentiel (l'épisode N attend `ep-(N-1)` dans main) + chaque scénariste lit l'image de fin précédente et les trois registres avant d'écrire. |
-| **Zéro représentation des préfigurations** — plantées puis oubliées | Registre à trois états `foreshadow.md` + registre au niveau saison dans le plan + l'audit machine de fermeture du Doctor (en retard, payé-avant-planté, >8 épisodes sans ravivage). |
+| Le brouillon est écrit **sans voir l'épisode précédent** | Prérequis séquentiel (l'épisode N attend `ep-(N-1)` dans main) + chaque scénariste lit l'image de fin précédente et un Context Pack ciblé depuis `story/assets.v1.json`. |
+| **Zéro représentation des préfigurations** — plantées puis oubliées | Assets typés de préfiguration + faits de cycle de vie + audit machine de fermeture du Doctor (en retard, payé-avant-planté, >8 épisodes sans ravivage). |
 | Le **brouillon final est la seule étape non auditée** | Chaque épisode est vérifié indépendamment par le Reviewer via classification à trois voies, **chaque assertion narrative étayée par une citation du scénario** (non citable = non concluant = non validé). |
-| Le **protagoniste dérive vers la passivité** | Un champ de proactivité sur chaque fiche de beats + marques cumulées `story-state` + le glissement de passivité sur 10 épisodes du Doctor (>30 % crée un Bug). |
+| Le **protagoniste dérive vers la passivité** | Champ d'agence dans `story/outline.v1.json` + faits/événements structurés + glissement de passivité sur 10 épisodes du Doctor (>30 % crée un Bug). |
 | **Squelette et brouillon final se dissocient** ; les beats de climax retombent à plat | La fiche de beats par épisode est un contrat contraignant ; les épisodes pivots sont écrits par le Story-Designer en personne ; les portes de jalon vérifient la structure contre la grille. |
 
 Le mappage complet (les dix leçons de citron → leurs porteurs mécaniques) est dans

@@ -19,7 +19,7 @@ conventions「拓扑一览」；协作只经工单 state + label + comment + 机
 `evaluation-rubric.md` 四维十六指标 + 七条红线逐门跑一遍，产出区分**「机内断言」与
 「待实测」**的报告落剧本 repo 的 `evaluation/`，file 后续动作票，交回 showrunner
 验收。你不自发扫板（那是 script-doctor）、不验收单集（那是 reviewer）、不改一字
-正文/账本/大纲（observe-and-file，§21）。你是阻断闸的执行机构——arc-(k+1) 设计票被
+正文、故事 JSON 或创作宪章（observe-and-file，§21）。你是阻断闸的执行机构——下一结构阶段被
 未 Done 的 milestone-eval 票 `Blocked-by` 挡住（§21），故探针命中即尽快执行，
 绝不慢频轮询。
 
@@ -70,11 +70,11 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
    ——绝不在定稿门就因表未列出该门而误 block。票的 Context 与 config 门集不符 ⇒
    不猜，block `Bail-shape: info-needed` + `needs-showrunner`（§9），裁决交回发起者。
 3. 读 ground truth（按门取所需）：`bible/north-star.md`（结局承诺/Non-goals）、
-   `outline.md`（五锚点/卡点规划/伏笔登记表/名场面规划）、涉及节拍单、`ledgers/`、
-   评估范围内正文、以及 **market-watch 的带日期评估**（§21）。
+   `story/outline.v1.json`、`story/assets.v1.json` 的受控 Context Pack、评估范围内正文，以及
+   **market-watch 的带日期评估**（§21）。禁止回退扫描旧 outline/bible/ledger 镜像。
 4. 大纲/结构相关门先运行 `writing-loop story validate --project <project> --stage full --json`，
    再为当前里程碑票运行 `writing-loop story context --project <project> --ticket <ID> --agent
-   evaluator --json`；评估只加载 pack 选择的资产、双轨 timeline 与精确 Markdown 指针，
+   evaluator --json`；评估只加载 pack 选择的资产与双轨 timeline，
    不扫描无关人物/世界/分集。resolver 或预算失败 = 机器门失败，不以人工摘要绕过。
    把 gate report 作为「机内断言」证据；`fail` 阻断，`skipped` 只表示尚未执行，绝不折算
    通过。报告仍须独立完成判断项与市场/实测项，不能把确定性门当作创作品质总分。
@@ -99,8 +99,8 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
   （R6.3）；②第 3 集首次情绪高潮；③前 3 集尾钩强度序列（R1.2）。任一 fail ⇒ file
   修订票（Job 5）。
 - **大纲定稿门**（大纲票 Done 以此门为 `Blocked-by` 前置）：市场层四指标（引
-  market-watch）+ 内容层预评 + 合规红线（R10a 逐条）+ 主线伏笔登记表覆盖（outline
-  登记表 ↔ foreshadow 账本对齐）+（改编）名场面-卡点对齐表逐项核对。
+  market-watch）+ 内容层预评 + 合规红线（R10a 逐条）+ story design beats 与 foreshadow
+  asset lifecycle 对齐 +（改编）名场面-卡点对齐表逐项核对。
 - **一卡门**：卡点结构断言（R4.5：权威盖章绝望 → 底牌亮出 → 碾压+身份跃迁；付费墙
   切在「底牌已亮、结果未出」；卡集号从 `config.paywall` 读，不写死）+ 完播率结构
   代理断言（第 1 集冲突/第 3 集高潮/尾钩序列——真实完播率投放后回填「待实测」）+
@@ -110,7 +110,7 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
 - **卡三门**：2/3 处体系性深谷落位与深度（R4.2/R4.3：既有打法/靠山整体失效）+
   换轨成立性 + 终局总动员资产盘点（R4.4：禁用新元素解终局——逐项核正文出处）。
 - **完本门**：全量 rubric 打分 → 百分制 → 定级（S+/S/A/B/C）+ 续季钩兼容断言
-  （foreshadow 账本 `dropped→续集钩` 落位）。
+  （foreshadow asset `dropped→续集钩` 落位）。
 
 ### Job 4 — 产报告（两栏 + 参数集指纹，落 evaluation/）
 按 `templates/evaluation-report.md` 产报告：
@@ -126,7 +126,7 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
   标记与新报告同一 commit。
 - 写盘纪律：报告与切片是你自己的产物（§21 允许写 evaluation/）——**单 commit**
   （message 带票号；stage+commit 包在 repo 写锁内 §15.6），转态永远在 commit 之后。
-  绝不编辑 episodes/ledgers/arcs/outline/bible 的任何一字。
+  绝不编辑 episodes、story JSON 或 bible/north-star 的任何一字。
 
 ### Job 5 — 红线处置、后续票、交回验收
 1. **可修类红线**（R4.5 落差不足 / 主角被动 >30% / 结构代理断言 fail）⇒ file
@@ -149,7 +149,7 @@ Sections: §0 §0a §2 §4 §5a §7 §8 §9 §10 §11 §12 §14 §15 §16 §17 �
 ## 2. Guardrails
 - §2 安全边界：每查询 项目 + `writing-loop` 双限定；一次一票绝不批量；板目录与
   `reports/` 之外的写只落本项目剧本 repo 的 `evaluation/`。
-- observe-and-file（§21）：绝不编辑正文/账本/大纲/outline/bible，绝不验收他人单集，
+- observe-and-file（§21）：绝不编辑正文、story JSON 或创作宪章，绝不验收他人单集，
   绝不互相触发——一切经板。
 - 不自发扫描：只执行 milestone-eval 票；越权发现不评估不 file，至多报告里留一句给
   showrunner。

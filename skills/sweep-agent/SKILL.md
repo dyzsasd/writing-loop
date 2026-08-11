@@ -17,7 +17,7 @@ description: >-
 owner-scoped agent 各看自己的切片；**掉出所有切片**的票（缺 owner/tier、缺
 `Episode:` 行、孤儿 In Progress、大纲门崩溃残留）无人认领、永久停摆——你只管这些
 「裂缝」。**宪章极窄：report-don't-mutate**——只做少数机械修复（改标签/补 tier/
-促成子票放行/补关父票/回收孤儿/清陈旧锁），其余一切**只旗标不动手**；绝不写正文/账本、
+促成子票放行/补关父票/回收孤儿/清陈旧锁），其余一切**只旗标不动手**；绝不写正文/故事 JSON、
 验收、file 任何票、commit 剧本。拿不准就旗标交操作者，不猜（§8）。
 
 ## 0. boot
@@ -91,8 +91,8 @@ commit（§19）；③认领超时——
 
 ### Job 3 — 陈旧锁清理（§18 + §15）
 **mtime >60min = 陈旧，删除并记一行日志**（强制规则，否则一次崩溃永久死锁）。三类：
-票锁 `board/tickets/<ID>.lock`（§18）；账本锁 `<repoPath>/ledgers/*.md.lock`
-（§15.5）；repo 写锁 `<repoPath>/.git/repo.lock`（§15.6，stage+commit 秒级互斥，
+票锁 `board/tickets/<ID>.lock`（§18）；repo 写锁 `<repoPath>/.git/repo.lock`
+（§15.6，story JSON 与正文 commit 的秒级互斥，
 固定序末位）。并发 cron 配置（§15.6 worktree 选项）遗留的 `wt/<票ID>` worktree 归
 写 repo 的 fire `git worktree prune` 收割——sweep 只在 digest 旗标超龄残留，不删。
 未过 60min 的锁**别碰**（正被现任 fire 持有）。
@@ -114,17 +114,16 @@ commit（§19）；③认领超时——
 判据全在票的 state + `relatedTo` 边 + `Approved-hash:` 评论行，不靠记忆。父子关系
 读不清 ⇒ 旗标不猜。
 
-### Job 5 — 账本 / 涟漪稽核（只旗标，绝不动手）
+### Job 5 — 结构化剧情资产 / 涟漪稽核（只旗标，绝不动手）
 三项稽核只留言旗标 + 进 digest 路由 owner（你连 §21 观察型的 file 权都没有）：
 - **§15.4 稽核**：`Canceled` 单集/重写票的 Cancel 评论记了失败稿 commit sha，但
   `git log` 显示该 sha **未被 revert**（跟进票强制第一步 = revert）⇒ 在该票留言
   旗标（`§15.4: commit <sha> 未 revert，canon 可能被污染`），路由 reviewer/
   showrunner。不自己 revert、不 file 修订票。
-- **§19/§21a 版本链稽核（机械判据）**：只稽核该 arc `Approved-hash:` 记录时刻**之后**
-  触 `arcs/`（及 `outline.md`）的 commit（门前迭代不在链上是常态）：commit 后的
-  文件哈希**既不是**任何 arc-design 票的 `Approved-hash`、**也不在**文件头 changelog
-  的 `prev→new` 哈希链上 ⇒ 绕过工序的改写 ⇒ 旗标 + digest，路由 doctor 与
-  showrunner。**光有文字 changelog 条目而无哈希对不算数**。只做哈希比对，不读
+- **§19/§21a 版本链稽核（机械判据）**：只稽核 design `Approved-hash:` 记录时刻**之后**
+  触 `story/outline.v1.json` 的 commit（门前迭代不在链上是常态）：commit 后的文件哈希
+  **不是**任何 design 票的 `Approved-hash`，且受影响子票 `Design-hash` 未刷新
+  ⇒ 绕过工序的改写 ⇒ 旗标 + digest，路由 doctor 与 showrunner。只做哈希比对，不读
   diff、不 file 票。
 - **§20 稽核**：commit 触 `bible/north-star.md` 且 hunk 落在**方向级节**（§20 节
   分级；看 hunk 所属节标题即可判）而板上无对应已批准的方向停靠票 ⇒ 旗标 + digest，
@@ -147,9 +146,9 @@ commit（§19）；③认领超时——
 `Bail-shape`（§9）分组（`external-prereq` 堆积 = 在等操作者；`fix-exhausted` 堆积 =
 人工停靠积压）；needs-\* 各计数；**停靠超时**——`external-prereq`/`fix-exhausted`
 停靠票中最新 `Notified:` 行已 >24h 无操作者动作的清单（§9 重提醒轨道——showrunner
-发提醒，你只浮出）；**账本超编/滚存欠账**（§19 ≤25KB 纪律的稽核方；`## changelog` 节不计入，patch WL-66）——
-任一 `ledgers/*.md`（剔除 `## changelog` 节后）实测 >25KB 或上一 arc 完结而 `ledgers/archive/` 无滚存条目 ⇒
-旗标路由 story-designer（你只 stat 大小，不读不改）；本 fire 修了什么（Job 1-4）+
+发提醒，你只浮出）；**结构化资产健康**——`writing-loop story status --project <project>
+--json` 失败、旧 Markdown 镜像令 S00 fail 或 asset revision 未推进 ⇒ 旗标路由
+story-designer（只读状态，不改内容）；本 fire 修了什么（Job 1-4）+
 旗标了什么（Job 5-6.5 及一切「不猜」项）。
 
 ## 2. Guardrails
