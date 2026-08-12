@@ -713,12 +713,17 @@ export function laneShowrunner(
   tickets: LaneTicket[], nowMs: number,
   cur: { board: string; northStar: string },
   baseline: { board: string; northStar: string } | null,
+  sourceAnalysisFocused = false,
 ): string[] {
   const hits: string[] = [];
-  if (!baseline) hits.push("无板快照基线（首次求值/上次 fire 未干净退出）——视作已变");
-  else {
-    if (baseline.board !== cur.board) hits.push("板快照哈希变化");
-    if (baseline.northStar !== cur.northStar) hits.push("north-star 哈希变化（doc-watch）");
+  // 原著来源分析期间，Story Designer 直接消费 North Star；不要为了首次基线、普通板心跳
+  // 或文档 watch 占用 repo-writer 单飞锁。显式 blocked resolver / 人类决策停靠仍在下方保留。
+  if (!sourceAnalysisFocused) {
+    if (!baseline) hits.push("无板快照基线（首次求值/上次 fire 未干净退出）——视作已变");
+    else {
+      if (baseline.board !== cur.board) hits.push("板快照哈希变化");
+      if (baseline.northStar !== cur.northStar) hits.push("north-star 哈希变化（doc-watch）");
+    }
   }
   const byId = new Map(tickets.map((t) => [t.id, t] as const));
   const resolvable = tickets.find((t) => !TERMINAL_STATES.has(t.state) && t.labels.includes("blocked")
@@ -1029,7 +1034,7 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       northStarHash = hashFileOrAbsent(join(io.repoPath, "bible", "north-star.md"));
       if (northStarHash === null) reasons.push("north-star 读取失败——保守放行");
       const cur = { board: boardHash, northStar: northStarHash ?? "unreadable" };
-      reasons.push(...laneShowrunner(snap.tickets, nowMs, cur, io.showrunnerBaseline ?? null));
+      reasons.push(...laneShowrunner(snap.tickets, nowMs, cur, io.showrunnerBaseline ?? null, sourceAnalysisFocused));
       break;
     }
     case "sweep": {

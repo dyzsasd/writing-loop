@@ -580,6 +580,13 @@ function testSweepLocksAndShowrunnerBaseline(): void {
   check("sweep：节拍兜底 ⇒ open", evalLaneGate("sweep", freshIo({ lastCleanEndMs: NOW - 31 * MIN })).open);
 
   // showrunner：基线流转（evalLaneGate 返回的哈希即基线载体）
+  writeFileSync(join(w.boardDir, "WL-SOURCE.md"),
+    "---\nid: WL-SOURCE\ntitle: 分析原著\nstate: Todo\nowner: story-designer\n" +
+    "labels: [writing-loop, Feature, source-analysis, story-designer]\n" +
+    "assignee: null\nupdated: 2026-07-15T11:00:00Z\n---\n");
+  check("showrunner：原著分析期间无基线也 gated，不占用 Story Designer 的单飞锁",
+    !evalLaneGate("showrunner", w.io({ showrunnerBaseline: null })).open);
+  rmSync(join(w.boardDir, "WL-SOURCE.md"));
   const g1 = evalLaneGate("showrunner", w.io({ showrunnerBaseline: null }));
   check("showrunner：无基线 ⇒ open 且返回板/north-star 哈希", g1.open && g1.boardHash.length > 0 && g1.northStarHash === "absent");
   const base = { board: g1.boardHash, northStar: g1.northStarHash! };
