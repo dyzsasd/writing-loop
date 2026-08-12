@@ -136,14 +136,15 @@ Le parcours normal n'a pas de seconde inscription manuelle. Le project plan appr
 lie déjà l'empreinte du roman, le brief, les droits et le consentement du Harness ;
 project create copie/chunke localement, ne committe que provenance et brief, puis crée
 source-analysis. Démarrez la room : Story-Designer choisit la fenêtre de saison, traite
-un chunk par fire, agrège les trois fiches et les soumet au Showrunner. `writing-loop
+un lot contigu borné de quatre chunks maximum par fire, agrège les trois fiches et les soumet au Showrunner. `writing-loop
 source status --project my-drama` est en lecture seule ; `source plan/register` sont
 réservées à la reprise/migration avancée et ne font pas partie du parcours normal.
 
-Après la porte source, Story Designer synchronise le plan lisible, le compagnon strict
-`story/outline.v1.json` et le graphe typé `story/assets.v1.json`, puis exécute automatiquement les portes
-`skeleton → beats → full`. L'opérateur n'a pas à lancer `story validate` : Studio montre
-les mêmes faits dans Source / Architecture / Timeline / Assets narratifs / Personnages / Art / Épisodes et qualité.
+Après la porte source, Story Designer construit la saison, les beats, personnages,
+monde, préparations, continuité et double chronologie, puis exécute automatiquement les
+portes qualité. La sérialisation structurée reste interne à la plateforme et ne devient
+jamais un ticket créatif. Studio montre les mêmes faits dans Source / Saison / Timeline /
+Personnages et monde / Art / Épisodes et qualité.
 Chaque ticket reçoit un Context Pack borné d'assets et d'événements chrono/révélation ; skipped n'est jamais pass, et
 le Showrunner conserve une validation éditoriale indépendante.
 

@@ -115,10 +115,10 @@ plan/create/verify 边界。自动立项只
 不会混入任何剧集的创作看板。终端可用 `writing-loop system proposal list` 查看同一批
 不可变 `WLSYS-*` 记录；项目 Ticket 只承载目的地确实属于该故事产品的工作。
 
-项目内部现在按创作职责分为 **概览 / 原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量**。
-原著页只显示本地指纹、选中窗口和逐块 checkpoint，不回显正文；故事页读取 Story Designer
-维护的 `story/outline.v1.json` 与 `story/assets.v1.json`：前者管季结构，后者把人物、世界规则、
-地点、道具、伏笔、连续性及“真实发生顺序 × 观众揭示顺序”变成结构化资产。Harness 按 ticket、
+项目内部现在按创作职责分为 **概览 / 原著分析 / 全季结构 / 时间线 / 人物与世界 / 美术资产 / 分集与质量**。
+原著页只显示本地指纹、选中窗口和逐块 checkpoint，不回显正文；Story Designer 维护季结构、
+人物、世界规则、地点、道具、伏笔、连续性及“真实发生顺序 × 观众揭示顺序”。其底层结构化
+序列化对编剧透明，不进入项目 Ticket。Harness 按 ticket、
 agent、集数和字节预算取得确定性 Context Pack，不再扫描整份 bible/ledger。质量页区分 pass / fail /
 skipped / not-applicable，并保留 Showrunner 的“机器全绿但创作平庸”否决位。Studio 仍不直接
 改剧情资产，也不会在剧本阶段启动 H3/GPU。

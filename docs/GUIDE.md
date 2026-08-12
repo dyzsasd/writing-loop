@@ -135,15 +135,15 @@ There is no second manual registration step in normal onboarding. The approved p
 plan already binds the novel fingerprint, brief, rights and Harness consent. Project
 creation copies/chunks the novel locally, commits only its provenance and your brief,
 and files source-analysis. Start the room; Story-Designer selects the season range,
-analyzes one chunk per fire, aggregates the three worksheets, and hands them to the
+analyzes a bounded consecutive batch of up to four chunks per fire, aggregates the three worksheets, and hands them to the
 Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
 plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
-After the source gate, Story Designer writes strict `story/outline.v1.json` and the typed
-`story/assets.v1.json` graph as the only story sources, running the deterministic
-`skeleton → beats → full` gates automatically. Operators do not need to run `story
-validate`: Studio exposes the same facts through Source / Story / Timeline / Story assets / Characters / Art /
-Episodes & quality. Each creative ticket receives a bounded Context Pack selected from character,
+After the source gate, Story Designer creates the season structure, episode beats,
+characters, world, setups, continuity and dual timeline, running deterministic quality
+gates automatically. Their structured serialization is an internal platform detail and
+never becomes a creative ticket. Studio exposes the same facts through Source / Season /
+Timeline / Characters & world / Art / Episodes & quality. Each creative ticket receives a bounded Context Pack selected from character,
 world, location, prop, foreshadowing, continuity and dual-order timeline assets; skipped is never pass,
 and Showrunner still performs an independent editorial review after machine-green.
 

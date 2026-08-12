@@ -538,6 +538,10 @@ try {
   const ticket = readFileSync(join(data, "paper-moon", "board", "tickets", "PM-1.md"), "utf8");
   ok(ticket.includes("state: Todo") && ticket.includes("owner: showrunner") && ticket.includes("story-designer")
     && ticket.includes("## Context-pack") && ticket.includes("## Acceptance criteria") && ticket.includes("## How to verify"), "首张且唯一大纲票满足门禁协议");
+  ok(ticket.includes("第一季故事设计") && ticket.includes("全季分段")
+    && !ticket.includes("story/outline.v1.json") && !ticket.includes("story/assets.v1.json")
+    && !ticket.includes("schema") && !ticket.includes("两个 JSON"),
+  "首张创作票只描述故事工作，不把存储格式和 schema 变成编剧任务");
   ok((JSON.parse(readFileSync(join(data, "paper-moon", "board", "counter.json"), "utf8")) as { next?: number }).next === 2, "counter hint 推进到下一 ID");
   ok(readdirSync(join(data, "paper-moon", "board", "tickets")).length === 1, "立项恒只创建一张首票");
   const snapshot = buildWorkspaceSnapshot(loadConfig(tmp), Date.parse("2026-08-10T10:00:00.000Z"));

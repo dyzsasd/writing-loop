@@ -593,6 +593,23 @@ export function boardSnapshotHash(tickets: LaneTicket[]): string {
   return createHash("sha256").update(rows.join("\n")).digest("hex");
 }
 
+// 原著拆解属于写作专注阶段。Story Designer 在一次 checkpoint 中会依次写 assignee、
+// Todo/In Progress、updated 与评论；这些是同一创作任务的进度心跳，不是需要 Showrunner
+// 重新协调的板变化。只规范化仍处于 Todo/In Progress 的 source-analysis 票；进入 In Review、
+// 新增求助标签或其他票变化仍会改变快照并唤醒 Showrunner。
+export function showrunnerBoardSnapshotHash(tickets: LaneTicket[]): string {
+  const rows = [...tickets]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map((t) => {
+      const activeSource = (t.state === "Todo" || t.state === "In Progress")
+        && t.labels.includes("source-analysis") && t.labels.includes("story-designer");
+      return activeSource
+        ? [t.id, "source-analysis-active", t.labels.join(","), "", "", "0"].join("\0")
+        : [t.id, t.state, t.labels.join(","), t.assignee ?? "", t.updatedRaw, String(t.mtimeMs)].join("\0");
+    });
+  return createHash("sha256").update(rows.join("\n")).digest("hex");
+}
+
 // 文件内容哈希；ENOENT ⇒ "absent"（合法态，参与变更比对）；其他读取失败 ⇒ null（保守放行）。
 export function hashFileOrAbsent(path: string): string | null {
   try { return createHash("sha256").update(readFileSync(path)).digest("hex"); }
@@ -730,16 +747,20 @@ export function laneSweep(
   lastSweepEndMs: number | null, cadenceMs = SWEEP_CADENCE_MS,
 ): string[] {
   const hits: string[] = [];
-  const ip = tickets.find((t) => t.state === "In Progress");
+  const activeSource = tickets.find((t) => (t.state === "Todo" || t.state === "In Progress")
+    && t.labels.includes("source-analysis") && t.labels.includes("story-designer"));
+  const freshSource = activeSource?.state === "In Progress" && !orphaned(activeSource, nowMs);
+  const ip = tickets.find((t) => t.state === "In Progress"
+    && (t !== activeSource || orphaned(t, nowMs)));
   if (ip) hits.push(fmtHit("∃ In Progress", ip));
   if (anyLock === null) hits.push("锁扫描不可判——保守命中");
-  else if (anyLock) hits.push("∃ .lock 文件（板/剧情资产/repo）");
+  else if (anyLock && !freshSource) hits.push("∃ .lock 文件（板/剧情资产/repo）");
   const mislabeled = tickets.find((t) => !TERMINAL_STATES.has(t.state)
     && (t.owner === null || !t.labels.some((l) => AGENT_ORDER.includes(l))));
   if (mislabeled) hits.push(fmtHit("错标：非终态票缺 owner/tier 标签（SKILL §0 逃逸口②）", mislabeled));
   const ks = tickets.find((t) => t.state === "In Review" && t.labels.includes("keystone") && claimStale(t, nowMs, KEYSTONE_STALL_MS));
   if (ks) hits.push(fmtHit("keystone-stall（In Review 停滞 >30min，§1 护栏）", ks));
-  if (lastSweepEndMs === null || nowMs - lastSweepEndMs > cadenceMs) {
+  if (!activeSource && (lastSweepEndMs === null || nowMs - lastSweepEndMs > cadenceMs)) {
     hits.push(`兜底节拍：距上次 sweep fire >${Math.round(cadenceMs / 60_000)}min（保守）`);
   }
   return hits;
@@ -967,7 +988,9 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   // 解析不出的票可能属于任何 lane，agent 侧探针（LLM 解析更宽容）是修复它的机会。
   if (snap.unreadable) reasons.push("板目录读取失败——保守放行");
   if (snap.anyMalformed) reasons.push("板上存在 frontmatter 边缘形态票——保守放行");
-  const boardHash = boardSnapshotHash(snap.tickets);
+  // GateEval.boardHash 是 Showrunner 的持久基线载体；原著分析期间忽略同一创作票的
+  // checkpoint 心跳，避免每个分块都唤醒协调角色。
+  const boardHash = showrunnerBoardSnapshotHash(snap.tickets);
   let northStarHash: string | null = null;
   const statePath = (name: string): string => join(io.projData, "state", name);
   switch (agent) {

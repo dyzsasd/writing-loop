@@ -151,6 +151,9 @@ Episode: 1
   ok(pageHtml.includes("原著分析") && pageHtml.includes("故事结构") && pageHtml.includes("人物设定")
     && pageHtml.includes("美术资产") && pageHtml.includes("分集与质量"),
   "项目概览提供完整的创作工作台信息架构，不再只呈现看板");
+  ok(pageHtml.includes("创作资产") && pageHtml.includes("全季结构") && pageHtml.includes("人物与世界")
+    && !pageHtml.includes("story/outline.v1.json") && !pageHtml.includes("story/assets.v1.json"),
+  "项目首页只呈现创作概念，不向编剧暴露 JSON 实现文件");
   ok(pageHtml.includes("一句话故事已定") && pageHtml.includes("故事结构尚未过门"), "成熟度使用结构化创作信号，不把脚手架当作过门");
   ok(!pageHtml.includes("<img src=x") && pageHtml.includes("&lt;img src=x"), "notice 参数不会注入 HTML");
 
@@ -376,8 +379,8 @@ Episode: 1
     && timelineHtml.includes("故事世界时序") && timelineHtml.includes("观众揭示顺序"),
   "Studio 时间线页面始终可访问，并明确区分 chronology 与 reveal order");
   const assetWorkbench = await fetch(`${base}/p/adapted-drama/assets`);
-  ok(assetWorkbench.status === 200 && (await assetWorkbench.text()).includes("剧情资产图"),
-  "Studio 提供独立的结构化剧情资产工作台，而非把全部事实藏在人物或美术页");
+  ok(assetWorkbench.status === 200 && (await assetWorkbench.text()).includes("人物与世界"),
+  "Studio 提供独立的人物与世界工作台，而非把全部剧情事实藏在人物卡或美术页");
   const wrongStoryMethod = await fetch(`${base}/api/projects/adapted-drama/story`, { method: "POST", headers: { origin: base } });
   ok(wrongStoryMethod.status === 405 && wrongStoryMethod.headers.get("allow") === "GET, HEAD",
   "story API 保持只读，Studio 不能绕过 agent/票据直接改故事资产");

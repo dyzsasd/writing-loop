@@ -113,14 +113,19 @@ writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其�
    部分、版权/相似性策略和聚合阈值。不要预设原著一定值得保留，也不要把操作者的设计改写成
    已证实的原著事实。commit 后执行
    `writing-loop source select --project <project> --chunks <ordered IDs>`；同一范围重放必须 exact。
-3. **每 fire 恰处理一个 chunk**：从 source status 取第一项 remaining，只读对应本地 chunk，写
-   `source/deconstruction/chunks/<chunk-id>.md`。文件必须含三行精确 provenance：
+3. **每 fire 处理一个有界连续批次**：从 source status 取 remaining 的连续前缀，最多 4 个
+   chunk、原文总量最多 320 KiB（先触及任一上限即停）；只读这个批次，分别写
+   `source/deconstruction/chunks/<chunk-id>.md`。每个文件必须含三行精确 provenance：
    `Source-intake:`、`Source-chunk:`、`Source-sha256:`；正文只记章节范围、因果功能、目标/阻力/
    转折、人物功能、可转译名场面、与操作者设计的关系、版权/相似性风险，禁止复制长段原文或
-   原著对白。单独 commit 后，用该 commit 的 40 位 SHA 调
-   `writing-loop source checkpoint --project <project> --chunk <id> --commit <sha>`。
-   若仍有 remaining，追加进度评论，把票 In Progress→Todo、清 assignee，让下一 fire 从持久
-   checkpoint 继续；不得在一次上下文中吞完整本长篇。
+   原著对白。批次只做一次 commit，再以同一 40 位 SHA 为批次内每个 chunk 依次调用
+   `writing-loop source checkpoint --project <project> --chunk <id> --commit <sha>`。若仍有
+   remaining，只追加一条简洁进度评论，把票 In Progress→Todo、清 assignee，让下一 fire 从
+   持久 checkpoint 继续；不得在一次上下文中吞完整本长篇。
+   **写作专注边界**：plan fire 之后，除非出现真实的季范围/版权/人物功能等创作决策，不得扩写
+   `analysis-plan.md`；不得在剧本 repo 或项目 Ticket 中创建覆盖率脚本、测试、斜率/预算/字节/
+   评论长度算法、过程 TSV 或遥测。工具、存储格式、schema、hash、路径迁移等平台问题必须投递
+   workspace 系统改进收件箱，绝不占用项目看板。
 4. **聚合 fire**：remaining=0 后，综合 `analysis-plan.md` 和全部已验 chunk 摘要，填写
    `source/mainline.md`、`source/highlights.md`、`source/characters-function.md`。三文件都带
    `Source-intake: <planId>`，清楚区分「原著事实功能 / 操作者原创方向 / writing-loop 重构提案」；
@@ -154,6 +159,10 @@ writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其�
 以及同时保存 `chronologyIndex`（实际发生顺序）与 `reveal`（观众看到顺序）的 timeline。
 Studio 与 harness 直接渲染/选择 JSON。严禁另建 `outline.md`、`arcs/*.md`、人物/世界 bible
 或 foreshadow/story-state/production Markdown 台账；一个事实只写一次。
+
+**面向编剧的表达边界**：上述文件名、JSON/schema/hash 与迁移规则只是平台实现。Ticket 标题、
+Context、验收标准、交接评论和 Studio 文案只使用“全季结构、分集节拍、人物、世界、伏笔、
+连续性、时间线”等创作概念；不得把序列化格式变更写成项目工作。平台会自动校验和持久化。
 
 - 人物与场景 ID/名称/集数范围必须与 outline companion 精确一致；timeline 的 `assetIds` 必须
   闭合，每一集至少一条 reveal event；事实冲突用 `disputed` 显式建模，不能并存两条不同的

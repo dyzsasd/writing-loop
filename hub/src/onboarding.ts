@@ -624,7 +624,7 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
     sourceIntake,
     outlineTicket: {
       id: ticketId,
-      title: `建立《${input.title}》结构化故事事实源`,
+      title: `完成《${input.title}》第一季故事设计`,
       state: input.kind === "adaptation" ? "Backlog" : "Todo",
       path: join(dataPath, "board", "tickets", `${ticketId}.md`),
     },
@@ -682,18 +682,13 @@ function renderRepoReadme(plan: OnboardingPlan): string {
 
 ${plan.input.logline}
 
-## 文档索引
+## 创作入口
 
-| 路径 | 用途 | 维护与门禁 |
-|---|---|---|
-| \`bible/north-star.md\` | 方向、受众、红线与当前进度 | showrunner；方向级变更需操作者批准 |
-| \`story/outline.v1.json\` | 全剧结构、arc、分集节拍与制作约束的唯一事实源 | story-designer 起草，showrunner + evaluator 过门 |
-| \`story/assets.v1.json\` | 人物、世界、伏笔、连续性与双轨时间线的唯一事实源 | 与结构同批维护；\`writing-loop story status\` 校验 |
-| \`episodes/\` | 分集正文 | writer → reviewer → evaluator |
-| \`evaluation/\` | 里程碑评估与 superseded 历史 | evaluator；文件名含片名与里程碑 |
-| \`source/\` | 对标拆解或授权原著拆书清单 | 只作证据，不混入未授权 IP |
+Studio 统一展示 North Star、原著分析、全季结构、人物与世界、伏笔、连续性、双轨时间线、
+分集正文和质量门。编剧与 Agent 只处理这些创作概念；底层结构化存储、校验和迁移由
+writing-loop 自动完成，不应出现在项目 Ticket 中。
 
-人物、世界、伏笔、状态、时间线与季结构不得另建 Markdown 镜像；Studio 直接渲染上述 JSON。
+同一剧情事实只维护一次；不要另建人物、世界、大纲或台账镜像。
 
 运行态、看板与报告不进 Git，位于：
 
@@ -771,28 +766,29 @@ updated: ${createdAt}
 ---
 ## Context
 
-北极星已由立项服务建立。第一步是直接创建 \`story/outline.v1.json\` 与
-\`story/assets.v1.json\`；showrunner 只验收，不自领起草。禁止另建人物、世界、大纲或台账 Markdown 镜像。
+北极星已由立项服务建立。第一步是完成第一季故事设计：确定全季结构、分集节拍、人物、
+世界规则、关键场景、伏笔、连续性与双轨时间线。showrunner 只做创作验收，不替代
+Story Designer 起草；同一剧情事实不得维护第二份镜像。
 ${needsSource ? "\n改编项目在原著登记和 source-analysis 票通过前不得起草大纲；空白三清单不是分析结果。" : ""}
 
 ## Context-pack
 
-必读（≤8 指针）：\`bible/north-star.md\` 全文、\`source/\` 下的结构化拆解，以及
-\`writing-loop story status --project ${input.key} --json\` 的当前门状态。
+必读：North Star、原著分析结论（改编项目）和平台提供的当前故事 Context Pack。
 
 关键事实：
 ${facts}${adaptation}
 
 ## Acceptance criteria
 
-- \`story/outline.v1.json\` 的分段、节拍、分集、卡点与高潮锚点完整。
-- \`story/assets.v1.json\` 登记人物、世界、场景、伏笔、连续性和双轨时间线。
-- 两个 JSON 互相精确绑定，制作预算不超过 config 上限，且不存在旧 Markdown 镜像。
-- 另 file milestone-eval 大纲定稿门，并以 Blocked-by 建立前置关系。
+- 全季分段、分集节拍、付费卡点、高潮锚点与季终承诺完整。
+- 人物、世界、关键场景、伏笔、连续性和双轨时间线彼此一致且能支持逐集写作。
+- 第一季范围、改编处置与 North Star 一致，制作规模可执行，不存在互相冲突的重复事实。
+- 提交大纲定稿质量门；通过后才进入分集写作。
 
 ## How to verify
 
-showrunner 做结构预审；evaluator 通过大纲定稿门后才能进入分集写作。
+Showrunner 做创作预审；Evaluator 通过大纲定稿门后才能进入分集写作。结构化存储与一致性
+校验由 writing-loop 自动执行，不作为编剧 Ticket。
 
 ---
 ## Comments

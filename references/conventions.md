@@ -736,6 +736,17 @@ proposedChange,source:{project,agent,projectTicket:null}}`。项目票只有在�
 操作者应用提案 = 人类授权。产品资产（north-star、两份 story JSON、正文）不在此列
 ——它们是产品本身，按 §19/§21a 的门禁流转。genre profile 校准结果同走提案流程。
 
+### 创作看板边界与原著分析专注模式
+
+- 项目 Ticket、交接评论与 Studio 只使用创作语言：季结构、分集节拍、人物、世界、伏笔、
+  连续性、时间线、版权边界与创作品质。JSON、schema、hash、文件名、路径迁移、格式转换、
+  覆盖率脚本和过程遥测都是平台实现，不得成为剧本工作或验收目标。
+- 若平台实现阻碍创作，按上一节投递 workspace 系统改进提案；不得污染当前项目板。
+- source-analysis 为单写者专注阶段：Story Designer 按最多 4 chunks / 320 KiB 的连续有界批次
+  推进；普通 checkpoint 不唤醒 Showrunner，普通 cadence/正常写锁不唤醒 sweep。Showrunner 只在
+  In Review 或真实创作决策时介入；sweep 只处理陈旧、孤儿、损坏与错标。
+- 底层仍可使用严格结构化存储和确定性校验，但它对编剧透明；序列化格式变更由平台迁移完成。
+
 ## §18. Backend — 本地文件板协议（v1 唯一 backend）
 
 板目录：`<workspace>/.writing-loop/<project-key>/board/`（workspace 根解析见 §11）。

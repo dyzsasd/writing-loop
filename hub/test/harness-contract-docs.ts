@@ -98,16 +98,27 @@ const automaticSourcePhrases = [
   "正常立项没有第二次手工登记",
   "Le parcours normal n'a pas de seconde inscription manuelle",
 ];
+const boundedBatchPhrases = [
+  "bounded consecutive batch of up to four chunks",
+  "最多 4 个、总量不超过 320 KiB 的有界批次",
+  "lot contigu borné de quatre chunks maximum",
+];
+const contentFirstPatterns = [
+  /structured serialization is an internal platform detail and\s+never becomes a creative ticket/,
+  /底层结构化格式由平台维护，不会成为编剧 Ticket/,
+  /sérialisation structurée reste interne à la plateforme et ne devient\s+jamais un ticket créatif/,
+];
 for (const [index, guide] of guides.entries()) {
   ok(guide.includes("OpenCode") && guide.includes("add-script")
     && guide.includes("project plan") && guide.includes("project create"),
   `指南 ${index + 1} 明示 OpenCode-only 的非 slash 立项入口`);
   ok(guide.includes(automaticSourcePhrases[index]!) && guide.includes("source-analysis")
-    && guide.includes("source status --project my-drama") && !guide.includes("my-drama/source/novel.txt"),
+    && guide.includes("source status --project my-drama") && guide.includes(boundedBatchPhrases[index]!)
+    && !guide.includes("my-drama/source/novel.txt"),
   `指南 ${index + 1} 把原著交给立项后自动 source-analysis，而非要求第二次手工登记或外部拆书`);
-  ok(guide.includes("story/outline.v1.json") && guide.includes("story/assets.v1.json")
-    && guide.includes("Context Pack") && guide.includes("skeleton") && guide.includes("beats") && guide.includes("full"),
-  `指南 ${index + 1} 同步结构伴随文件与三阶段质量门`);
+  ok(contentFirstPatterns[index]!.test(guide) && guide.includes("Context Pack")
+    && /season|全季|saison/i.test(guide) && /Timeline|时间线|chronologie/i.test(guide),
+  `指南 ${index + 1} 以创作概念说明结构化能力，不把实现文件变成编剧任务`);
 }
 ok(read("skills", "add-script", "SKILL.md").includes("不是正常立项步骤")
   && read("skills", "add-script", "SKILL.md").includes("同一次确认会在项目发布后自动登记原著")

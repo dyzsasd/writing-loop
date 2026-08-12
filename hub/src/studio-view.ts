@@ -237,7 +237,7 @@ function shell(title: string, body: string, snapshot: WorkspaceSnapshot, project
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>${esc(title)} · writing-loop</title><style>${STYLE}</style></head><body data-stream="${esc(at(base, "/api/stream"))}"><main class="shell">
   <header class="topbar"><a class="brand" href="${esc(home)}"><b>WRITING / LOOP</b><small>Writers' room</small></a>${projectCrumb}<span class="live">本地实时投影</span></header>
   ${body}
-  <footer class="footer"><span>writing-loop studio · schema ${snapshot.schemaVersion}</span><span>更新于 ${esc(new Date(snapshot.generatedAt).toLocaleString("zh-CN"))}</span><span class="path">${esc(snapshot.workspaceRoot)}</span></footer>
+  <footer class="footer"><span>writing-loop studio</span><span>更新于 ${esc(new Date(snapshot.generatedAt).toLocaleString("zh-CN"))}</span><span class="path">${esc(snapshot.workspaceRoot)}</span></footer>
   </main>${liveScript}</body></html>`;
 }
 
@@ -286,19 +286,19 @@ function storyAuthorityPanel(project: ProjectSnapshot, story: StoryStudioReadMod
   const catalog = design?.catalog;
   const rows = [
     charter?.exists
-      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/document/north-star`))}"><i class="doc-mark"></i><div><b>创作宪章</b><small>bible/north-star.md · 方向与红线，不存剧情事实</small></div><span>${Math.max(1, Math.round(charter.bytes / 1024))} KB</span></a>`
-      : `<div class="doc-row"><i class="doc-mark"></i><div><b>创作宪章</b><small>bible/north-star.md</small></div><span>未建立</span></div>`,
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/document/north-star`))}"><i class="doc-mark"></i><div><b>创作宪章</b><small>方向、受众与创作红线</small></div><span>${Math.max(1, Math.round(charter.bytes / 1024))} KB</span></a>`
+      : `<div class="doc-row"><i class="doc-mark"></i><div><b>创作宪章</b><small>方向、受众与创作红线</small></div><span>未建立</span></div>`,
     design
-      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>故事结构</b><small>story/outline.v1.json · 唯一结构事实源</small></div><span>${design.manifest.episodes.length} 集</span></a>`
-      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>故事结构</b><small>story/outline.v1.json</small></div><span>待建立</span></a>`,
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>全季结构</b><small>单元、分集节拍、卡点与高潮</small></div><span>${design.manifest.episodes.length} 集</span></a>`
+      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/story`))}"><i class="doc-mark"></i><div><b>全季结构</b><small>单元、分集节拍、卡点与高潮</small></div><span>待建立</span></a>`,
     catalog
-      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>剧情资产图</b><small>story/assets.v1.json · 人物、世界、伏笔与连续性</small></div><span>${catalog.manifest.assets.length} 项</span></a>`
-      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>剧情资产图</b><small>story/assets.v1.json</small></div><span>待建立</span></a>`,
+      ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>人物与世界</b><small>角色、地点、组织、规则、物件与伏笔</small></div><span>${catalog.manifest.assets.length} 项</span></a>`
+      : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/assets`))}"><i class="doc-mark"></i><div><b>人物与世界</b><small>角色、地点、组织、规则、物件与伏笔</small></div><span>待建立</span></a>`,
     catalog
       ? `<a class="doc-row ok" href="${esc(at(base, `/p/${enc(project.key)}/timeline`))}"><i class="doc-mark"></i><div><b>双轨时间线</b><small>由同一资产图直接渲染</small></div><span>${catalog.manifest.timeline.length} 事件</span></a>`
       : `<a class="doc-row" href="${esc(at(base, `/p/${enc(project.key)}/timeline`))}"><i class="doc-mark"></i><div><b>双轨时间线</b><small>不再维护独立台账</small></div><span>待建立</span></a>`,
   ];
-  return `<section class="panel"><div class="panel-head"><h2>故事事实源</h2><p>一个事实只写一次</p><span class="aside">${catalog ? "STRUCTURED" : "BUILDING"}</span></div><div class="doc-list">${rows.join("")}</div></section>`;
+  return `<section class="panel"><div class="panel-head"><h2>创作资产</h2><p>一个剧情事实只维护一次，系统自动保持一致</p><span class="aside">${catalog ? "READY" : "BUILDING"}</span></div><div class="doc-list">${rows.join("")}</div></section>`;
 }
 
 function roomPanel(project: ProjectSnapshot): string {
@@ -470,7 +470,7 @@ function sourceSection(model: StoryStudioReadModel): string {
 
 function storySection(model: StoryStudioReadModel): string {
   const story = model.story;
-  if (!story) return `${sectionHeader("Story architecture", "故事结构", "等待 Story Designer 直接建立唯一结构事实源 story/outline.v1.json。", "0", "EPISODES MAPPED")}<section class="panel"><div class="empty">质量门 S00 尚未通过；看板仍是当前任务真相源。</div></section>`;
+  if (!story) return `${sectionHeader("Story architecture", "全季结构", "等待 Story Designer 完成单元、分集节拍、卡点与高潮设计。", "0", "EPISODES MAPPED")}<section class="panel"><div class="empty">故事设计尚未通过质量门；当前进度以创作看板为准。</div></section>`;
   const decisions = (["keep", "cut", "merge", "risks"] as const).flatMap((kind) => story.manifest.adaptation[kind].map((row) => ({ kind, ...row })));
   const decisionLabels = { keep: "保留", cut: "删除", merge: "合并", risks: "风险" } as const;
   return `${sectionHeader("Story architecture", "故事结构", story.manifest.adaptation.core, String(story.assets.counts.episodes), "EPISODES MAPPED")}
@@ -483,7 +483,7 @@ function charactersSection(model: StoryStudioReadModel): string {
   const characters = story?.manifest.characters ?? [];
   const catalog = new Map((story?.catalog?.manifest.assets ?? []).map((row) => [row.id, row] as const));
   return `${sectionHeader("Character workbench", "人物设定", "按角色工作，而不是在卡片墙里找信息；source refs 与推断内容始终可见。", String(characters.length), "NAMED CHARACTERS")}
-  <section class="panel"><div class="cast-grid">${characters.map((row) => { const asset = catalog.get(row.id); return `<article class="dossier${row.sourceRefs.length ? "" : " inferred"}"><span class="tier">${esc(row.tier)}</span><h3>${esc(row.name)}</h3><small>${esc(row.id)} · EP ${row.firstEpisode}–${row.lastEpisode} · ${asset?.facts.length ?? 0} FACTS</small><p><b>戏剧功能：</b>${esc(row.role)}</p><p><b>人物弧：</b>${esc(row.arc ?? "功能角色，不虚构强行成长弧")}</p><p><b>当前事实：</b>${esc(asset?.facts.filter((fact) => fact.state === "current").map((fact) => `${fact.key}=${fact.value}`).join("；") || "等待 assets.v1.json")}</p><small>${asset?.sourceRefs.length ? `来源 ${esc(asset.sourceRefs.join(" · "))}` : "推断/原创：无结构化 source ref"}</small></article>`; }).join("") || `<div class="empty">等待人物分级与角色功能表。</div>`}</div></section>`;
+  <section class="panel"><div class="cast-grid">${characters.map((row) => { const asset = catalog.get(row.id); return `<article class="dossier${row.sourceRefs.length ? "" : " inferred"}"><span class="tier">${esc(row.tier)}</span><h3>${esc(row.name)}</h3><small>${esc(row.id)} · EP ${row.firstEpisode}–${row.lastEpisode} · ${asset?.facts.length ?? 0} FACTS</small><p><b>戏剧功能：</b>${esc(row.role)}</p><p><b>人物弧：</b>${esc(row.arc ?? "功能角色，不虚构强行成长弧")}</p><p><b>当前事实：</b>${esc(asset?.facts.filter((fact) => fact.state === "current").map((fact) => `${fact.key}=${fact.value}`).join("；") || "等待人物事实")}</p><small>${asset?.sourceRefs.length ? `来源 ${esc(asset.sourceRefs.join(" · "))}` : "推断/原创：暂无原著依据"}</small></article>`; }).join("") || `<div class="empty">等待人物分级与角色功能表。</div>`}</div></section>`;
 }
 
 function timelineSection(model: StoryStudioReadModel): string {
@@ -498,8 +498,8 @@ function timelineSection(model: StoryStudioReadModel): string {
 function assetGraphSection(model: StoryStudioReadModel): string {
   const assets = model.story?.catalog?.manifest.assets ?? [];
   const cards = assets.map((row) => `<article class="dossier"><span class="tier">${esc(row.type)} · ${esc(row.status)}</span><h3>${esc(row.label)}</h3><small>${esc(row.id)} · ${esc(row.importance)}${row.episodes ? ` · EP ${row.episodes.first}–${row.episodes.last}` : " · GLOBAL"}</small><p>${esc(row.summary)}</p><p><b>Facts</b> ${row.facts.length} · <b>Relations</b> ${row.relations.length}</p><div class="asset-tags">${row.context.agents.map((agent) => `<span>${esc(agent)}</span>`).join("")}</div><small>${esc(row.sourceRefs.join(" · ") || "无 provenance")}</small></article>`).join("");
-  return `${sectionHeader("Typed story graph", "剧情资产图", "人物、世界规则、地点、组织、道具、场景、伏笔与连续性共享稳定 ID、事实、关系、生命周期和上下文策略。", String(assets.length), "STRUCTURED ASSETS")}
-  <section class="panel"><div class="decision-grid">${cards || `<div class="empty">等待 Story Designer 创建 story/assets.v1.json。</div>`}</div></section>`;
+  return `${sectionHeader("Story world", "人物与世界", "人物、世界规则、地点、组织、道具、场景、伏笔与连续性在这里统一维护。", String(assets.length), "STORY ASSETS")}
+  <section class="panel"><div class="decision-grid">${cards || `<div class="empty">等待 Story Designer 建立人物、世界与伏笔。</div>`}</div></section>`;
 }
 
 function artSection(model: StoryStudioReadModel): string {
@@ -582,7 +582,7 @@ export function onboardingPlanPage(snapshot: WorkspaceSnapshot, plan: Onboarding
   <section class="panel stack"><div class="plan-grid"><div class="plan-item"><b>${esc(plan.input.title)}</b><small>${esc(plan.input.key)} · ${esc(plan.input.kind)}</small></div><div class="plan-item"><b>${esc(plan.input.format)} / ${esc(plan.input.monetization)}</b><small>${plan.input.totalEpisodes} 集 · ${esc(plan.input.genre)}</small></div><div class="plan-item"><b>正文仓</b><small>${esc(plan.repoPath)}</small></div><div class="plan-item"><b>运行态</b><small>${esc(plan.projectDataPath)}</small></div><div class="plan-item"><b>首张大纲票</b><small>${esc(plan.outlineTicket.id)} · ${esc(plan.outlineTicket.title)}</small></div><div class="plan-item"><b>${plan.files.length} 个计划文件</b><small>Git scaffold + board + lessons + receipt</small></div></div>
   ${sourcePreview ? `<div class="plan-grid">${sourcePreview}</div>` : ""}
   <div><h2>警告与人工确认</h2>${warnings}</div>
-  <div class="confirm-box"><b>Plan ID</b><div class="path">${esc(plan.planId)}</div><p>提交会以原子方式预留最终 repo 与运行态目录，在 durable journal 保护下完成 Git 首提交和项目数据；config.json 仍是最后的可见性提交点。目标路径已存在时绝不接管或覆盖。</p>
+  <div class="confirm-box"><b>立项确认码</b><div class="path">${esc(plan.planId)}</div><p>确认后会建立独立创作项目、North Star 与首张故事设计任务。已有同名项目不会被接管或覆盖。</p>
     <form method="post" action="${esc(at(base, "/projects/create"))}"><input type="hidden" name="payload" value="${esc(encodedInput)}"><input type="hidden" name="planId" value="${esc(plan.planId)}"><div class="toolbar"><button class="btn danger" type="submit">${plan.sourceIntake ? "确认立项并加入原著分析队列" : "确认并完整立项"}</button><a class="btn" href="${esc(at(base, "/projects/new"))}">返回修改</a></div></form>
   </div></section></div>`;
   return shell(`确认立项 · ${plan.input.title}`, body, snapshot, undefined, base);

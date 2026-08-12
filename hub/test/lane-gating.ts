@@ -20,7 +20,7 @@ import {
   laneEpisodeWriter, laneEvaluator, laneMarketWatch, laneReflect, laneReviewer,
   laneScriptDoctor, laneShowrunner, laneStoryDesigner, laneSweep,
   lastMonthlyBoundaryMs, lastWeeklyBoundaryMs, parseLaneTicket,
-  reportsEscape, shaEq, sweepLockScan, WlExit,
+  reportsEscape, shaEq, showrunnerBoardSnapshotHash, sweepLockScan, WlExit,
   type LaneTicket,
 } from "../src/scheduler.ts";
 import type { WlConfig, WlProject } from "../src/workspace.ts";
@@ -109,6 +109,20 @@ function testParse(): void {
   check("板快照哈希：state 变 ⇒ 哈希变", boardSnapshotHash(a) !== boardSnapshotHash(c));
   const d = [a[0], tk({ id: "WL-2", state: "Done", mtimeMs: NOW })];
   check("板快照哈希：mtime 变（人类手写留言信号）⇒ 哈希变", boardSnapshotHash(a) !== boardSnapshotHash(d));
+  const sourceTodo = tk({ id: "WL-SOURCE", state: "Todo", owner: "story-designer",
+    labels: ["writing-loop", "Feature", "source-analysis", "story-designer"] });
+  const sourceWorking = tk({ ...sourceTodo, state: "In Progress", assignee: "story-designer (run abc)",
+    updatedRaw: "later", updatedMs: NOW, mtimeMs: NOW });
+  check("Showrunner 快照：原著分析 Todo→In Progress/checkpoint 心跳不算协调变化",
+    showrunnerBoardSnapshotHash([sourceTodo]) === showrunnerBoardSnapshotHash([sourceWorking]));
+  check("Showrunner 快照：原著分析进入 In Review 仍算协调变化",
+    showrunnerBoardSnapshotHash([sourceTodo]) !== showrunnerBoardSnapshotHash([
+      tk({ ...sourceWorking, state: "In Review" }),
+    ]));
+  check("Showrunner 快照：新增真正的 needs-showrunner 票仍算协调变化",
+    showrunnerBoardSnapshotHash([sourceTodo]) !== showrunnerBoardSnapshotHash([
+      sourceTodo, tk({ id: "WL-DECISION", labels: ["writing-loop", "needs-showrunner"] }),
+    ]));
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +250,16 @@ function testSweep(): void {
     laneSweep([], NOW, false, NOW - 12 * MIN, 10 * MIN).length > 0);
   check("sweep cadence 随 config 缩短反例：阈值 10min、5min 前刚跑过 ⇒ 空",
     laneSweep([], NOW, false, NOW - 5 * MIN, 10 * MIN).length === 0);
+  const source: Partial<LaneTicket> = { owner: "story-designer",
+    labels: ["writing-loop", "Feature", "source-analysis", "story-designer"] };
+  check("sweep 原著专注模式：新鲜 In Progress + 正常 repo lock + cadence 到期仍不打断写作",
+    laneSweep([tk({ state: "In Progress", assignee: "story-designer (run source)",
+      updatedMs: NOW - 5 * MIN, ...source })], NOW, true, NOW - HOUR).length === 0);
+  check("sweep 原著专注模式：认领陈旧仍作为孤儿恢复候选",
+    laneSweep([tk({ state: "In Progress", assignee: "story-designer (run source)",
+      updatedMs: NOW - 2 * HOUR, ...source })], NOW, true, NOW - HOUR).length > 0);
+  check("sweep 原著专注模式：Todo 时遗留 lock 仍需清理",
+    laneSweep([tk({ state: "Todo", ...source })], NOW, true, NOW - HOUR).length > 0);
 }
 
 function testMarketWatch(): void {

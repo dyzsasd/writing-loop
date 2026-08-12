@@ -104,14 +104,14 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 
 正常立项没有第二次手工登记。你确认的 project plan 已经绑定原著指纹、改编建议、权利范围
 和 Harness 授权；project create 会自动在本地复制/分块原著、只提交指纹与改编建议，并创建
-`source-analysis` 票。此时直接启动编剧室：Story Designer 自主选择本季范围，每 fire 分析一块，
+`source-analysis` 票。此时直接启动编剧室：Story Designer 自主选择本季范围，每 fire 连续分析
+最多 4 个、总量不超过 320 KiB 的有界批次，
 聚合三清单后交 Showrunner 验收。`writing-loop source status --project my-drama` 是只读状态面；
 `source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
-拆书门通过后，Story Designer 只写严格的 `story/outline.v1.json` 和
-`story/assets.v1.json` 资产图，并按
-`skeleton → beats → full` 自动运行确定性质量门。你不需要手工执行 `story validate`：打开
-Studio 项目页即可在“原著分析 / 故事结构 / 时间线 / 剧情资产 / 人物设定 / 美术资产 / 分集与质量”中查看同一事实。
+拆书门通过后，Story Designer 完成全季结构、分集节拍、人物、世界、伏笔、连续性与双轨时间线，
+并自动运行确定性质量门。底层结构化格式由平台维护，不会成为编剧 Ticket。打开 Studio 项目页
+即可在“原著分析 / 全季结构 / 时间线 / 人物与世界 / 美术资产 / 分集与质量”中查看同一事实。
 人物、世界、地点、道具、伏笔、连续性和双轨时间线按 ticket/agent/集数生成有界 Context Pack；
 skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 

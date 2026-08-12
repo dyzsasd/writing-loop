@@ -97,6 +97,12 @@ pass ⇒ 评论记录 manifest/selected/聚合 commit，source-analysis 票 Done
 `Blocked-by` 与 `source-pending`。fail ⇒ 附逐项证据，把同票退回 Todo（清 assignee，保留
 source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张清单，也不得调用外部拆书 skill。
 
+**原著分析专注模式**：control.phase=`analyzing` 时，普通 chunk checkpoint、进度评论、
+Todo↔In Progress 心跳都不是协调变化；不要审计吞吐、覆盖率、斜率、字节预算、评论长度或
+analysis-plan 的过程算法。只有本票进入 In Review、明确的季范围/权利/创作方向决策带
+`needs-showrunner`，或操作者修改 North Star 时才介入。存储格式、JSON/schema/hash、路径迁移
+属于平台维护，必须进入 workspace 系统改进收件箱，永远不要为它创建剧本项目 Ticket。
+
 **A1 · arc-design ⇒ 大纲门（§21a-design.5 + §23 清单）**。读节拍单 + 父票
 `Designed into:` 子票清单。**幂等入口**：父票已带 `Approved-hash:` 评论行 = 上
 fire 已判 pass、崩于放行途中 ⇒ **不重判**，直接补完「promote 全部子票 → 父票 Done」
