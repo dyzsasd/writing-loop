@@ -983,6 +983,10 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   const git = io.gitSha ?? gitLastSha;
   const lastClean = io.lastCleanEndMs ?? null;
   const snap = readBoardTickets(io.boardDir);
+  const sourceAnalysisFocused = snap.tickets.some((ticket) =>
+    (ticket.state === "Todo" || ticket.state === "In Progress")
+    && ticket.labels.includes("source-analysis")
+    && ticket.labels.includes("story-designer"));
   const reasons: string[] = [];
   // frontmatter 边缘形态/板不可读 ⇒ 对**全部** agent 保守放行——统一的安全不变量：
   // 解析不出的票可能属于任何 lane，agent 侧探针（LLM 解析更宽容）是修复它的机会。
@@ -1048,18 +1052,22 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       break;
     }
     case "reflect": {
-      const raw = stateStr(readStateJson(statePath("reflect-state.json")), "lastRetro", "lastRetroAt", "lastRun");
-      const parsed = raw === null ? NaN : Date.parse(raw);
-      reasons.push(...laneReflect(nowMs, Number.isNaN(parsed) ? null : parsed));
-      // lessons 迁移待办逃逸口（reflect SKILL §0 逐字 / §14 迁移条款，执行者=reflect；
-      // 两次 stat 零读取成本——窗口内也必须唤醒，否则迁移义务被日频门假跳过，Fix 轮 1）：
-      // 旧单文件在而 lessons/ 缺失 = 迁移待办；两者并存 = 迁移崩在中途的残态（未改名
-      // .migrated），同命中。
-      const legacyLessons = join(io.projData, "lessons.md");
-      if (existsSync(legacyLessons)) {
-        reasons.push(existsSync(join(io.projData, "lessons"))
-          ? "lessons 迁移中途残态：lessons/ 已建而 lessons.md 未改名 .migrated（§14）"
-          : "lessons 迁移待办：旧单文件 lessons.md 在、lessons/ 目录缺失（§14）");
+      // 原著分析是长时间的创作 fire：在来源票进入 In Review 前，不启动日频复盘或
+      // lessons 迁移。未分发的人类报告仍由 switch 后的 reports escape 单独唤醒。
+      if (!sourceAnalysisFocused) {
+        const raw = stateStr(readStateJson(statePath("reflect-state.json")), "lastRetro", "lastRetroAt", "lastRun");
+        const parsed = raw === null ? NaN : Date.parse(raw);
+        reasons.push(...laneReflect(nowMs, Number.isNaN(parsed) ? null : parsed));
+        // lessons 迁移待办逃逸口（reflect SKILL §0 逐字 / §14 迁移条款，执行者=reflect；
+        // 两次 stat 零读取成本——窗口内也必须唤醒，否则迁移义务被日频门假跳过，Fix 轮 1）：
+        // 旧单文件在而 lessons/ 缺失 = 迁移待办；两者并存 = 迁移崩在中途的残态（未改名
+        // .migrated），同命中。
+        const legacyLessons = join(io.projData, "lessons.md");
+        if (existsSync(legacyLessons)) {
+          reasons.push(existsSync(join(io.projData, "lessons"))
+            ? "lessons 迁移中途残态：lessons/ 已建而 lessons.md 未改名 .migrated（§14）"
+            : "lessons 迁移待办：旧单文件 lessons.md 在、lessons/ 目录缺失（§14）");
+        }
       }
       break;
     }

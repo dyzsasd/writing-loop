@@ -468,6 +468,17 @@ function testStateAndGitSeams(): void {
   writeFileSync(join(w.projData, "state", "reflect-state.json"),
     JSON.stringify({ lastRetro: new Date(NOW - 25 * HOUR).toISOString() }));
   check("reflect：窗口到期 ⇒ open", evalLaneGate("reflect", w.io()).open);
+  mkdirSync(w.boardDir, { recursive: true });
+  const sourceTicket = (state: "Todo" | "In Review"): string =>
+    `---\nid: WL-SOURCE\ntitle: 分析原著\nstate: ${state}\nowner: story-designer\n` +
+    `labels: [writing-loop, Feature, source-analysis, story-designer]\n` +
+    `assignee: null\nupdated: 2026-07-15T11:00:00Z\n---\n`;
+  writeFileSync(join(w.boardDir, "WL-SOURCE.md"), sourceTicket("Todo"));
+  check("reflect：原著分析 Todo 期间即使日频到期也 gated",
+    !evalLaneGate("reflect", w.io()).open);
+  writeFileSync(join(w.boardDir, "WL-SOURCE.md"), sourceTicket("In Review"));
+  check("reflect：原著分析进入 In Review 后恢复日频回顾",
+    evalLaneGate("reflect", w.io()).open);
   rmSync(w.ws, { recursive: true, force: true });
 }
 

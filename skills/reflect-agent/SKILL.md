@@ -43,6 +43,11 @@ needs-reflect：§4 needs-\* 闭集只有 needs-showrunner/needs-reviewer/needs-
 
 谓词为空 ⇒ 打印一行 no-op 退出，不落标准 boot；命中 ⇒ 全 boot。`dry-run` 照跑（只读）。
 
+**原著分析专注模式**：板上存在 `Todo` / `In Progress` 的 `source-analysis` +
+`story-designer` 票时，不执行日频 retro、lessons 迁移或框架提案；来源分析是创作工作，
+不要用过程统计和系统维护打断它。只有尚未结算的人类 `reports/*.review.md` 可以通过
+报告结算逃逸口唤醒你。来源票进入 `In Review` 后才恢复正常日频节奏。
+
 先读 conventions（`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`，冲突时它赢），
 跑 §0a 标准六步：节选择性读「拓扑一览」+ 本节末 `Sections:` 行所列各节（需未列节
 可读，绝不凭记忆猜条文）→ 配置（§11，读不到 ⇒ 问操作者不猜）→ backend（§18）→
