@@ -518,6 +518,14 @@ function sourceReadme(): string {
   return `# 原著分析工作区\n\n- \`adaptation-brief.md\`：操作者提供的改编设计与原著指纹。\n- \`analysis-plan.md\`：由 writing-loop Source Analyst 生成的本季取材范围与筛选问题。\n- \`deconstruction/chunks/\`：有界创作摘要；不复制大段原文。\n- \`mainline.md\` / \`highlights.md\` / \`characters-function.md\`：Source Analyst 完成筛选后交给 Story Designer 的改编素材。\n\n原著全文只存于项目运行态，不进入 Git；未经 intake 中的明确 Harness 授权不得读取。\n`;
 }
 
+function creativeSourceTicket(ticket: string): string {
+  const start = ticket.indexOf("## Acceptance criteria\n");
+  const end = start < 0 ? -1 : ticket.indexOf("\n---\n## Comments", start);
+  if (start < 0 || end < 0) throw new SourceIntakeError("source-analysis ticket 模板缺少创作验收段");
+  const creative = `## Acceptance criteria\n- 冻结一个连续、可形成完整第一季弧线的最小取材窗口，不把全书做成资料库。\n- 每轮只筛选一段连续内容，优先提炼冲突、权力机制、人物功能、名场面与改编风险。\n- 完成后只保留最多12条主线、12个名场面和18个人物功能，交 Showrunner 验收。\n- 票据只记录创作判断，不记录工具、格式、性能或过程统计。\n\n## How to verify\n本季素材能回答北极星的核心问题，且未分析范围、改编取舍与相似性风险清楚可审。\n`;
+  return ticket.slice(0, start) + creative + ticket.slice(end);
+}
+
 function ensureRuntime(root: string, key: string, facts: ReturnType<typeof sourceFacts>, createdAt: string): { manifest: SourceIntakeManifest; replayed: boolean } {
   const data = projectDataDir(root, key);
   const finalDir = join(data, SOURCE_DIR);
@@ -637,7 +645,7 @@ function ensureBoard(root: string, key: string, config: WlConfig, planId: string
     const analysisTicketId = existingAnalysis?.id ?? `${configuredPrefix}-${max + 1}`;
     if (!existingAnalysis) {
       const ticket = `---\nid: ${analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${outlineTicketId}]\nduplicateOf: null\ncreated: ${now}\nupdated: ${now}\n---\nSource-intake: ${planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\n\n## Context\n由 writing-loop 的 Source Analyst 快速筛选原著，为 Story Designer 交付有界的第一季改编素材；禁止调用外部拆书 Skill。\n\n## Context-pack\n需读（≤8 指针）：\`source/adaptation-brief.md\`；\`.writing-loop/${key}/${SOURCE_DIR}/${MANIFEST_FILE}\`；本票。\n关键事实：原著 SHA-256=${manifest.source.sha256}；共 ${manifest.chunking.chunks.length} 块；允许 Harness=${manifest.adaptation.processingConsent.allowedHarnesses.join(",")}。\n禁读：首次 plan fire 不读原著全文，只读 manifest 中的标题和分块元数据。\n\n## Acceptance criteria\n- 先冻结最多 32 个连续块的第一季取材窗口。\n- 每 fire 最多处理 8 块 / 480 KiB；每块只保留有界的主线、机制、人物功能、名场面与风险。\n- 批次不维护全局大表；所选范围完成后再聚合最多 12 条主线、12 个名场面和 18 个人物功能。\n- 聚合产物交 showrunner 验收；outline ticket 在通过前保持 Backlog/source-pending。\n\n## How to verify\nmanifest provenance、selected/completed 覆盖、有界聚合与相似性门全部可机械核对。\n\n---\n## Comments\n### ${now} — source-intake\n原著已登记；等待 Source Analyst。\n`;
-      writeDurable(join(tickets, `${analysisTicketId}.md`), ticket, 0o600);
+      writeDurable(join(tickets, `${analysisTicketId}.md`), creativeSourceTicket(ticket), 0o600);
     }
     let outline = readFileSync(outlineFile, "utf8");
     if (!outline.includes(`Source-intake: ${planId}`)) {
@@ -834,7 +842,7 @@ export function restartSourceAnalysis(root: string, key: string, config: WlConfi
     archivePath = join(archiveDir, `${status.control.analysisTicketId}-${stamp}.md`);
     writeDurable(archivePath, readFileSync(ticketFile, "utf8"), 0o600);
     const ticket = `---\nid: ${status.control.analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${status.manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${status.control.outlineTicketId}]\nduplicateOf: null\ncreated: ${status.manifest.createdAt}\nupdated: ${now.toISOString()}\n---\nSource-intake: ${status.manifest.planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\nSource-restart: ${repoCommit}\n\n## Context\n由 Source Analyst 快速筛选原著，只交付第一季所需的有界改编素材；旧分析保存在 Git 历史和板归档中。\n\n## Acceptance criteria\n- 最多选择 32 个连续块；每 fire 最多 8 块 / 480 KiB。\n- 每块最多2个名场面、3个人物功能；批次不维护全局大表。\n- 最终最多12条主线、12个名场面、18个人物功能，交 Showrunner 验收。\n- 不创建技术脚本、过程统计或格式迁移任务。\n\n---\n## Comments\n### ${now.toISOString()} — source-restart\n旧派生分析已归档；从第1块按 Source Analyst 新流程重启。\n`;
-    atomicReplace(ticketFile, ticket);
+    atomicReplace(ticketFile, creativeSourceTicket(ticket));
     fsyncDir(tickets); fsyncDir(archiveDir);
   } finally {
     closeSync(lockFd!); unlinkSync(lock); fsyncDir(board);

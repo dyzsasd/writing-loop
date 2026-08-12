@@ -40,15 +40,15 @@ description: >-
 
 当 phase=`registered`：只读改编设计、North Star 和 manifest headings/行号/字节数，不读正文。
 
-- 写短的 `source/analysis-plan.md`：第一季问题、连续取材窗口、停止理由、3–6个验证问题、
+- 写短的 `source/analysis-plan.md`：第一季问题、连续取材窗口的章节标题、停止理由、3–6个验证问题、
   未分析范围声明、版权与相似性边界。
 - 连续窗口最多 **32 chunks / 2 MiB**；先触及任一上限即停。不得选择全书只为“以后可能有用”。
 - 若 headings 无法精确判断，以故事开端为起点选择最小可验证窗口；后续 Story Designer 可以基于
   已交付证据提出第二季或补充研究，而不是本 fire 扩成全书数据库。
 - commit 后运行 `writing-loop source select` 冻结范围，然后把票交回 Todo。
 
-`analysis-plan.md` 只保存创作问题和范围，不允许出现吞吐、覆盖率、斜率、评论字节、fire 数、
-脚本、schema、hash 迁移或过程算法。
+`analysis-plan.md` 只保存创作问题和范围。chunk ID 仅可作为简短来源引用；不写累计块数、字节、
+上限、吞吐、覆盖率、斜率、fire 数、脚本、schema、hash、命令、剩余工序或过程算法。
 
 ## 3. Scan fire：快速、有界、一次提交
 
@@ -77,7 +77,9 @@ Source-sha256: <sha256>
 
 本批次只做一次 commit，以同一40位 SHA 为每块依次运行
 `writing-loop source checkpoint --project <project> --chunk <id> --commit <sha>`。Ticket 只追加一条不超过
-600字的创作交接：完成范围、最多3条新判断、下一块。若有 remaining，票回 Todo、清 assignee。
+400字的创作交接，严格只有三段：`范围`（用章节标题）、`创作判断`（最多3条）、`下一步`。
+禁止写 commit、phase、selected/completed/remaining、chunk 数、字节、上限、fire 数或剩余工序。
+若有 remaining，票回 Todo、清 assignee。
 
 ## 4. Synthesis fire：交付而非囤积
 

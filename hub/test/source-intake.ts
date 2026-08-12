@@ -79,6 +79,7 @@ try {
   ok(outline.includes("state: Backlog") && outline.includes("source-pending") && outline.includes("Blocked-by: SRC-2")
     && analysis.includes("state: Todo") && analysis.includes("source-analysis")
     && analysis.includes("source-analyst") && !analysis.includes("source-analysis, story-designer")
+    && analysis.includes("不把全书做成资料库") && !analysis.includes("480 KiB")
     && analysis.includes("禁止调用外部拆书 Skill"),
     "source analysis is routed only to Source Analyst while outline is durably parked in Backlog");
   ok(!existsSync(join(repo, "novel.txt")) && !readFileSync(join(repo, "source", "adaptation-brief.md"), "utf8").includes(sections.slice(0, 100)),
@@ -162,7 +163,8 @@ try {
   const resetTicket = readFileSync(join(tickets, "SRC-2.md"), "utf8");
   ok(restarted.phase === "registered" && resetStatus?.control.selectedChunks.length === 0
     && resetStatus.control.completedChunks.length === 0 && resetTicket.includes("source-analyst")
-    && resetTicket.includes("state: Todo") && !resetTicket.includes("story-designer"),
+    && resetTicket.includes("state: Todo") && !resetTicket.includes("story-designer")
+    && resetTicket.includes("票据只记录创作判断") && !resetTicket.includes("480 KiB"),
     "restart archives the old analysis and republishes one compact Source Analyst ticket");
   ok(restarted.archivePath !== null && existsSync(restarted.archivePath)
     && !existsSync(join(repo, "source", "deconstruction"))
