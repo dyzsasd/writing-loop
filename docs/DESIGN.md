@@ -39,7 +39,7 @@ citron 十教训 → 机制载体（v2 修订后）：
 | 角色 | dev-loop 原型 | 档位 | 职责一句话 |
 |---|---|---|---|
 | **showrunner 总编剧** | PM | opus/max | north-star+outline 唯一维护者；立项/方向 intake；file 各类创作票；大纲门验收；里程碑监测与 milestone-eval 票发起；Backlog 闸门 |
-| **source-analyst 原著筛选** | researcher | sonnet/high | 只处理 source-analysis：有界选择第一季窗口、快速筛选分块、交付限量改编素材；不设计60集、不维护故事资产 |
+| **source-analyst 原著分析** | researcher | sonnet/high | 只处理 source-analysis：先全书有界扫描与季界规划，再深拆当前季证据并交付限量素材；不设计分集、不维护故事资产 |
 | **story-designer 细纲师** | senior-dev | opus/max | arc 设计票→逐集节拍单（含候选竞争与弃案）→spawn 子票；keystone 亲写；升级接管（Mode: direct-write）；arc punch-up 执行 |
 | **episode-writer 编剧** | junior-dev | sonnet/high | 单集票→读结构化节拍+有界资产 Context Pack+上集→写正文→自检门→剧情资产 delta 声明→In Review |
 | **reviewer 审读** | QA | ≥writer 档（受治理配置，默认 opus/high） | 单集独立验收（三分类+邻集对读+delta 逐条核对，断言必须带正文引文）；fail 三级路由；修订复核；邻集复核票 |
@@ -49,7 +49,7 @@ citron 十教训 → 机制载体（v2 修订后）：
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
 | **sweep** | Sweep | sonnet/high | 生命周期卫生（机制原样 + 本设计新增票类的错标规则） |
 | **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创收定位；改编收原著路径+整体建议+权利+Harness 同意，同一次确认自动 source intake，outline 停 source-pending |
-| **source intake**（onboarding core + Source Analyst；独立 CLI 仅迁移/恢复） | ingest/analysis | sonnet/high | onboarding plan 绑定 workspace-local 原著 bytes+改编设计+Harness 授权；create 自动登记/建票；≤32块取材窗口、每 fire ≤8块/480 KiB、限量素材包→showrunner 门 |
+| **source intake**（onboarding core + Source Analyst；独立 CLI 仅迁移/恢复） | ingest/analysis | sonnet/high | onboarding plan 绑定 workspace-local 原著 bytes+改编设计+Harness 授权；create 自动登记/建票；先全书有界扫描，再按季制选择≤32块/2 MiB/4窗口深拆，限量素材包→showrunner 门 |
 | **story companion + asset graph + context resolver** | design evidence | deterministic | `story/outline.v1.json` 管结构；`story/assets.v1.json` 管人物/世界/地点/道具/伏笔/连续性事实及 chronology×reveal 双轨时间线；按 ticket/agent/episode 生成有界 Context Pack，Studio 只读投影 |
 | **system proposal inbox** | framework governance | deterministic | workspace 级 `.writing-loop/system/proposals/WLSYS-*.json` 承接 scheduler/skill/跨项目机制改进；Studio `/system` 独立投影，绝不污染或阻塞任何剧集的创作看板 |
 

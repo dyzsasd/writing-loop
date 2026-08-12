@@ -70,6 +70,10 @@ Sections: §0 §0a §1 §2 §11 §12a §13 §14 §15 §16 §17 §18 §20 §21 §
   门位与卡点语义。
 - **format**（script-format §3）：`live-action` | `ai-anime` | `reelshort-en`——决定
   字数带默认与制作层预算表。
+- **季制**：`seasonStrategy`（`single-season` 单季完结 | `multi-season` 多季项目 |
+  `undecided` 全书扫描后决定）与 `currentSeason`。`totalEpisodes` 始终表示当前季集数，不能用
+  第一季集数冒充全剧范围。改编项目无论季制都先扫描完整原著；多季/待定项目由 Source Analyst
+  提出全剧季界并交 Showrunner 验收。
 - **规模**：`totalEpisodes`、`paywall`（备卡集号，`card1 ⊂ [8..12]`，R4.5 参数从此
   读）、`episodeWordBand`（按 format 默认可覆盖）、`maxPrimaryScenes` /
   `maxNamedCharacters`（制作预算上限，进入结构化 story policy）。
@@ -119,8 +123,9 @@ data 被修改/加项或含 symlink 会拒绝；崩溃在摘要持久化前则�
 即使 create 已自动验证，也运行 `writing-loop project verify <key> --json` 并展示结果：
 config-entry / repo-scaffold / git-head / outline-ticket / runtime-layout 必须全 PASS。输出立项摘要
 （key/立项式/genre 警告/monetization/门表/scaffold SHA/首票 ID）。原创下一步为
-`/showrunner-agent`；改编下一步是直接启动 scheduler，由 source-analysis 票自主选择本季范围、
-逐块拆解并提交 Showrunner 门，不是准备另一份 intake JSON，也不是手工拆书。outline 与
+`/showrunner-agent`；改编下一步是直接启动 scheduler，由 source-analysis 票先完成全书结构扫描，
+再自主提出季界、选择本季证据、逐块深拆并提交 Showrunner 门，不是准备另一份 intake JSON，也
+不是手工拆书。outline 与
 source-analysis 票 owner 为 showrunner、执行层为 source-analyst；本 skill 不领票、不写 outline。
 
 ## 2. Guardrails

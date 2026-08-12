@@ -193,7 +193,10 @@ enregistre le projet et vérifie les trois vérités-terrain :
 Pour une adaptation, la même confirmation lie les octets du roman, les copie/chunke
 dans le runtime local et crée le ticket `source-analysis` ; outline reste
 `source-pending`. Source Analyst choisit ensuite la fenêtre de saison, traite des lots
-bornés et livre un dossier source plafonné avant la porte du Showrunner. `source plan/register` restent
+bornés sur tout le roman, construit les cartes globales des personnages, du monde et des saisons,
+puis sélectionne les preuves de la saison courante avant de livrer un dossier plafonné.
+Le projet peut être mono-saison, multi-saison ou indécis ; le nombre d'épisodes vise toujours la saison courante.
+`source plan/register` restent
 des commandes avancées de reprise/migration, **pas une seconde étape normale**.
 `add-script` ne remplace jamais ce flux autonome par une skill externe d'analyse.
 

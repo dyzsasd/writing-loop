@@ -71,7 +71,8 @@ try {
     version: 1,
     futureField: { doNotLose: true },
     projects: {
-      demo: { title: "纸月亮 <script>danger()</script>", repoPath: "demo-repo", enabled: true, totalEpisodes: 8 },
+      demo: { title: "纸月亮 <script>danger()</script>", repoPath: "demo-repo", enabled: true,
+        seasonStrategy: "multi-season", currentSeason: 2, totalEpisodes: 8 },
     },
   }, null, 2) + "\n");
   writeFileSync(join(repo, "bible", "north-star.md"), "## 一句话故事\n她写下的每一场戏都会成真。\n");
@@ -147,7 +148,10 @@ Episode: 1
   const page = await fetch(`${base}/p/demo?notice=${encodeURIComponent("<img src=x onerror=alert(1)>")}`);
   const pageHtml = await page.text();
   if (page.status !== 200) console.error(`project page ${page.status}: ${pageHtml}`);
-  ok(page.status === 200 && pageHtml.includes("故事脊柱") && pageHtml.includes("等待你的决定") && pageHtml.includes("审读正在工作"), "项目页呈现创作成熟度、人工门与 live agent");
+  ok(page.status === 200 && pageHtml.includes("故事脊柱") && pageHtml.includes("等待你的决定")
+    && pageHtml.includes("审读正在工作") && pageHtml.includes("多季项目 · 第 2 季")
+    && pageHtml.includes("本季 8 集"),
+  "项目页呈现季制、当前季、创作成熟度、人工门与 live agent");
   ok(pageHtml.includes("原著分析") && pageHtml.includes("故事结构") && pageHtml.includes("人物设定")
     && pageHtml.includes("美术资产") && pageHtml.includes("分集与质量"),
   "项目概览提供完整的创作工作台信息架构，不再只呈现看板");
@@ -248,7 +252,8 @@ Episode: 1
   const newHtml = await newPage.text();
   ok(newPage.status === 200 && newHtml.includes("生成零写入立项计划") && newHtml.includes("原著与改编方向")
     && newHtml.includes("YOU PROVIDE") && newHtml.includes("WRITING-LOOP DECIDES")
-    && newHtml.includes("选取哪一季内容、如何拆书、人物与场景资产、分集节拍、质量门和 tickets")
+    && newHtml.includes("先扫描整部原著，再提出季界、当前季取材")
+    && newHtml.includes('name="seasonStrategy"') && newHtml.includes('name="currentSeason"')
     && newHtml.includes('name="sourcePath"') && newHtml.includes('name="adaptationBrief"')
     && newHtml.includes('name="sourceHarness"') && newHtml.includes('name="allowRawSourceProcessing"')
     && !newHtml.includes('name="compressionRatio"') && !newHtml.includes('name="highlightCount"')
@@ -258,7 +263,8 @@ Episode: 1
     key: "new-drama", title: "新剧 <安全>", repoPath: "new-drama", kind: "original",
     logline: "她能听见每个谎言在月光下碎裂。", audience: "女性 25-40 岁付费用户",
     complianceNotes: "不涉政；违法有后果；不美化控制；遵守平台边界。", nonGoals: "不复制未授权 IP",
-    genre: "revenge-slap", monetization: "paid-app", format: "live-action", totalEpisodes: "80",
+    genre: "revenge-slap", monetization: "paid-app", format: "live-action",
+    seasonStrategy: "single-season", currentSeason: "1", totalEpisodes: "80",
     card1: "9,10,11", card2: "26,28,30", card3: "60", wordMin: "900", wordMax: "1300",
     maxPrimaryScenes: "5", maxNamedCharacters: "20", ticketPrefix: "ND", intakeMode: "autonomous", mode: "live",
     comparables: "公开结构对标", differentiation: "谎言视觉化",
@@ -317,7 +323,8 @@ Episode: 1
     key: "adapted-drama", title: "改编新剧", repoPath: "adapted-drama", kind: "adaptation",
     logline: "一个自信知道王朝结局的人，发现自己的历史记忆正在失效。", audience: "男性 25-44 岁海外流媒体用户",
     complianceNotes: "仅作内部开发；发行前完成版权、分级和史实复核。", nonGoals: "不逐章照搬原著",
-    genre: "brain-hole", monetization: "reelshort-sub", format: "reelshort-en", totalEpisodes: "60",
+    genre: "brain-hole", monetization: "reelshort-sub", format: "reelshort-en",
+    seasonStrategy: "multi-season", currentSeason: "1", totalEpisodes: "60",
     card1: "", card2: "", card3: "", wordMin: "500", wordMax: "800",
     maxPrimaryScenes: "4", maxNamedCharacters: "18", ticketPrefix: "AD", intakeMode: "autonomous", mode: "live",
     sourceTitle: "测试原著", sourcePath: sourceNovel,

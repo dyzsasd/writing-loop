@@ -87,17 +87,18 @@ fire 就 file，服从 §8 去重），方向落 `Decisions log` + 更新 `当�
 **A0 · source-analysis ⇒ 原著拆解门**。这张票证明拆书是 writing-loop 的内生工作，而不是
 操作者或外部 skill 填好的答案。先运行 `writing-loop source status --project <project> --json`，
 只有 control.phase=`review-ready` 才审：
-- selected chunk 全部 completed；每个摘要的 `Source-intake/Source-chunk/Source-sha256` 与 manifest
-  精确匹配，repo clean；未选范围在 `analysis-plan.md` 中被明确标成「未分析」，不能冒充全书结论。
+- surveyed chunk 精确覆盖 manifest 全书，并形成 `book-map/character-arcs/world-evolution/season-map`；
+  selected chunk 全部 completed；每个摘要的 `Source-intake/Source-chunk/Source-sha256` 与 manifest
+  精确匹配，repo clean；深拆未选范围只能标为「未深拆」，不得说成「未理解」或冒充全书证据。
 - `mainline.md`、`highlights.md`、`characters-function.md` 都绑定同一 planId，并区分原著功能、
   操作者设计和重构提案；没有长段原文/对白，换名之外确实改变身份、目标、关系、方法和结局。
-- 季范围、集数、改编方向、权利范围与 `adaptation-brief.md` 一致；真实历史人物另列史料核验边界，
+- `seasonStrategy/currentSeason`、季范围、本季集数、改编方向、权利范围与 `adaptation-brief.md` 一致；真实历史人物另列史料核验边界，
   海外发行不被误写成免版权/免平台合规。
 pass ⇒ 评论记录 manifest/selected/聚合 commit，source-analysis 票 Done；随后 B3 才能解除 outline 的
 `Blocked-by` 与 `source-pending`。fail ⇒ 附逐项证据，把同票退回 Todo（清 assignee，保留
 source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张清单，也不得调用外部拆书 skill。
 
-**原著分析专注模式**：control.phase=`analyzing` 时，普通 chunk checkpoint、进度评论、
+**原著分析专注模式**：control.phase=`surveying|surveyed|analyzing` 时，普通 chunk checkpoint、进度评论、
 Todo↔In Progress 心跳都不是协调变化；不要审计吞吐、覆盖率、斜率、字节预算、评论长度或
 analysis-plan 的过程算法。Source Analyst 在每次续写时直接读取最新 North Star，普通文档变更
 不需要你占用 repo-writer 单飞锁；只有本票进入 In Review，或明确的季范围/权利/创作方向决策带

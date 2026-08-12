@@ -105,7 +105,7 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 | agent | 原型（dev-loop） | 默认档位 | 一句话职责 |
 |---|---|---|---|
 | showrunner 总编剧 | PM | opus/max | north-star 唯一维护者、outline 闸门（写者 = story-designer，§19）；立项/方向 intake；file 创作票；大纲门验收；里程碑监测与 milestone-eval 票发起；Backlog 闸门 |
-| source-analyst 原著筛选 | researcher | sonnet/high | source-analysis 专用：选择有界第一季窗口、快速筛选分块、交付限量改编素材；不设计全季、不写故事资产 |
+| source-analyst 原著分析 | researcher | sonnet/high | source-analysis 专用：全书有界扫描→完整人物/世界/季界图→当前季深度证据；不设计全季、不写故事资产 |
 | story-designer 细纲师 | senior-dev | opus/max | arc 设计票→逐集节拍单（候选竞争+弃案）→spawn 子票；keystone 亲写；`Mode: direct-write` 升级接管；punch-up 执行 |
 | episode-writer 编剧 | junior-dev | sonnet/high | 单集票→读结构化节拍+有界资产 Context Pack+上集→写正文→自检门→剧情资产 delta 声明→In Review |
 | reviewer 审读 | QA | **≥ writer 档**（受治理配置，默认 opus/high） | 单集独立验收；fail 三级路由；修订复核；邻集复核 |
@@ -545,7 +545,8 @@ fleet/各 workspace 的 SSE cursor 也分别绑定作用域，不能串用。
 但该项目将失去随 workspace 复制的可迁移性）、`format`（live-action|ai-anime|reelshort-en）、
 `monetization`（paid-app|free-hongguo|reelshort-sub——决定门位与卡点语义，
 craft-rules 附录 B）、`genre`（profile key，craft-rules 附录 A——决定 R 参数集）、
-`audience`（必填含性别+年龄）、`totalEpisodes`、`paywall`（备卡集号）、
+`audience`（必填含性别+年龄）、`seasonStrategy`（single-season|multi-season|undecided）、
+`currentSeason`、`totalEpisodes`（只表示当前季集数）、`paywall`（当前季备卡集号）、
 `airedThrough`（已投放水位，§19）、`episodeWordBand`、`maxPrimaryScenes`、
 `maxNamedCharacters`、`assetLibrary`、`marketDataPath`、`intake.{mode,todoDepthCap}`、
 `comms.{provider,webhookEnv}`、`models`/`efforts` 覆盖、`mode`（live|dry-run）。
@@ -743,8 +744,10 @@ proposedChange,source:{project,agent,projectTicket:null}}`。项目票只有在�
   连续性、时间线、版权边界与创作品质。JSON、schema、hash、文件名、路径迁移、格式转换、
   覆盖率脚本和过程遥测都是平台实现，不得成为剧本工作或验收目标。
 - 若平台实现阻碍创作，按上一节投递 workspace 系统改进提案；不得污染当前项目板。
-- source-analysis 为单写者专注阶段：Source Analyst 最多选择32个连续 chunks，每 fire 最多8 chunks / 480 KiB，
-  最终素材限制为12条主线、12个名场面、18个人物功能；Story Designer 不参与原著扫描。
+- source-analysis 为单写者专注阶段：Source Analyst 先按顺序扫描**全书所有 chunks**（每 fire 最多
+  8 chunks / 480 KiB），形成全书阶段、完整人物弧、世界演变和季界图；之后依据 `seasonStrategy`
+  为当前季选择最多32 chunks / 2 MiB / 4个连续窗口做深拆。最终素材限制为12条主线、12个名场面、
+  18个人物功能；Story Designer 不参与原著扫描。
   普通 checkpoint 不唤醒 Showrunner，普通 cadence/正常写锁不唤醒 sweep。Showrunner 只在
   In Review 或真实创作决策时介入；sweep 只处理陈旧、孤儿、损坏与错标。
 - 底层仍可使用严格结构化存储和确定性校验，但它对编剧透明；序列化格式变更由平台迁移完成。

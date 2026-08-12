@@ -48,6 +48,8 @@ const input = (key = "paper-moon", repoPath = key): Record<string, unknown> => (
   genre: "revenge-slap",
   monetization: "paid-app",
   format: "live-action",
+  seasonStrategy: "single-season",
+  currentSeason: 1,
   totalEpisodes: 80,
   paywall: { card1: [9, 10, 11], card2: [26, 28, 30], card3: [60] },
   episodeWordBand: [900, 1300],
@@ -93,7 +95,12 @@ try {
   ok(plan.files.includes("story/.gitkeep") && plan.files.includes("episodes/.gitkeep")
     && !plan.files.includes("outline.md") && plan.outlineTicket.id === "PM-1",
   "plan 列出结构化故事目录且不再计划重复 Markdown");
-  ok(plan.requiresConfirmation && plan.projectConfig.repoPath === "paper-moon", "plan 明示确认门并保持相对 repoPath");
+  ok(plan.requiresConfirmation && plan.projectConfig.repoPath === "paper-moon"
+    && plan.projectConfig.seasonStrategy === "single-season" && plan.projectConfig.currentSeason === 1,
+  "plan 明示确认门、季制与相对 repoPath");
+  ok(throwsWith(() => planOnboarding(tmp, { ...input("invalid-season"), currentSeason: 2 }),
+    "single-season 项目的 currentSeason 必须为 1"),
+  "单季项目不能伪装成后续季；多季项目才允许 currentSeason 大于 1");
 
   const badAudience = { ...input("bad-audience"), audience: "喜欢爽剧的人", ticketPrefix: "BA" };
   ok(throwsWith(() => planOnboarding(tmp, badAudience), "性别与年龄段"), "受众缺性别/年龄硬拒绝");
@@ -538,7 +545,7 @@ try {
   const ticket = readFileSync(join(data, "paper-moon", "board", "tickets", "PM-1.md"), "utf8");
   ok(ticket.includes("state: Todo") && ticket.includes("owner: showrunner") && ticket.includes("story-designer")
     && ticket.includes("## Context-pack") && ticket.includes("## Acceptance criteria") && ticket.includes("## How to verify"), "首张且唯一大纲票满足门禁协议");
-  ok(ticket.includes("第一季故事设计") && ticket.includes("全季分段")
+  ok(ticket.includes("第1季故事设计") && ticket.includes("全季分段")
     && !ticket.includes("story/outline.v1.json") && !ticket.includes("story/assets.v1.json")
     && !ticket.includes("schema") && !ticket.includes("两个 JSON"),
   "首张创作票只描述故事工作，不把存储格式和 schema 变成编剧任务");
@@ -657,6 +664,7 @@ updated: 2026-08-10T10:10:00.000Z
 
   const adaptationInput = {
     ...input("source-gated"), kind: "adaptation", ticketPrefix: "SG",
+    seasonStrategy: "multi-season", currentSeason: 1,
     comparables: undefined, differentiation: undefined,
     adaptation: adaptation({ highlightCount: 8, riskAcknowledged: true }),
   };
@@ -673,6 +681,7 @@ updated: 2026-08-10T10:10:00.000Z
     && existsSync(join(data, "source-gated", "source-intake.v1", "original", "source.txt")),
   "改编立项自动登记原著并创建 source-analysis 票，大纲票默认停在 source-pending");
   ok(readFileSync(join(tmp, "source-gated", "bible", "north-star.md"), "utf8").includes("由 writing-loop 自主确定第一季范围")
+    && readFileSync(join(tmp, "source-gated", "bible", "north-star.md"), "utf8").includes("季制：多季项目")
     && readFileSync(join(tmp, "source-gated", "source", "adaptation-brief.md"), "utf8").includes("操作者改编设计"),
   "改编总建议同时进入 North Star 与 source intake，不要求操作者预填拆书结果");
 } finally {

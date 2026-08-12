@@ -38,6 +38,7 @@ const TRANSACTION_DIR = ".onboarding-transactions";
 
 type JsonObject = Record<string, unknown>;
 export type OnboardingKind = "original" | "adaptation";
+export type SeasonStrategy = "single-season" | "multi-season" | "undecided";
 export type OnboardingInput = {
   key: string;
   title: string;
@@ -50,6 +51,8 @@ export type OnboardingInput = {
   genre: string;
   monetization: string;
   format: string;
+  seasonStrategy: SeasonStrategy;
+  currentSeason: number;
   totalEpisodes: number;
   paywall: { card1: number[]; card2: number[]; card3: number[] };
   episodeWordBand: [number, number];
@@ -252,6 +255,12 @@ function normalizeInput(raw: unknown): OnboardingInput {
   const format = enumValue<string>(obj, "format", FORMATS);
   const monetization = enumValue<string>(obj, "monetization", MONETIZATION);
   const genre = enumValue<string>(obj, "genre", GENRES);
+  const seasonStrategy = enumValue<SeasonStrategy>(obj, "seasonStrategy",
+    new Set(["single-season", "multi-season", "undecided"]), "undecided");
+  const currentSeason = obj.currentSeason === undefined ? 1 : integer(obj, "currentSeason", 1, 100);
+  if (seasonStrategy === "single-season" && currentSeason !== 1) {
+    throw new OnboardingError("single-season 项目的 currentSeason 必须为 1");
+  }
   const audience = oneLine(obj, "audience", 240);
   const genderSignal = /(男|女|男性|女性|男频|女频|不限性别|全性别|men|women|all genders)/i.test(audience);
   const ageSignal = /(?:\d{1,2})\s*(?:-|–|—|~|至|到)\s*(?:\d{1,2})(?:\s*岁)?|(?:\d{1,2})\s*\+/i.test(audience);
@@ -333,6 +342,8 @@ function normalizeInput(raw: unknown): OnboardingInput {
     genre,
     monetization,
     format,
+    seasonStrategy,
+    currentSeason,
     totalEpisodes,
     paywall,
     episodeWordBand: [band[0], band[1]],
@@ -503,6 +514,8 @@ function projectConfigFor(input: OnboardingInput, storedRepoPath: string): WlPro
     monetization: input.monetization,
     genre: input.genre,
     audience: input.audience,
+    seasonStrategy: input.seasonStrategy,
+    currentSeason: input.currentSeason,
     totalEpisodes: input.totalEpisodes,
     paywall: input.paywall,
     airedThrough: 0,
@@ -624,7 +637,7 @@ export function planOnboarding(root: string, raw: unknown): OnboardingPlan {
     sourceIntake,
     outlineTicket: {
       id: ticketId,
-      title: `完成《${input.title}》第一季故事设计`,
+      title: `完成《${input.title}》第${input.currentSeason}季故事设计`,
       state: input.kind === "adaptation" ? "Backlog" : "Todo",
       path: join(dataPath, "board", "tickets", `${ticketId}.md`),
     },
@@ -662,8 +675,12 @@ function renderNorthStar(input: OnboardingInput): string {
   raw = raw.replace(/^- 目标受众画像：.*$/m, `- 目标受众画像：${input.audience}`);
   raw = raw.replace(/^- 对标剧：.*$/m, `- 对标剧：${input.kind === "original" ? input.comparables : "授权原著；拆书清单见 source/"}`);
   raw = raw.replace(/^- format profile：.*$/m, `- format profile：${input.format}`);
+  const seasonLabel = input.seasonStrategy === "single-season" ? "单季完结"
+    : input.seasonStrategy === "multi-season" ? "多季项目" : "季数待全书扫描后决定";
+  raw = raw.replace(/^(## 定位(?:（Goals）)?)$/m,
+    `$1\n- 季制：${seasonLabel}；当前开发第 ${input.currentSeason} 季，本季 ${input.totalEpisodes} 集。`);
   if (input.adaptation) {
-    const sourceDirection = `## 操作者改编方向（North Star 输入）\n<!-- 【方向级】来自立项表；writing-loop 负责拆解原著、提出执行方案，不得覆盖操作者意图。 -->\n\n${input.adaptation.adaptationBrief}\n\n- 原著输入：${input.adaptation.sourceTitle}（本地文件只按 source-analysis 票分块读取，不进入 Git）\n- 自治流程：Source Analyst 筛选原著，Showrunner 验收，Story Designer 再设计本季；操作者无需手工填拆书三清单。\n\n`;
+    const sourceDirection = `## 操作者改编方向（North Star 输入）\n<!-- 【方向级】来自立项表；writing-loop 负责拆解原著、提出执行方案，不得覆盖操作者意图。 -->\n\n${input.adaptation.adaptationBrief}\n\n- 原著输入：${input.adaptation.sourceTitle}（本地文件只按 source-analysis 票分块读取，不进入 Git）\n- 自治流程：Source Analyst 先完成全书结构扫描，再依据 seasonStrategy 提出季界和当前季证据；Showrunner 验收后 Story Designer 才设计本季。操作者无需手工填拆书三清单。\n\n`;
     raw = raw.replace(/(## 核心情绪引擎\n)/, `${sourceDirection}$1`);
   }
   const nonGoals = [
@@ -741,7 +758,7 @@ function outlineTicket(plan: OnboardingPlan, createdAt: string): string {
   const facts = [
     `- genre=${input.genre}（config.json）`,
     `- monetization=${input.monetization}；paywall=${JSON.stringify(input.paywall)}（config.json）`,
-    `- format=${input.format}；总集数=${input.totalEpisodes}（config.json）`,
+    `- format=${input.format}；seasonStrategy=${input.seasonStrategy}；当前第${input.currentSeason}季=${input.totalEpisodes}集（config.json）`,
     `- 合规预筛：${input.complianceNotes.replace(/\s+/g, " ")}（bible/north-star.md#创作红线）`,
   ].join("\n");
   const adaptation = input.kind === "adaptation"
@@ -766,7 +783,7 @@ updated: ${createdAt}
 ---
 ## Context
 
-北极星已由立项服务建立。第一步是完成第一季故事设计：确定全季结构、分集节拍、人物、
+北极星已由立项服务建立。第一步是完成第${input.currentSeason}季故事设计：确定全季结构、分集节拍、人物、
 世界规则、关键场景、伏笔、连续性与双轨时间线。showrunner 只做创作验收，不替代
 Story Designer 起草；同一剧情事实不得维护第二份镜像。
 ${needsSource ? "\n改编项目在原著登记和 source-analysis 票通过前不得起草大纲；空白三清单不是分析结果。" : ""}
@@ -782,7 +799,7 @@ ${facts}${adaptation}
 
 - 全季分段、分集节拍、付费卡点、高潮锚点与季终承诺完整。
 - 人物、世界、关键场景、伏笔、连续性和双轨时间线彼此一致且能支持逐集写作。
-- 第一季范围、改编处置与 North Star 一致，制作规模可执行，不存在互相冲突的重复事实。
+- 当前季范围、全剧季界、改编处置与 North Star 一致，制作规模可执行，不存在互相冲突的重复事实。
 - 提交大纲定稿质量门；通过后才进入分集写作。
 
 ## How to verify

@@ -87,9 +87,10 @@ export type StoryStudioReadModel = {
   project: string;
   source: null | {
     title: string; planId: string; sha256: string; byteLength: number; chunkCount: number;
-    phase: "registered" | "analyzing" | "review-ready"; selected: number; completed: number;
+    phase: "registered" | "surveying" | "surveyed" | "analyzing" | "review-ready";
+    surveyed: number; selected: number; completed: number;
     allowedHarnesses: string[]; updatedAt: string;
-    chunks: Array<{ id: string; headings: string[]; selected: boolean; completed: boolean }>;
+    chunks: Array<{ id: string; headings: string[]; surveyed: boolean; selected: boolean; completed: boolean }>;
   };
   story: null | { path: string; sha256: string; manifest: StoryDesignManifest; assets: StoryAssetPlan;
     catalog: null | { path: string; digest: string; manifest: StoryAssetCatalog } };
@@ -324,12 +325,14 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
   try {
     const status = readSourceIntakeStatus(root, key);
     if (status) {
+      const surveyed = new Set(status.control.surveyedChunks);
       const selected = new Set(status.control.selectedChunks); const completed = new Set(status.control.completedChunks);
       source = { title: status.manifest.source.title, planId: status.manifest.planId, sha256: status.manifest.source.sha256,
         byteLength: status.manifest.source.byteLength, chunkCount: status.manifest.chunking.chunks.length, phase: status.control.phase,
-        selected: selected.size, completed: completed.size, allowedHarnesses: [...status.manifest.adaptation.processingConsent.allowedHarnesses],
+        surveyed: surveyed.size, selected: selected.size, completed: completed.size,
+        allowedHarnesses: [...status.manifest.adaptation.processingConsent.allowedHarnesses],
         updatedAt: status.control.updatedAt, chunks: status.manifest.chunking.chunks.map((row) => ({ id: row.id,
-          headings: [...row.headings], selected: selected.has(row.id), completed: completed.has(row.id) })) };
+          headings: [...row.headings], surveyed: surveyed.has(row.id), selected: selected.has(row.id), completed: completed.has(row.id) })) };
     }
   } catch (error) { warnings.push(`原著状态不可读：${error instanceof Error ? error.message : String(error)}`); }
   let story: StoryStudioReadModel["story"] = null;

@@ -5,8 +5,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
-  checkpointSourceAnalysisChunk, commitSourceIntake, finalizeSourceAnalysis, planSourceIntake,
+  checkpointSourceAnalysisChunk, checkpointSourceSurveyChunk, commitSourceIntake, finalizeSourceAnalysis,
+  finalizeSourceSurvey, planSourceIntake,
   readSourceIntakeStatus, restartSourceAnalysis, selectSourceAnalysisChunks, SourceIntakeError,
+  startSourceSurvey,
 } from "./source-intake.ts";
 import { requireWorkspace, WsError } from "./workspace.ts";
 
@@ -17,6 +19,9 @@ function usage(): void {
   writing-loop source register --project KEY --input request.json --confirm PLAN_ID [--json]
   writing-loop source status --project KEY [--json]
   writing-loop source restart --project KEY --confirm PLAN_ID [--json]
+  writing-loop source survey-start --project KEY [--json]
+  writing-loop source survey-checkpoint --project KEY --chunk chunk-0001 --commit SHA [--json]
+  writing-loop source survey-finalize --project KEY [--json]
   writing-loop source select --project KEY --chunks chunk-0001,chunk-0002 [--json]
   writing-loop source checkpoint --project KEY --chunk chunk-0001 --commit SHA [--json]
   writing-loop source finalize --project KEY [--json]
@@ -88,7 +93,8 @@ export function sourceMain(argv = process.argv.slice(2)): number {
         console.log(`writing-loop source — ${project}`);
         console.log(`  title: ${status.manifest.source.title}`);
         console.log(`  sha256: ${status.manifest.source.sha256}`);
-        console.log(`  chunks: ${status.control.completedChunks.length}/${status.control.selectedChunks.length || status.manifest.chunking.chunks.length}`);
+        console.log(`  full-book survey: ${status.control.surveyedChunks.length}/${status.manifest.chunking.chunks.length}`);
+        console.log(`  season evidence: ${status.control.completedChunks.length}/${status.control.selectedChunks.length}`);
         console.log(`  phase: ${status.control.phase}`);
         console.log(`  ticket: ${status.control.analysisTicketId}`);
       }
@@ -104,6 +110,24 @@ export function sourceMain(argv = process.argv.slice(2)): number {
         console.log(`  archived ticket: ${result.archivePath}`);
         console.log("NEXT: writing-loop run --project " + project + " --cli <authorized-harness>");
       }
+      return 0;
+    }
+    if (action === "survey-start") {
+      if (input || confirmation || chunks || chunk || commit) { console.error("writing-loop source survey-start: 不接受额外参数"); return 2; }
+      const result = startSourceSurvey(ws.root, project);
+      console.log(asJson ? JSON.stringify(result, null, 2) : "全书结构扫描已开始。");
+      return 0;
+    }
+    if (action === "survey-checkpoint") {
+      if (!chunk || !commit || input || confirmation || chunks) { console.error("writing-loop source survey-checkpoint: 需要 --chunk 与 --commit"); return 2; }
+      const result = checkpointSourceSurveyChunk(ws.root, project, ws.config, chunk, commit);
+      console.log(asJson ? JSON.stringify(result, null, 2) : `已验收全书扫描 ${chunk}。`);
+      return 0;
+    }
+    if (action === "survey-finalize") {
+      if (input || confirmation || chunks || chunk || commit) { console.error("writing-loop source survey-finalize: 不接受额外参数"); return 2; }
+      const result = finalizeSourceSurvey(ws.root, project, ws.config);
+      console.log(asJson ? JSON.stringify(result, null, 2) : "全书结构扫描已完成；可以选择本季深度取材窗口。");
       return 0;
     }
     if (action === "select") {

@@ -156,8 +156,10 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 ```
 
 改编项目在同一次确认中绑定原著字节，自动把原著复制/分块到本地运行态并创建
-`source-analysis` 票；大纲票先停在 `source-pending`。Source Analyst 随后自主选择本季范围、
-按有界批次快速筛选并形成限量改编素材，showrunner 验收后才解锁大纲。`source plan/register` 只保留给
+`source-analysis` 票；大纲票先停在 `source-pending`。Source Analyst 先按有界批次覆盖全书，
+形成完整人物弧、世界演变和季界图，再自主选择当前季的深度证据并形成限量
+改编素材，showrunner 验收后才解锁大纲。项目可设单季、多季或全书扫描后决定；集数始终指当前季。
+`source plan/register` 只保留给
 已有项目迁移、故障恢复和高级 CLI 管理，**不是正常立项的第二步**；`add-script` 也不会调用
 外部拆书 Skill 代替这条自治工单链。
 

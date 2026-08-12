@@ -222,8 +222,9 @@ ground truths:
 
 For an adaptation, the same confirmation binds the novel bytes, copies/chunks them
 into local runtime storage, files the `source-analysis` ticket, and leaves the outline
-as `source-pending`. Source Analyst then chooses the season window, processes bounded
-durable batches, and aggregates a capped source package; the Showrunner unlocks the outline only
+as `source-pending`. Source Analyst first surveys every immutable source chunk to build
+whole-book character, world and season maps; only then does it choose bounded evidence
+for the configured current season and aggregate a capped source package. The Showrunner unlocks the outline only
 after that gate. `source plan/register` remain advanced recovery/migration commands,
 not a second onboarding step. `add-script` itself never substitutes an external
 novel-analysis skill.

@@ -102,7 +102,9 @@ CLI 的根解析。
                                            //   v1 已校准：brain-hole | revenge-slap | profession-unit；
                                            //   女频 sweet-pet/angst 为 UNCALIBRATED——add-script 立项时显式警告）
       "audience": "男性 25-45 下沉市场付费用户",   // 非空且含性别+年龄（红线①入口预防）
-      "totalEpisodes": 80,
+      "seasonStrategy": "multi-season",     // single-season | multi-season | undecided
+      "currentSeason": 1,                    // 当前开发季；单季项目恒为 1
+      "totalEpisodes": 80,                   // 当前季集数，不是多季项目的全剧总集数
       "paywall": {                         // 备卡制（R4.5 参数从这里读，不写死 9-11）
         "card1": [9, 10, 11],
         "card2": [26, 28, 30],
@@ -422,6 +424,8 @@ CLI 的 `plan` / `create` 使用**同一份 request**，不是把 plan JSON 再�
   "genre": "revenge-slap",
   "monetization": "paid-app",
   "format": "live-action",
+  "seasonStrategy": "single-season",
+  "currentSeason": 1,
   "totalEpisodes": 80,
   "paywall": { "card1": [9, 10, 11], "card2": [26, 28, 30], "card3": [60] },
   "episodeWordBand": [900, 1300],
@@ -525,8 +529,10 @@ bytes、改编设计、权利范围、授权 Harness、repo/runtime 路径与全
 register 将原始 bytes 与 chunks 以 mode 0600 发布到
 `.writing-loop/<key>/source-intake.v1/`，原著不进 Git；repo 只 commit
 `source/adaptation-brief.md` 与指纹。它创建 `source-analysis+source-analyst` Todo 票，并给 outline
-写入 `Blocked-by`。Source Analyst 先用 `source select` 冻结最多32个连续块的本季范围，再每 fire
-最多处理8块/480 KiB，单次 commit 带 provenance 的有界摘要并用 `source checkpoint` 核验；
+写入 `Blocked-by`。Source Analyst 先按原著顺序、每 fire 最多8块/480 KiB 完成**全部 chunk** 的
+有界结构扫描，形成 book map、完整人物弧、世界演变和季界图；未覆盖全书时 `source select`
+机械拒绝。之后才依据 `seasonStrategy` 为当前季冻结最多32块/2 MiB、最多4个连续窗口的深度证据，
+单次 commit 带 provenance 的有界摘要并用 `source checkpoint` 核验；
 全部完成后只聚合最多12条主线、12个名场面、18个人物功能并调用
 `source finalize`。只有 control.phase=`review-ready` 且 showrunner 将 source-analysis 票 Done，
 通用 Blocked-by resolver 才能解锁 outline。任何外部拆书 skill 产物都不能替代这条证据链。
@@ -708,6 +714,8 @@ server profile 与 Comfy 兼容性证明替换示例值；参见 [Comfy H3 教�
   `.writing-loop/` 内部；相对路径解析后必须仍在 workspace 内。CLI 允许显式外部绝对路径但
   告警失去整体复制迁移能力；Studio 只允许 workspace 内相对路径。
 - `paywall.card1 ⊂ [8..12]`；`totalEpisodes` 与 format profile 惯例带一致（越界要求确认）。
+- `seasonStrategy` 必须是 `single-season|multi-season|undecided`；`currentSeason` 为 1–100，
+  且 `single-season` 时只能为 1。`totalEpisodes` 与 paywall 一律属于当前季。
 - `audience` 非空且含性别+年龄要素（评估红线①的入口预防）。
 - key 全 workspace 唯一；`ticketPrefix` 冲突时要求显式改名；PATH 中必须有 Git，create 才能
   生成并验证首个 scaffold commit。

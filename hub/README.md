@@ -117,7 +117,8 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 | `project verify K [--json]` | independently verify config, repo/Git scaffold, first ticket, and runtime layout |
 | `source plan --project K --input FILE` | pin a workspace-local novel, adaptation brief, rights and Harness consent into a deterministic zero-write plan |
 | `source register --project K --input FILE --confirm PLAN_ID [--json]` | copy/chunk the novel into local 0600 runtime, commit only provenance/brief, and file writing-loop's source-analysis ticket |
-| `source status --project K [--json]` | inspect selected/completed chunks and the source-analysis phase |
+| `source status --project K [--json]` | inspect whole-book surveyed chunks, current-season selected/completed evidence, and phase |
+| `source survey-start\|survey-checkpoint\|survey-finalize …` | Source Analyst's resumable whole-book survey gates; scheduler-managed in normal onboarding |
 | `source restart --project K --confirm PLAN_ID [--json]` | preserve the registered novel and North Star, archive old derived analysis, and republish one compact Source Analyst ticket |
 | `story status --project K [--json]` | inspect the strict story companion, derived assets and shared Studio quality model; read-only |
 | `story validate --project K [--stage skeleton\|beats\|full] [--json]` | run deterministic story gates; scheduler agents call this automatically |

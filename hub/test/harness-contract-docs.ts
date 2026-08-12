@@ -71,13 +71,20 @@ ok(read("references", "config-schema.md").includes("Harness 契约只有 `claude
 "配置 schema 同步一级 Harness 集合与 GPU 边界");
 
 ok(sourceAnalyst.includes("Source Analyst Agent")
+  && sourceAnalyst.includes("writing-loop source survey-start")
+  && sourceAnalyst.includes("writing-loop source survey-checkpoint")
+  && sourceAnalyst.includes("writing-loop source survey-finalize")
   && sourceAnalyst.includes("writing-loop source checkpoint")
   && sourceAnalyst.includes("writing-loop source finalize")
+  && sourceAnalyst.includes("全书结构扫描 → 全书事实地图 → 季规划")
+  && sourceAnalyst.includes("32 chunks / 2 MiB / 4 个连续窗口")
+  && sourceAnalyst.includes("single-season") && sourceAnalyst.includes("multi-season")
   && sourceAnalyst.includes("不回读完整评论历史")
   && sourceAnalyst.includes("8 chunks / 480 KiB")
   && sourceAnalyst.includes("不调用外部拆书 skill")
   && storyDesigner.includes("source-analysis` 属 Source Analyst")
   && showrunner.includes("A0 · source-analysis ⇒ 原著拆解门")
+  && showrunner.includes("surveyed chunk 精确覆盖 manifest 全书")
   && showrunner.includes("control.phase=`review-ready`")
   && showrunner.includes("outline 继续 Backlog"),
 "改编拆书由 writing-loop source-analysis/checkpoint/showrunner 门闭环，明确拒绝外部 skill 旁路");
@@ -119,6 +126,8 @@ for (const [index, guide] of guides.entries()) {
   `指南 ${index + 1} 明示 OpenCode-only 的非 slash 立项入口`);
   ok(guide.includes(automaticSourcePhrases[index]!) && guide.includes("source-analysis")
     && guide.includes("source status --project my-drama") && guide.includes(boundedBatchPhrases[index]!)
+    && /every source chunk|全书所有块|tous les chunks/i.test(guide)
+    && /currentSeason/.test(guide)
     && !guide.includes("my-drama/source/novel.txt"),
   `指南 ${index + 1} 把原著交给立项后自动 source-analysis，而非要求第二次手工登记或外部拆书`);
   ok(contentFirstPatterns[index]!.test(guide) && guide.includes("Context Pack")
@@ -126,6 +135,9 @@ for (const [index, guide] of guides.entries()) {
   `指南 ${index + 1} 以创作概念说明结构化能力，不把实现文件变成编剧任务`);
 }
 ok(read("skills", "add-script", "SKILL.md").includes("不是正常立项步骤")
+  && read("skills", "add-script", "SKILL.md").includes("seasonStrategy")
+  && read("references", "config-schema.md").includes("currentSeason")
+  && read("references", "config-schema.md").includes("全部 chunk")
   && read("skills", "add-script", "SKILL.md").includes("同一次确认会在项目发布后自动登记原著")
   && read("references", "config-schema.md").includes("改编原著 source intake 与拆书门")
   && read("references", "config-schema.md").includes("正常立项之后直接启动 scheduler")

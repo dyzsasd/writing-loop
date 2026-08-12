@@ -95,7 +95,8 @@ placeholders into config). For the adaptation track, be ready to answer:
   and gate semantics).
 - **format**: `live-action` / `ai-anime` / `reelshort-en` (sets the word band and
   the production budget table; for ai-anime, cheap VFX is a strength).
-- **Scale**: `totalEpisodes`, `paywall` (backup card numbers; card 1 ⊂ episodes
+- **Season system and scale**: `seasonStrategy` (`single-season` / `multi-season` /
+  `undecided`), `currentSeason`, `totalEpisodes` for that season, `paywall` (backup card numbers; card 1 ⊂ episodes
   8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
 **Adaptation-only (the operator supplies inputs, not teardown answers)**
@@ -134,12 +135,15 @@ Then `add-script` automatically:
 There is no second manual registration step in normal onboarding. The approved project
 plan already binds the novel fingerprint, brief, rights and Harness consent. Project
 creation copies/chunks the novel locally, commits only its provenance and your brief,
-and files source-analysis. Start the room; Source Analyst selects at most 32 contiguous
-chunks, screens at most 8 chunks / 480 KiB per fire, caps the source package at 12 mainline
+and files source-analysis. Start the room; Source Analyst first surveys every source chunk
+at at most 8 chunks / 480 KiB per fire, builds whole-book character/world/season maps, then
+selects at most 32 chunks / 2 MiB across four windows as current-season evidence. It caps the package at 12 mainline
 units, 12 highlights and 18 character functions, and hands it to the
 Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
 plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
+Project settings distinguish `single-season`, `multi-season`, and `undecided`; `totalEpisodes`
+always means the current season, and `currentSeason` identifies which season is being developed.
 After the source gate, Story Designer creates the season structure, episode beats,
 characters, world, setups, continuity and dual timeline, running deterministic quality
 gates automatically. Their structured serialization is an internal platform detail and

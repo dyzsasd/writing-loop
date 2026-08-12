@@ -22,6 +22,7 @@ const MAX_SECTIONS_PER_CHUNK = 6;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_SELECTED_CHUNKS = 32;
 const MAX_SELECTED_BYTES = 2 * 1024 * 1024;
+const MAX_SELECTED_WINDOWS = 4;
 const HARNESSES = new Set(["claude", "codex", "opencode"]);
 const ID_PATTERN = /^([A-Z][A-Z0-9]{0,7})-(\d+)\.md$/;
 const HEADING = /^(?:第[〇零一二三四五六七八九十百千万两0-9]+(?:章|节|回|卷)(?:至[〇零一二三四五六七八九十百千万两0-9]+(?:章|节|回|卷))?(?:\s+.*)?|序章(?:\s+.*)?|楔子(?:\s+.*)?|引子(?:\s+.*)?|终章(?:\s+.*)?|后记(?:\s+.*)?|番外(?:\s+.*)?)$/u;
@@ -112,12 +113,13 @@ export type SourceIntakeManifest = {
 };
 
 export type SourceIntakeControl = {
-  version: 1;
+  version: 2;
   kind: "writing-loop/source-analysis-control";
   planId: string;
   analysisTicketId: string;
   outlineTicketId: string;
-  phase: "registered" | "analyzing" | "review-ready";
+  phase: "registered" | "surveying" | "surveyed" | "analyzing" | "review-ready";
+  surveyedChunks: string[];
   selectedChunks: string[];
   completedChunks: string[];
   updatedAt: string;
@@ -137,6 +139,7 @@ export type SourceIntakeResult = {
 export type SourceAnalysisProgress = {
   projectKey: string;
   phase: SourceIntakeControl["phase"];
+  surveyedChunks: string[];
   selectedChunks: string[];
   completedChunks: string[];
   remainingChunks: string[];
@@ -471,20 +474,30 @@ function parseManifest(value: unknown): SourceIntakeManifest {
 
 function parseControl(value: unknown): SourceIntakeControl {
   if (!isRecord(value)) throw new SourceIntakeError("source analysis control 必须是 JSON 对象");
-  exactKeys(value, ["version", "kind", "planId", "analysisTicketId", "outlineTicketId", "phase", "selectedChunks", "completedChunks", "updatedAt"], "source analysis control");
-  if (value.version !== 1 || value.kind !== "writing-loop/source-analysis-control") throw new SourceIntakeError("source analysis control identity 无效");
+  const legacy = value.version === 1;
+  exactKeys(value, legacy
+    ? ["version", "kind", "planId", "analysisTicketId", "outlineTicketId", "phase", "selectedChunks", "completedChunks", "updatedAt"]
+    : ["version", "kind", "planId", "analysisTicketId", "outlineTicketId", "phase", "surveyedChunks", "selectedChunks", "completedChunks", "updatedAt"],
+  "source analysis control");
+  if ((!legacy && value.version !== 2) || value.kind !== "writing-loop/source-analysis-control") {
+    throw new SourceIntakeError("source analysis control identity 无效");
+  }
   if (typeof value.planId !== "string" || !/^wlsrc_[0-9a-f]{32}$/.test(value.planId)
     || typeof value.analysisTicketId !== "string" || typeof value.outlineTicketId !== "string") {
     throw new SourceIntakeError("source analysis control ID 无效");
   }
-  if (!new Set(["registered", "analyzing", "review-ready"]).has(String(value.phase))) {
+  const phases = legacy ? ["registered", "analyzing", "review-ready"]
+    : ["registered", "surveying", "surveyed", "analyzing", "review-ready"];
+  if (!new Set(phases).has(String(value.phase))) {
     throw new SourceIntakeError("source analysis control phase 无效");
   }
   if (typeof value.updatedAt !== "string" || !Number.isFinite(Date.parse(value.updatedAt))) throw new SourceIntakeError("source analysis control updatedAt 无效");
   return {
-    version: 1, kind: "writing-loop/source-analysis-control", planId: value.planId,
+    version: 2, kind: "writing-loop/source-analysis-control", planId: value.planId,
     analysisTicketId: value.analysisTicketId, outlineTicketId: value.outlineTicketId,
-    phase: value.phase as SourceIntakeControl["phase"], selectedChunks: exactStringArray(value.selectedChunks, "selectedChunks"),
+    phase: value.phase as SourceIntakeControl["phase"],
+    surveyedChunks: legacy ? [] : exactStringArray(value.surveyedChunks, "surveyedChunks"),
+    selectedChunks: exactStringArray(value.selectedChunks, "selectedChunks"),
     completedChunks: exactStringArray(value.completedChunks, "completedChunks"), updatedAt: value.updatedAt,
   };
 }
@@ -515,14 +528,14 @@ function repoDocument(manifest: SourceIntakeManifest, brief: string): string {
   return `# 改编设计输入\n\n> 本文件由 writing-loop source intake 登记；原著全文不进入 Git。\n> Source-intake: \`${manifest.planId}\`\n\n## 原著指纹\n\n- 标题：${manifest.source.title}\n- 文件名：\`${manifest.source.fileName}\`\n- SHA-256：\`${manifest.source.sha256}\`\n- 字节数：${manifest.source.byteLength}\n- UTF-8 行数：${manifest.source.lineCount}\n- 本地分块：${manifest.chunking.chunks.length}\n\n## 操作者改编设计\n\n${brief}\n\n## 权利范围\n\n${manifest.adaptation.rightsScope}\n\n## 模型处理授权\n\n- 允许的 Harness：${consent.allowedHarnesses.join("、")}\n- 已明确允许按分析票把原著分块发送给上述 Harness：是\n- 确认时间：${consent.confirmedAt}\n`;
 }
 function sourceReadme(): string {
-  return `# 原著分析工作区\n\n- \`adaptation-brief.md\`：操作者提供的改编设计与原著指纹。\n- \`analysis-plan.md\`：由 writing-loop Source Analyst 生成的本季取材范围与筛选问题。\n- \`deconstruction/chunks/\`：有界创作摘要；不复制大段原文。\n- \`mainline.md\` / \`highlights.md\` / \`characters-function.md\`：Source Analyst 完成筛选后交给 Story Designer 的改编素材。\n\n原著全文只存于项目运行态，不进入 Git；未经 intake 中的明确 Harness 授权不得读取。\n`;
+  return `# 原著分析工作区\n\n- \`adaptation-brief.md\`：操作者提供的改编设计与原著指纹。\n- \`survey/chunks/\`：覆盖全书的有界结构扫描摘要。\n- \`book-map.md\` / \`character-arcs.md\` / \`world-evolution.md\` / \`season-map.md\`：全书级事实地图。\n- \`analysis-plan.md\`：建立在全书地图上的本季深度取材窗口与筛选问题。\n- \`deconstruction/chunks/\`：本季深度证据摘要；不复制大段原文。\n- \`mainline.md\` / \`highlights.md\` / \`characters-function.md\`：Source Analyst 完成筛选后交给 Story Designer 的改编素材。\n\n原著全文只存于项目运行态，不进入 Git；未经 intake 中的明确 Harness 授权不得读取。\n`;
 }
 
 function creativeSourceTicket(ticket: string): string {
   const start = ticket.indexOf("## Acceptance criteria\n");
   const end = start < 0 ? -1 : ticket.indexOf("\n---\n## Comments", start);
   if (start < 0 || end < 0) throw new SourceIntakeError("source-analysis ticket 模板缺少创作验收段");
-  const creative = `## Acceptance criteria\n- 冻结一个连续、可形成完整第一季弧线的最小取材窗口，不把全书做成资料库。\n- 每轮只筛选一段连续内容，优先提炼冲突、权力机制、人物功能、名场面与改编风险。\n- 完成后只保留最多12条主线、12个名场面和18个人物功能，交 Showrunner 验收。\n- 票据只记录创作判断，不记录工具、格式、性能或过程统计。\n\n## How to verify\n本季素材能回答北极星的核心问题，且未分析范围、改编取舍与相似性风险清楚可审。\n`;
+  const creative = `## Acceptance criteria\n- 先覆盖全书完成结构扫描，形成全书阶段、人物生命周期、世界演变与季界候选；不得用开篇窗口冒充全书理解。\n- 再依据 seasonStrategy 为当前季选择最多32块、最多4个连续窗口的深度证据。\n- 单季项目的证据须覆盖开端、关键转折与结局；多季项目须说明全剧季界与当前季职责。\n- 完成后只保留最多12条主线、12个名场面和18个人物功能，交 Showrunner 验收。\n- 票据只记录创作判断，不记录工具、格式、性能或过程统计。\n\n## How to verify\n全书事实地图和本季素材共同回答 North Star；季制、改编取舍与相似性风险清楚可审。\n`;
   return ticket.slice(0, start) + creative + ticket.slice(end);
 }
 
@@ -644,7 +657,7 @@ function ensureBoard(root: string, key: string, config: WlConfig, planId: string
     const [{ file: outlineFile, id: outlineTicketId }] = outlines;
     const analysisTicketId = existingAnalysis?.id ?? `${configuredPrefix}-${max + 1}`;
     if (!existingAnalysis) {
-      const ticket = `---\nid: ${analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${outlineTicketId}]\nduplicateOf: null\ncreated: ${now}\nupdated: ${now}\n---\nSource-intake: ${planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\n\n## Context\n由 writing-loop 的 Source Analyst 快速筛选原著，为 Story Designer 交付有界的第一季改编素材；禁止调用外部拆书 Skill。\n\n## Context-pack\n需读（≤8 指针）：\`source/adaptation-brief.md\`；\`.writing-loop/${key}/${SOURCE_DIR}/${MANIFEST_FILE}\`；本票。\n关键事实：原著 SHA-256=${manifest.source.sha256}；共 ${manifest.chunking.chunks.length} 块；允许 Harness=${manifest.adaptation.processingConsent.allowedHarnesses.join(",")}。\n禁读：首次 plan fire 不读原著全文，只读 manifest 中的标题和分块元数据。\n\n## Acceptance criteria\n- 先冻结最多 32 个连续块的第一季取材窗口。\n- 每 fire 最多处理 8 块 / 480 KiB；每块只保留有界的主线、机制、人物功能、名场面与风险。\n- 批次不维护全局大表；所选范围完成后再聚合最多 12 条主线、12 个名场面和 18 个人物功能。\n- 聚合产物交 showrunner 验收；outline ticket 在通过前保持 Backlog/source-pending。\n\n## How to verify\nmanifest provenance、selected/completed 覆盖、有界聚合与相似性门全部可机械核对。\n\n---\n## Comments\n### ${now} — source-intake\n原著已登记；等待 Source Analyst。\n`;
+      const ticket = `---\nid: ${analysisTicketId}\ntitle: ${JSON.stringify(`通读《${manifest.source.title}》并形成当前季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${outlineTicketId}]\nduplicateOf: null\ncreated: ${now}\nupdated: ${now}\n---\nSource-intake: ${planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: survey\n\n## Context\n由 writing-loop 的 Source Analyst 先覆盖全书建立结构地图，再为当前季选择有界深度证据；禁止调用外部拆书 Skill。\n\n## Context-pack\n需读（≤8 指针）：\`source/adaptation-brief.md\`；\`.writing-loop/${key}/${SOURCE_DIR}/${MANIFEST_FILE}\`；config 的 seasonStrategy；本票。\n关键事实：原著 SHA-256=${manifest.source.sha256}；共 ${manifest.chunking.chunks.length} 块；允许 Harness=${manifest.adaptation.processingConsent.allowedHarnesses.join(",")}。\n禁读：首次 fire 不读原著正文，只读 manifest 标题、改编方向与季制设置。\n\n## Acceptance criteria\n- 先完成全书结构扫描，再选择本季深度证据。\n- 每 fire 最多处理 8 块 / 480 KiB；批次不维护全局大表。\n- 聚合产物交 showrunner 验收；outline ticket 在通过前保持 Backlog/source-pending。\n\n## How to verify\n全书 surveyed 覆盖、manifest provenance、本季 selected/completed 覆盖、有界聚合与相似性门全部可机械核对。\n\n---\n## Comments\n### ${now} — source-intake\n原著已登记；等待 Source Analyst 先完成全书结构扫描。\n`;
       writeDurable(join(tickets, `${analysisTicketId}.md`), creativeSourceTicket(ticket), 0o600);
     }
     let outline = readFileSync(outlineFile, "utf8");
@@ -676,9 +689,9 @@ export function commitSourceIntake(root: string, key: string, config: WlConfig, 
   const repoCommit = ensureRepoDocs(facts.repoPath, runtimeResult.manifest, facts.parsed.request.adaptationBrief);
   const board = ensureBoard(root, key, config, facts.planId, runtimeResult.manifest, createdAt);
   const control: SourceIntakeControl = {
-    version: 1, kind: "writing-loop/source-analysis-control", planId: facts.planId,
+    version: 2, kind: "writing-loop/source-analysis-control", planId: facts.planId,
     analysisTicketId: board.analysisTicketId, outlineTicketId: board.outlineTicketId,
-    phase: "registered", selectedChunks: [], completedChunks: [], updatedAt: createdAt,
+    phase: "registered", surveyedChunks: [], selectedChunks: [], completedChunks: [], updatedAt: createdAt,
   };
   const controlFile = join(projectDataDir(root, key), SOURCE_DIR, CONTROL_FILE);
   if (existsSync(controlFile)) {
@@ -703,25 +716,105 @@ export function readSourceIntakeStatus(root: string, key: string): { manifest: S
   return { manifest, control };
 }
 
+export function startSourceSurvey(root: string, key: string, now = new Date()): SourceAnalysisProgress {
+  const control = mutateControl(root, key, (_manifest, current) => {
+    if (current.phase !== "registered" && current.phase !== "surveying") {
+      throw new SourceIntakeError("全书结构扫描只能从 registered 开始");
+    }
+    return { ...current, phase: "surveying", updatedAt: now.toISOString() };
+  });
+  return { ...progress(control), projectKey: key };
+}
+
+export function checkpointSourceSurveyChunk(root: string, key: string, config: WlConfig, chunkId: string, commit: string,
+  now = new Date()): SourceAnalysisProgress {
+  if (!/^chunk-[0-9]{4}$/.test(chunkId) || !/^[0-9a-f]{40}$/.test(commit)) {
+    throw new SourceIntakeError("chunk ID 或 commit SHA 无效");
+  }
+  const entry = projectEntries(config).find(([candidate]) => candidate === key);
+  if (!entry) throw new SourceIntakeError(`config.json 无项目 '${key}'`);
+  const repo = resolveRepoPath(root, entry[1]);
+  const summary = join(repo, "source", "survey", "chunks", `${chunkId}.md`);
+  const control = mutateControl(root, key, (manifest, current) => {
+    if (current.phase !== "surveying") throw new SourceIntakeError("全书结构扫描尚未开始");
+    const fact = manifest.chunking.chunks.find((chunk) => chunk.id === chunkId);
+    if (!fact) throw new SourceIntakeError("chunk 不在 manifest");
+    const already = current.surveyedChunks.indexOf(chunkId);
+    if (already < 0) {
+      const expected = manifest.chunking.chunks[current.surveyedChunks.length]?.id;
+      if (chunkId !== expected) throw new SourceIntakeError(`全书结构扫描必须按原著顺序推进；下一块是 ${expected ?? "无"}`);
+    }
+    if (!existsSync(summary)) throw new SourceIntakeError(`缺少全书扫描摘要：${summary}`);
+    const raw = readFileSync(summary, "utf8");
+    if (!raw.includes(`Source-intake: ${manifest.planId}`) || !raw.includes(`Source-chunk: ${chunkId}`)
+      || !raw.includes(`Source-sha256: ${fact.sha256}`)) {
+      throw new SourceIntakeError("全书扫描摘要缺少精确 provenance 标记");
+    }
+    const fileCommit = git(repo, ["log", "-1", "--format=%H", "--", relative(repo, summary)]);
+    if (fileCommit !== commit || git(repo, ["status", "--porcelain"])) {
+      throw new SourceIntakeError("全书扫描摘要 commit 不匹配或 repo 不干净");
+    }
+    const surveyed = already >= 0 ? current.surveyedChunks : [...current.surveyedChunks, chunkId];
+    return { ...current, surveyedChunks: surveyed, updatedAt: now.toISOString() };
+  });
+  return { ...progress(control), projectKey: key };
+}
+
+export function finalizeSourceSurvey(root: string, key: string, config: WlConfig, now = new Date()): SourceAnalysisProgress {
+  const entry = projectEntries(config).find(([candidate]) => candidate === key);
+  if (!entry) throw new SourceIntakeError(`config.json 无项目 '${key}'`);
+  const repo = resolveRepoPath(root, entry[1]);
+  const control = mutateControl(root, key, (manifest, current) => {
+    if (current.phase !== "surveying" && current.phase !== "surveyed") {
+      throw new SourceIntakeError("全书结构扫描尚未进入 surveying");
+    }
+    const expected = manifest.chunking.chunks.map((chunk) => chunk.id);
+    if (current.surveyedChunks.length !== expected.length
+      || expected.some((id, index) => current.surveyedChunks[index] !== id)) {
+      throw new SourceIntakeError("仍有未完成的全书结构扫描 chunk");
+    }
+    for (const name of ["book-map.md", "character-arcs.md", "world-evolution.md", "season-map.md"]) {
+      const file = join(repo, "source", name);
+      const raw = existsSync(file) ? readFileSync(file, "utf8") : "";
+      if (raw.length < 400 || !raw.includes(`Source-intake: ${manifest.planId}`)) {
+        throw new SourceIntakeError(`${name} 尚未形成带 provenance 的全书结构结论`);
+      }
+    }
+    if (git(repo, ["status", "--porcelain"])) throw new SourceIntakeError("repo 有未提交改动，不能完成全书结构扫描");
+    return { ...current, phase: "surveyed", updatedAt: now.toISOString() };
+  });
+  return { ...progress(control), projectKey: key };
+}
+
 export function selectSourceAnalysisChunks(root: string, key: string, chunkIds: string[], now = new Date()): SourceAnalysisProgress {
   if (!Array.isArray(chunkIds) || chunkIds.length < 1 || new Set(chunkIds).size !== chunkIds.length) {
     throw new SourceIntakeError("必须选择至少一个且不重复的 chunk ID");
   }
   if (chunkIds.length > MAX_SELECTED_CHUNKS) {
-    throw new SourceIntakeError(`第一季原著窗口最多 ${MAX_SELECTED_CHUNKS} 个 chunk`);
+    throw new SourceIntakeError(`当前季原著深度证据最多 ${MAX_SELECTED_CHUNKS} 个 chunk`);
   }
   const control = mutateControl(root, key, (manifest, current) => {
     const order = manifest.chunking.chunks.map((chunk) => chunk.id);
     const indices = chunkIds.map((id) => order.indexOf(id));
     if (indices.some((index) => index < 0)) throw new SourceIntakeError("选择包含 manifest 外的 chunk ID");
-    if (indices.some((index, offset) => index !== indices[0] + offset)) {
-      throw new SourceIntakeError("source analysis 必须按 manifest 顺序选择连续 chunk 窗口");
+    if (indices.some((index, offset) => index < 0 || (offset > 0 && index <= indices[offset - 1]!))) {
+      throw new SourceIntakeError("source analysis 必须按 manifest 顺序选择 chunk");
+    }
+    const windowCount = indices.reduce((count, index, offset) => count + (offset === 0 || index !== indices[offset - 1]! + 1 ? 1 : 0), 0);
+    if (windowCount > MAX_SELECTED_WINDOWS) {
+      throw new SourceIntakeError(`本季深度取材最多 ${MAX_SELECTED_WINDOWS} 个连续窗口`);
     }
     const selectedBytes = indices.reduce((total, index) => total + manifest.chunking.chunks[index]!.byteLength, 0);
     if (selectedBytes > MAX_SELECTED_BYTES) {
-      throw new SourceIntakeError(`第一季原著窗口最多 ${MAX_SELECTED_BYTES} bytes`);
+      throw new SourceIntakeError(`当前季原著深度证据最多 ${MAX_SELECTED_BYTES} bytes`);
     }
+    const completeSurvey = current.surveyedChunks.length === order.length
+      && order.every((id, index) => current.surveyedChunks[index] === id);
+    if (!completeSurvey) throw new SourceIntakeError("必须先完成全书结构扫描，才能选择本季深度取材窗口");
     if (current.phase === "review-ready") throw new SourceIntakeError("source analysis 已冻结，不能重选范围");
+    if (current.phase !== "surveyed" && current.phase !== "analyzing") {
+      throw new SourceIntakeError("source analysis 尚未完成全书结构扫描");
+    }
     if (current.selectedChunks.length && canonical(current.selectedChunks) !== canonical(chunkIds)) {
       throw new SourceIntakeError("source analysis 范围已选定，拒绝漂移");
     }
@@ -732,7 +825,7 @@ export function selectSourceAnalysisChunks(root: string, key: string, chunkIds: 
 
 function progress(control: SourceIntakeControl): SourceAnalysisProgress {
   const done = new Set(control.completedChunks);
-  return { projectKey: "", phase: control.phase, selectedChunks: [...control.selectedChunks],
+  return { projectKey: "", phase: control.phase, surveyedChunks: [...control.surveyedChunks], selectedChunks: [...control.selectedChunks],
     completedChunks: [...control.completedChunks], remainingChunks: control.selectedChunks.filter((id) => !done.has(id)) };
 }
 
@@ -797,12 +890,14 @@ export function restartSourceAnalysis(root: string, key: string, config: WlConfi
   const sourceDir = join(repo, "source");
   const sourceFact = lstatSync(sourceDir);
   if (!sourceFact.isDirectory() || sourceFact.isSymbolicLink()) throw new SourceIntakeError("source 不是安全目录");
-  const derivedDir = join(sourceDir, "deconstruction");
-  if (existsSync(derivedDir)) {
+  const derivedDirs = [join(sourceDir, "deconstruction"), join(sourceDir, "survey")];
+  for (const derivedDir of derivedDirs) {
+    if (!existsSync(derivedDir)) continue;
     const fact = lstatSync(derivedDir);
-    if (!fact.isDirectory() || fact.isSymbolicLink()) throw new SourceIntakeError("source/deconstruction 不是安全目录");
+    if (!fact.isDirectory() || fact.isSymbolicLink()) throw new SourceIntakeError(`${relative(repo, derivedDir)} 不是安全目录`);
   }
-  const derivedFiles = ["analysis-plan.md", "mainline.md", "highlights.md", "characters-function.md", "README.md"];
+  const surveyFiles = ["book-map.md", "character-arcs.md", "world-evolution.md", "season-map.md"];
+  const derivedFiles = ["analysis-plan.md", "mainline.md", "highlights.md", "characters-function.md", ...surveyFiles, "README.md"];
   for (const name of derivedFiles) {
     const file = join(sourceDir, name);
     if (existsSync(file)) {
@@ -810,7 +905,8 @@ export function restartSourceAnalysis(root: string, key: string, config: WlConfi
       if (!fact.isFile() || fact.isSymbolicLink() || fact.nlink !== 1) throw new SourceIntakeError(`source/${name} 必须是普通单链接文件`);
     }
   }
-  if (existsSync(derivedDir)) rmSync(derivedDir, { recursive: true });
+  for (const derivedDir of derivedDirs) if (existsSync(derivedDir)) rmSync(derivedDir, { recursive: true });
+  for (const name of surveyFiles) rmSync(join(sourceDir, name), { force: true });
   for (const name of ["analysis-plan.md", "mainline.md", "highlights.md", "characters-function.md"]) {
     const file = join(sourceDir, name);
     if (name === "analysis-plan.md") rmSync(file, { force: true });
@@ -841,7 +937,7 @@ export function restartSourceAnalysis(root: string, key: string, config: WlConfi
     const stamp = now.toISOString().replace(/[:.]/g, "-");
     archivePath = join(archiveDir, `${status.control.analysisTicketId}-${stamp}.md`);
     writeDurable(archivePath, readFileSync(ticketFile, "utf8"), 0o600);
-    const ticket = `---\nid: ${status.control.analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${status.manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${status.control.outlineTicketId}]\nduplicateOf: null\ncreated: ${status.manifest.createdAt}\nupdated: ${now.toISOString()}\n---\nSource-intake: ${status.manifest.planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\nSource-restart: ${repoCommit}\n\n## Context\n由 Source Analyst 快速筛选原著，只交付第一季所需的有界改编素材；旧分析保存在 Git 历史和板归档中。\n\n## Acceptance criteria\n- 最多选择 32 个连续块；每 fire 最多 8 块 / 480 KiB。\n- 每块最多2个名场面、3个人物功能；批次不维护全局大表。\n- 最终最多12条主线、12个名场面、18个人物功能，交 Showrunner 验收。\n- 不创建技术脚本、过程统计或格式迁移任务。\n\n---\n## Comments\n### ${now.toISOString()} — source-restart\n旧派生分析已归档；从第1块按 Source Analyst 新流程重启。\n`;
+    const ticket = `---\nid: ${status.control.analysisTicketId}\ntitle: ${JSON.stringify(`通读《${status.manifest.source.title}》并形成当前季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${status.control.outlineTicketId}]\nduplicateOf: null\ncreated: ${status.manifest.createdAt}\nupdated: ${now.toISOString()}\n---\nSource-intake: ${status.manifest.planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: survey\nSource-restart: ${repoCommit}\n\n## Context\n由 Source Analyst 先覆盖全书建立结构地图，再依据 seasonStrategy 交付当前季的有界改编素材；旧分析保存在 Git 历史和板归档中。\n\n## Acceptance criteria\n- 全书所有 chunk 先完成结构扫描；每 fire 最多 8 块 / 480 KiB。\n- 全书地图完成后，本季最多选择 32 块、4 个连续窗口做深度拆解。\n- 最终最多12条主线、12个名场面、18个人物功能，交 Showrunner 验收。\n- 不创建技术脚本、过程统计或格式迁移任务。\n\n---\n## Comments\n### ${now.toISOString()} — source-restart\n旧派生分析已归档；从第1块按“全书扫描 → 本季深拆”流程重启。\n`;
     atomicReplace(ticketFile, creativeSourceTicket(ticket));
     fsyncDir(tickets); fsyncDir(archiveDir);
   } finally {
@@ -849,7 +945,7 @@ export function restartSourceAnalysis(root: string, key: string, config: WlConfi
   }
 
   mutateControl(root, key, (_manifest, current) => ({ ...current, phase: "registered",
-    selectedChunks: [], completedChunks: [], updatedAt: now.toISOString() }));
+    surveyedChunks: [], selectedChunks: [], completedChunks: [], updatedAt: now.toISOString() }));
   return { projectKey: key, planId: status.control.planId, analysisTicketId: status.control.analysisTicketId,
     archivePath, repoCommit, phase: "registered" };
 }

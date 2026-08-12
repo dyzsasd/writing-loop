@@ -77,7 +77,8 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 - **genre profile**：`brain-hole`（脑洞爽剧）/ `revenge-slap`（复仇打脸）/ `profession-unit`（职业单元）已校准；女频 `sweet-pet` / `angst` 是 **UNCALIBRATED**，会明确警告你参数未校准、质量有风险。
 - **monetization**：`paid-app` / `free-hongguo` / `reelshort-sub`（决定卡点与门位语义）。
 - **format**：`live-action` / `ai-anime` / `reelshort-en`（决定字数带与制作层预算；ai-anime 特效近乎免费是形态优势）。
-- **规模**：`totalEpisodes`、`paywall`（备卡集号，一卡 ⊂ 第 8–12 集）、`maxPrimaryScenes`、`maxNamedCharacters`。
+- **季制与规模**：`seasonStrategy`（单季 / 多季 / 扫描后决定）、`currentSeason`、当前季的
+  `totalEpisodes`、`paywall`（备卡集号，一卡 ⊂ 第 8–12 集）、`maxPrimaryScenes`、`maxNamedCharacters`。
 
 **改编线专属（操作者提供输入，不填写拆书答案）**
 
@@ -104,12 +105,14 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 
 正常立项没有第二次手工登记。你确认的 project plan 已经绑定原著指纹、改编建议、权利范围
 和 Harness 授权；project create 会自动在本地复制/分块原著、只提交指纹与改编建议，并创建
-`source-analysis` 票。此时直接启动编剧室：Source Analyst 最多选择32个连续块，每 fire 最多
-筛选8块/480 KiB，最终只交付最多12条主线、12个名场面和18个人物功能，再交 Showrunner 验收。
+`source-analysis` 票。此时直接启动编剧室：Source Analyst 先按顺序扫描全书所有块（每 fire 最多
+8块/480 KiB），形成完整人物弧、世界演变和季界图；然后才为当前季从最多4个窗口选择
+32块/2 MiB以内的深度证据，最终只交付最多12条主线、12个名场面和18个人物功能，再交 Showrunner 验收。
 `writing-loop source status --project my-drama` 是只读状态面；
 `source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
-拆书门通过后，Story Designer 完成全季结构、分集节拍、人物、世界、伏笔、连续性与双轨时间线，
+项目设置区分单季完结、多季项目和全书扫描后决定；`totalEpisodes` 始终表示当前季集数，
+`currentSeason` 表示当前开发第几季。拆书门通过后，Story Designer 完成全季结构、分集节拍、人物、世界、伏笔、连续性与双轨时间线，
 并自动运行确定性质量门。底层结构化格式由平台维护，不会成为编剧 Ticket。打开 Studio 项目页
 即可在“原著分析 / 全季结构 / 时间线 / 人物与世界 / 美术资产 / 分集与质量”中查看同一事实。
 人物、世界、地点、道具、伏笔、连续性和双轨时间线按 ticket/agent/集数生成有界 Context Pack；

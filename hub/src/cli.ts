@@ -75,7 +75,9 @@ const usage = (): void => {
   source register --project K --input FILE --confirm PLAN_ID [--json]
                               本地登记原著与改编设计，并创建 writing-loop 拆书票
   source status --project K [--json]
-                              查看原著登记及 source-analysis 进度
+                              查看全书扫描、本季取材及 source-analysis 进度
+  source survey-start|survey-checkpoint|survey-finalize …
+                              Source Analyst 的全书扫描恢复/checkpoint 门
   story status --project K [--json]
                               查看结构化故事、派生资产与质量门（只读；通常由 Studio 使用）
   story validate --project K [--stage skeleton|beats|full] [--json]

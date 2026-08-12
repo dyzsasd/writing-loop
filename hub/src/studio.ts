@@ -317,6 +317,8 @@ export function onboardingInputFromForm(root: string, form: URLSearchParams): Re
     genre: form.get("genre") ?? "",
     monetization: form.get("monetization") ?? "",
     format: form.get("format") ?? "",
+    seasonStrategy: form.get("seasonStrategy") ?? "undecided",
+    currentSeason: formInteger(form, "currentSeason"),
     totalEpisodes: formInteger(form, "totalEpisodes"),
     paywall: { card1: formNumbers(form, "card1"), card2: formNumbers(form, "card2"), card3: formNumbers(form, "card3") },
     episodeWordBand: [formInteger(form, "wordMin"), formInteger(form, "wordMax")],

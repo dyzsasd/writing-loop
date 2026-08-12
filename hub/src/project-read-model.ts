@@ -51,6 +51,8 @@ export type ProjectSnapshot = {
   genre: string | null;
   monetization: string | null;
   audience: string | null;
+  seasonStrategy: "single-season" | "multi-season" | "undecided" | null;
+  currentSeason: number | null;
   logline: string | null;
   progress: {
     frontier: number;
@@ -336,6 +338,10 @@ function projectSnapshot(ws: Workspace, key: string, project: WlProject, nowMs: 
     genre: typeof project.genre === "string" ? project.genre : null,
     monetization: typeof project.monetization === "string" ? project.monetization : null,
     audience: typeof project.audience === "string" ? project.audience : null,
+    seasonStrategy: project.seasonStrategy === "single-season" || project.seasonStrategy === "multi-season"
+      || project.seasonStrategy === "undecided" ? project.seasonStrategy : null,
+    currentSeason: typeof project.currentSeason === "number" && Number.isSafeInteger(project.currentSeason)
+      && project.currentSeason >= 1 && project.currentSeason <= 100 ? project.currentSeason : null,
     logline: readLogline(repoPath),
     progress: {
       frontier: episodes.frontier,

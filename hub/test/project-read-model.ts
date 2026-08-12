@@ -51,6 +51,8 @@ try {
         format: "live-action",
         genre: "悬疑",
         audience: "18–35 岁女性",
+        seasonStrategy: "multi-season",
+        currentSeason: 2,
         totalEpisodes: 12,
       },
       paused: { title: "冬眠中的故事", repoPath: "paused-story", enabled: false, totalEpisodes: 60 },
@@ -99,6 +101,8 @@ try {
   ok(snapshot.projects[0].key === "paper-moon" && snapshot.projects[1].key === "paused", "enabled 项目优先且顺序稳定");
   const project = snapshot.projects[0];
   ok(project.logline?.includes("现实发生") === true, "从北极星提取一句话故事");
+  ok(project.seasonStrategy === "multi-season" && project.currentSeason === 2,
+    "project snapshot exposes the configured season system and current season to Studio");
   ok(project.progress.frontier === 3 && project.progress.percent === 25, "分集前沿与总集数形成进度");
   ok(project.latestEpisodes[0].number === 3 && project.latestEpisodes[0].words === null
     && project.latestEpisodes[1].words === 1320, "分集按最新优先投影元数据，超大 words 保持 null 而非 Infinity");

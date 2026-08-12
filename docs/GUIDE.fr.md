@@ -98,7 +98,8 @@ répondre :
   sémantique du paywall et des portes).
 - **format** : `live-action` / `ai-anime` / `reelshort-en` (fixe la fourchette de mots
   et le tableau de budget de production ; pour ai-anime, les VFX bon marché sont un atout).
-- **Échelle** : `totalEpisodes`, `paywall` (numéros de cartes de secours ; carte 1 ⊂
+- **Saisons et échelle** : `seasonStrategy` (`single-season` / `multi-season` /
+  `undecided`), `currentSeason`, `totalEpisodes` pour cette saison, `paywall` (numéros de cartes de secours ; carte 1 ⊂
   épisodes 8–12), `maxPrimaryScenes`, `maxNamedCharacters`.
 
 **Spécifique à l'adaptation (l'opérateur fournit les entrées, pas le découpage)**
@@ -135,12 +136,16 @@ Ensuite `add-script` automatiquement :
 Le parcours normal n'a pas de seconde inscription manuelle. Le project plan approuvé
 lie déjà l'empreinte du roman, le brief, les droits et le consentement du Harness ;
 project create copie/chunke localement, ne committe que provenance et brief, puis crée
-source-analysis. Démarrez la room : Source Analyst choisit au plus 32 chunks contigus,
-traite au plus 8 chunks / 480 KiB par fire, plafonne le dossier à 12 axes, 12 scènes et
+source-analysis. Démarrez la room : Source Analyst parcourt d'abord tous les chunks,
+à raison de 8 chunks / 480 KiB par fire, construit les cartes globales des personnages,
+du monde et des saisons, puis choisit au plus 32 chunks / 2 MiB dans quatre fenêtres pour
+la saison courante. Le dossier reste plafonné à 12 axes, 12 scènes et
 18 fonctions de personnages, puis le soumet au Showrunner. `writing-loop
 source status --project my-drama` est en lecture seule ; `source plan/register` sont
 réservées à la reprise/migration avancée et ne font pas partie du parcours normal.
 
+Le projet distingue `single-season`, `multi-season` et `undecided` ; `totalEpisodes`
+désigne toujours la saison courante et `currentSeason` la saison développée.
 Après la porte source, Story Designer construit la saison, les beats, personnages,
 monde, préparations, continuité et double chronologie, puis exécute automatiquement les
 portes qualité. La sérialisation structurée reste interne à la plateforme et ne devient

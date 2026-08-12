@@ -7,8 +7,9 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  checkpointSourceAnalysisChunk, commitSourceIntake, finalizeSourceAnalysis, planSourceIntake,
-  readSourceIntakeStatus, restartSourceAnalysis, selectSourceAnalysisChunks, SourceIntakeError,
+  checkpointSourceAnalysisChunk, checkpointSourceSurveyChunk, commitSourceIntake, finalizeSourceAnalysis,
+  finalizeSourceSurvey, planSourceIntake, readSourceIntakeStatus, restartSourceAnalysis,
+  selectSourceAnalysisChunks, SourceIntakeError, startSourceSurvey,
 } from "../src/source-intake.ts";
 import { loadConfig } from "../src/workspace.ts";
 
@@ -79,7 +80,7 @@ try {
   ok(outline.includes("state: Backlog") && outline.includes("source-pending") && outline.includes("Blocked-by: SRC-2")
     && analysis.includes("state: Todo") && analysis.includes("source-analysis")
     && analysis.includes("source-analyst") && !analysis.includes("source-analysis, story-designer")
-    && analysis.includes("不把全书做成资料库") && !analysis.includes("480 KiB")
+    && analysis.includes("先覆盖全书完成结构扫描") && !analysis.includes("480 KiB")
     && analysis.includes("禁止调用外部拆书 Skill"),
     "source analysis is routed only to Source Analyst while outline is durably parked in Backlog");
   ok(!existsSync(join(repo, "novel.txt")) && !readFileSync(join(repo, "source", "adaptation-brief.md"), "utf8").includes(sections.slice(0, 100)),
@@ -100,20 +101,55 @@ try {
   ok(rejects(() => commitSourceIntake(tmp, "demo", ws.config, { ...request, adaptationBrief: "漂移" }, plan.planId), "确认指纹"),
     "brief drift cannot reuse an old confirmation fingerprint");
 
-  const selected = status!.manifest.chunking.chunks.slice(0, 2);
+  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [status!.manifest.chunking.chunks[0].id], new Date()),
+    "必须先完成全书结构扫描"),
+  "current-season selection cannot begin before every immutable source chunk has been surveyed");
+  const surveyStarted = startSourceSurvey(tmp, "demo", new Date("2026-08-11T01:01:40.000Z"));
+  ok(surveyStarted.phase === "surveying" && surveyStarted.surveyedChunks.length === 0,
+    "Source Analyst explicitly enters the whole-book survey phase");
+  mkdirSync(join(repo, "source", "survey", "chunks"), { recursive: true });
+  for (const fact of status!.manifest.chunking.chunks) {
+    writeFileSync(join(repo, "source", "survey", "chunks", `${fact.id}.md`),
+      `# ${fact.id} 全书结构扫描\n\nSource-intake: ${plan.planId}\nSource-chunk: ${fact.id}\nSource-sha256: ${fact.sha256}\n\n本段只记录全书阶段、人物变化、世界演变与季界候选。\n`);
+  }
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-qm", "source: survey whole book"], { cwd: repo });
+  const surveyCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8" }).trim();
+  ok(rejects(() => checkpointSourceSurveyChunk(tmp, "demo", ws.config,
+    status!.manifest.chunking.chunks[1].id, surveyCommit), "按原著顺序推进"),
+  "whole-book survey cannot skip an earlier chunk");
+  for (const fact of status!.manifest.chunking.chunks) {
+    checkpointSourceSurveyChunk(tmp, "demo", ws.config, fact.id, surveyCommit,
+      new Date("2026-08-11T01:01:45.000Z"));
+  }
+  ok(rejects(() => finalizeSourceSurvey(tmp, "demo", ws.config), "book-map.md"),
+    "survey checkpoints alone cannot bypass the four whole-book fact maps");
+  for (const name of ["book-map.md", "character-arcs.md", "world-evolution.md", "season-map.md"]) {
+    writeFileSync(join(repo, "source", name),
+      `# ${name}\n\nSource-intake: ${plan.planId}\n\n${"覆盖全书的结构事实与季界判断。".repeat(60)}\n`);
+  }
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-qm", "source: publish whole-book maps"], { cwd: repo });
+  const surveyed = finalizeSourceSurvey(tmp, "demo", ws.config, new Date("2026-08-11T01:01:50.000Z"));
+  ok(surveyed.phase === "surveyed" && surveyed.surveyedChunks.length === status!.manifest.chunking.chunks.length,
+    "only exact ordered coverage plus committed whole-book maps reaches surveyed");
+
+  const selected = [status!.manifest.chunking.chunks[0], status!.manifest.chunking.chunks.at(-1)!];
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo",
     status!.manifest.chunking.chunks.slice(0, 33).map((chunk) => chunk.id), new Date()), "最多 32"),
     "season selection mechanically rejects more than 32 chunks");
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo",
     status!.manifest.chunking.chunks.slice(0, 30).map((chunk) => chunk.id), new Date()), "最多 2097152 bytes"),
     "season selection mechanically rejects more than 2 MiB even below the chunk-count cap");
-  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [
-    status!.manifest.chunking.chunks[0].id, status!.manifest.chunking.chunks[2].id,
-  ], new Date()), "连续 chunk"), "season analysis cannot skip across a non-contiguous source range");
-  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [selected[1].id, selected[0].id], new Date()), "连续 chunk"),
+  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [0, 2, 4, 6, 8]
+    .map((index) => status!.manifest.chunking.chunks[index].id), new Date()), "最多 4 个连续窗口"),
+  "current-season deep evidence cannot fragment into more than four windows");
+  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [selected[1].id, selected[0].id], new Date()), "manifest 顺序"),
     "season analysis must preserve manifest source order");
   const selection = selectSourceAnalysisChunks(tmp, "demo", selected.map((chunk) => chunk.id), new Date("2026-08-11T01:02:00.000Z"));
-  ok(selection.phase === "analyzing" && selection.remainingChunks.length === 2, "Source Analyst freezes a bounded season analysis range");
+  ok(selection.phase === "analyzing" && selection.remainingChunks.length === 2
+    && selection.selectedChunks[1] === status!.manifest.chunking.chunks.at(-1)!.id,
+  "Source Analyst can freeze bounded non-prefix evidence after understanding the whole book");
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [selected[0].id], new Date()), "拒绝漂移"),
     "selected source range cannot silently drift across fires");
   mkdirSync(join(repo, "source", "deconstruction", "chunks"), { recursive: true });
@@ -161,13 +197,15 @@ try {
     new Date("2026-08-11T01:05:00.000Z"));
   const resetStatus = readSourceIntakeStatus(tmp, "demo");
   const resetTicket = readFileSync(join(tickets, "SRC-2.md"), "utf8");
-  ok(restarted.phase === "registered" && resetStatus?.control.selectedChunks.length === 0
-    && resetStatus.control.completedChunks.length === 0 && resetTicket.includes("source-analyst")
+  ok(restarted.phase === "registered" && resetStatus?.control.surveyedChunks.length === 0
+    && resetStatus.control.selectedChunks.length === 0 && resetStatus.control.completedChunks.length === 0
+    && resetTicket.includes("source-analyst")
     && resetTicket.includes("state: Todo") && !resetTicket.includes("story-designer")
     && resetTicket.includes("票据只记录创作判断") && !resetTicket.includes("480 KiB"),
     "restart archives the old analysis and republishes one compact Source Analyst ticket");
   ok(restarted.archivePath !== null && existsSync(restarted.archivePath)
-    && !existsSync(join(repo, "source", "deconstruction"))
+    && !existsSync(join(repo, "source", "deconstruction")) && !existsSync(join(repo, "source", "survey"))
+    && !existsSync(join(repo, "source", "book-map.md")) && !existsSync(join(repo, "source", "season-map.md"))
     && readFileSync(join(repo, "source", "mainline.md"), "utf8").includes("等待 Source Analyst")
     && readFileSync(northStar, "utf8").includes("必须保留")
     && Buffer.compare(rawBeforeRestart,
