@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   boardSnapshotHash, buildSched, evalLaneGate, keystonePending,
   laneEpisodeWriter, laneEvaluator, laneMarketWatch, laneReflect, laneReviewer,
-  laneScriptDoctor, laneShowrunner, laneStoryDesigner, laneSweep,
+  laneScriptDoctor, laneShowrunner, laneSourceAnalyst, laneStoryDesigner, laneSweep,
   lastMonthlyBoundaryMs, lastWeeklyBoundaryMs, parseLaneTicket,
   reportsEscape, shaEq, showrunnerBoardSnapshotHash, sweepLockScan, WlExit,
   type LaneTicket,
@@ -27,7 +27,7 @@ import type { WlConfig, WlProject } from "../src/workspace.ts";
 
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const runEntry = join(hubRoot, "src", "run.ts");
-const AGENTS = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
+const AGENTS = ["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator",
   "sweep", "script-doctor", "market-watch", "reflect"];
 
 let npass = 0, nfail = 0;
@@ -165,6 +165,11 @@ function testStoryDesigner(): void {
     laneStoryDesigner([tk({ state: "In Progress", labels: sd, assignee: "x", updatedMs: NOW - 2 * HOUR })], NOW).length > 0);
   check("story-designer 反例：episode-writer 票不入本 lane",
     laneStoryDesigner([tk({ labels: ["writing-loop", "episode", "episode-writer"] })], NOW).length === 0);
+  const legacySource = tk({ labels: ["writing-loop", "Feature", "source-analysis", "story-designer"] });
+  check("Source Analyst 正例：新票与 legacy source-analysis 都进入专用车道",
+    laneSourceAnalyst([legacySource], NOW).length > 0);
+  check("Story Designer 反例：即使 legacy 票仍带 story-designer 也不得抢原著分析",
+    laneStoryDesigner([legacySource], NOW).length === 0);
 }
 
 function testReviewer(): void {
@@ -239,7 +244,7 @@ function testSweep(): void {
   check("sweep 保守：上次 fire 无从考证 ⇒ 命中", laneSweep([], NOW, false, null).length > 0);
   check("sweep 反例：板整洁/无锁/无 stall/节拍未到 ⇒ 空", laneSweep([tk({ state: "Todo", ...clean })], NOW, false, fresh).length === 0);
   // Fix 轮 1 minor：错标即时枝（SKILL §0 逃逸口②前半）直接机械实现，不再靠 cadence 兜底
-  check("sweep 错标即时枝：非终态票缺全部九个 tier 标签 ⇒ 命中",
+  check("sweep 错标即时枝：非终态票缺全部十个 tier 标签 ⇒ 命中",
     laneSweep([tk({ state: "Todo", owner: "reviewer", labels: ["writing-loop", "episode"] })], NOW, false, fresh).length > 0);
   check("sweep 错标即时枝：owner 字段缺失 ⇒ 命中",
     laneSweep([tk({ state: "Todo", labels: ["writing-loop", "episode-writer"] })], NOW, false, fresh).length > 0);

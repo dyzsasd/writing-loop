@@ -1,0 +1,4 @@
+interface:
+  display_name: "Source Analyst"
+  short_description: "Fast bounded adaptation-source screening"
+  default_prompt: "Use $source-analyst-agent to screen the registered novel into bounded first-season adaptation evidence."

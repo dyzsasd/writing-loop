@@ -667,6 +667,7 @@ updated: 2026-08-10T10:10:00.000Z
   ok(adaptationTicket.includes("state: Backlog") && adaptationTicket.includes("source-pending")
     && adaptationTicket.includes("自动登记原著") && !adaptationTicket.includes("state: Todo")
     && sourceTicket.includes("state: Todo") && sourceTicket.includes("source-analysis")
+    && sourceTicket.includes("source-analyst") && !sourceTicket.includes("source-analysis, story-designer")
     && adaptationResult.sourceAnalysisTicketId === "SG-2"
     && adaptationPlan.sourceIntake?.source.fileName === "source-novel.txt"
     && existsSync(join(data, "source-gated", "source-intake.v1", "original", "source.txt")),

@@ -29,6 +29,7 @@ const STATE_LABEL: Record<string, string> = {
 
 const AGENT_LABEL: Record<string, string> = {
   showrunner: "总编剧",
+  "source-analyst": "原著筛选",
   "story-designer": "故事设计",
   "episode-writer": "分集编剧",
   reviewer: "审读",

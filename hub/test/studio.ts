@@ -355,6 +355,7 @@ Episode: 1
   ok(adaptationCreated.status === 303 && adaptationNotice.includes("原著分析票 AD-2 已进入自治队列")
     && outlineTicket.includes("state: Backlog") && outlineTicket.includes("source-pending")
     && sourceTicket.includes("state: Todo") && sourceTicket.includes("source-analysis")
+    && sourceTicket.includes("source-analyst") && !sourceTicket.includes("source-analysis, story-designer")
     && existsSync(join(data, "adapted-drama", "source-intake.v1", "original", "source.txt")),
   "确认改编立项后自动登记原著、创建分析票并停靠大纲票，不要求手工 source 命令");
   ok(readFileSync(join(tmp, "adapted-drama", "bible", "north-star.md"), "utf8").includes("由 writing-loop 自主拆解")

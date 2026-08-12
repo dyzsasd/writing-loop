@@ -121,7 +121,7 @@ config-entry / repo-scaffold / git-head / outline-ticket / runtime-layout 必须
 （key/立项式/genre 警告/monetization/门表/scaffold SHA/首票 ID）。原创下一步为
 `/showrunner-agent`；改编下一步是直接启动 scheduler，由 source-analysis 票自主选择本季范围、
 逐块拆解并提交 Showrunner 门，不是准备另一份 intake JSON，也不是手工拆书。outline 与
-source-analysis 票 owner 均为 showrunner、执行层为 story-designer；本 skill 不领票、不写 outline。
+source-analysis 票 owner 为 showrunner、执行层为 source-analyst；本 skill 不领票、不写 outline。
 
 ## 2. Guardrails
 - §2 安全边界：只授权 core 创建一个新 repo、本项目数据目录及索引内本剧条目；绝不碰

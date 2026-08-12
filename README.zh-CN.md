@@ -2,7 +2,7 @@
 
 [English](README.md) · **中文** · [Français](README.fr.md)
 
-**一个文件夹里的自治短剧编剧团队。** 9 个可启动 agent（总编剧、细纲师、编剧、
+**一个文件夹里的自治短剧编剧团队。** 10 个可启动 agent（总编剧、原著筛选、细纲师、编剧、
 审读、剧本医生、评估官、市场监察、reflect、sweep）在一块本地工单板上，通过工单
 状态协作，把一个**竖屏短剧**点子规划、拉纲、成稿、审读、评分——你给设定，团队
 把它做成一部连贯的 60–100 集连续剧。
@@ -53,7 +53,7 @@ codex plugin marketplace add dyzsasd/writing-loop
 ```
 
 OpenCode 是第三种一级 scheduler Harness。项目创建完成后，它会以内联方式收到编剧房的
-9 个 agent skill；只使用 OpenCode 时，请通过 Studio 或 `writing-loop project plan/create`
+10 个 agent skill；只使用 OpenCode 时，请通过 Studio 或 `writing-loop project plan/create`
 完成立项。
 
 Codex 还可作为可选的**加速器**（按项目 `codex` 配置 opt-in）：**图像生成**——把 bible 的
@@ -156,18 +156,19 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 ```
 
 改编项目在同一次确认中绑定原著字节，自动把原著复制/分块到本地运行态并创建
-`source-analysis` 票；大纲票先停在 `source-pending`。writing-loop 随后自主选择本季范围、
-逐块拆解并聚合三清单，showrunner 验收后才解锁大纲。`source plan/register` 只保留给
+`source-analysis` 票；大纲票先停在 `source-pending`。Source Analyst 随后自主选择本季范围、
+按有界批次快速筛选并形成限量改编素材，showrunner 验收后才解锁大纲。`source plan/register` 只保留给
 已有项目迁移、故障恢复和高级 CLI 管理，**不是正常立项的第二步**；`add-script` 也不会调用
 外部拆书 Skill 代替这条自治工单链。
 
 **3. 运行团队。** 每个 agent 都是无状态 skill：Claude Code/Codex 可把它作为 slash
-命令调用；OpenCode Harness 则内联同一组 9 个 agent skill。每次 fire 都从板 + repo
+命令调用；OpenCode Harness 则内联同一组 10 个 agent skill。每次 fire 都从板 + repo
 重读 ground truth。按自然顺序依次驱动，或用外部 `cron` 调度：
 
 ```
-/writing-loop:story-designer-agent      # 改编先逐块 source-analysis；之后写 outline/节拍单
+/writing-loop:source-analyst-agent      # 改编先做有界原著筛选并交付素材包
 /writing-loop:showrunner-agent         # 验收原著拆解与大纲门，放行队列
+/writing-loop:story-designer-agent      # 将已验素材转为 outline/节拍单
 /writing-loop:episode-writer-agent      # 按集序拾取单集票、写正文、声明结构化剧情事实 delta
 /writing-loop:reviewer-agent            # 逐集独立验收（三分类、断言带正文引文）
 /writing-loop:evaluator-agent           # 执行里程碑门（大纲定稿、一卡包、完本…）

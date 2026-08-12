@@ -192,19 +192,20 @@ enregistre le projet et vérifie les trois vérités-terrain :
 
 Pour une adaptation, la même confirmation lie les octets du roman, les copie/chunke
 dans le runtime local et crée le ticket `source-analysis` ; outline reste
-`source-pending`. Writing-loop choisit ensuite la fenêtre de saison, traite les chunks
-et agrège les trois fiches avant la porte du Showrunner. `source plan/register` restent
+`source-pending`. Source Analyst choisit ensuite la fenêtre de saison, traite des lots
+bornés et livre un dossier source plafonné avant la porte du Showrunner. `source plan/register` restent
 des commandes avancées de reprise/migration, **pas une seconde étape normale**.
 `add-script` ne remplace jamais ce flux autonome par une skill externe d'analyse.
 
 **3. Faire tourner la room.** Chaque agent est une skill sans état : Claude Code et
 Codex peuvent l'invoquer comme slash command, tandis que le Harness OpenCode reçoit
-inline les neuf mêmes skills d'agents. Chaque fire relit la vérité-terrain depuis le
+inline les dix mêmes skills d'agents. Chaque fire relit la vérité-terrain depuis le
 tableau + le repo. Pilotez-les dans l'ordre naturel, ou pointez un `cron` externe dessus :
 
 ```
-/writing-loop:story-designer-agent     # adaptation : source-analysis par chunks, puis plan et beats
+/writing-loop:source-analyst-agent     # adaptation : sélection source bornée et dossier de preuves
 /writing-loop:showrunner-agent        # accepte les portes source/plan et promeut la file
+/writing-loop:story-designer-agent     # transforme le dossier validé en plan et beats
 /writing-loop:episode-writer-agent     # tire les tickets d'épisode dans l'ordre, écrit les brouillons, déclare les deltas de registre
 /writing-loop:reviewer-agent           # vérification indépendante par épisode (classification à trois voies, assertions citées)
 /writing-loop:evaluator-agent          # exécute les portes milestone-eval (verrou du plan, pack premier-paywall, finale …)

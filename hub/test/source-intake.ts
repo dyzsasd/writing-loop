@@ -2,13 +2,13 @@
 // immutable, planning is zero-write, and the outline cannot outrun source analysis.
 import { execFileSync, spawnSync } from "node:child_process";
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   checkpointSourceAnalysisChunk, commitSourceIntake, finalizeSourceAnalysis, planSourceIntake,
-  readSourceIntakeStatus, selectSourceAnalysisChunks, SourceIntakeError,
+  readSourceIntakeStatus, restartSourceAnalysis, selectSourceAnalysisChunks, SourceIntakeError,
 } from "../src/source-intake.ts";
 import { loadConfig } from "../src/workspace.ts";
 
@@ -42,7 +42,7 @@ try {
   writeFileSync(join(tickets, "SRC-1.md"), `---\nid: SRC-1\ntitle: outline\ntype: Feature\nstate: Todo\nowner: showrunner\nassignee: null\nlabels: [writing-loop, Feature, outline, showrunner, story-designer]\npriority: 1\nrelatedTo: []\nduplicateOf: null\ncreated: 2026-08-11T00:00:00.000Z\nupdated: 2026-08-11T00:00:00.000Z\n---\n## Context\nempty\n`);
   writeFileSync(join(data, "demo", "board", "counter.json"), JSON.stringify({ prefix: "SRC", next: 2 }));
   const source = join(tmp, "novel.txt");
-  const sections = Array.from({ length: 18 }, (_, index) => `第${index + 1}章 标题${index + 1}\n${"内容".repeat(6_000)}\n`).join("");
+  const sections = Array.from({ length: 198 }, (_, index) => `第${index + 1}章 标题${index + 1}\n${"内容".repeat(6_000)}\n`).join("");
   writeFileSync(source, sections);
   const request = {
     version: 1,
@@ -77,8 +77,10 @@ try {
   const outline = readFileSync(join(tickets, "SRC-1.md"), "utf8");
   const analysis = readFileSync(join(tickets, "SRC-2.md"), "utf8");
   ok(outline.includes("state: Backlog") && outline.includes("source-pending") && outline.includes("Blocked-by: SRC-2")
-    && analysis.includes("state: Todo") && analysis.includes("source-analysis") && analysis.includes("禁止调用外部拆书 Skill"),
-    "source analysis becomes Todo while outline is durably parked in Backlog");
+    && analysis.includes("state: Todo") && analysis.includes("source-analysis")
+    && analysis.includes("source-analyst") && !analysis.includes("source-analysis, story-designer")
+    && analysis.includes("禁止调用外部拆书 Skill"),
+    "source analysis is routed only to Source Analyst while outline is durably parked in Backlog");
   ok(!existsSync(join(repo, "novel.txt")) && !readFileSync(join(repo, "source", "adaptation-brief.md"), "utf8").includes(sections.slice(0, 100)),
     "Git stores only source fingerprint, brief and consent—not raw novel bytes");
   const replay = commitSourceIntake(tmp, "demo", ws.config, request, plan.planId, {
@@ -98,13 +100,19 @@ try {
     "brief drift cannot reuse an old confirmation fingerprint");
 
   const selected = status!.manifest.chunking.chunks.slice(0, 2);
+  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo",
+    status!.manifest.chunking.chunks.slice(0, 33).map((chunk) => chunk.id), new Date()), "最多 32"),
+    "season selection mechanically rejects more than 32 chunks");
+  ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo",
+    status!.manifest.chunking.chunks.slice(0, 30).map((chunk) => chunk.id), new Date()), "最多 2097152 bytes"),
+    "season selection mechanically rejects more than 2 MiB even below the chunk-count cap");
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [
     status!.manifest.chunking.chunks[0].id, status!.manifest.chunking.chunks[2].id,
   ], new Date()), "连续 chunk"), "season analysis cannot skip across a non-contiguous source range");
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [selected[1].id, selected[0].id], new Date()), "连续 chunk"),
     "season analysis must preserve manifest source order");
   const selection = selectSourceAnalysisChunks(tmp, "demo", selected.map((chunk) => chunk.id), new Date("2026-08-11T01:02:00.000Z"));
-  ok(selection.phase === "analyzing" && selection.remainingChunks.length === 2, "story-designer freezes a bounded season analysis range");
+  ok(selection.phase === "analyzing" && selection.remainingChunks.length === 2, "Source Analyst freezes a bounded season analysis range");
   ok(rejects(() => selectSourceAnalysisChunks(tmp, "demo", [selected[0].id], new Date()), "拒绝漂移"),
     "selected source range cannot silently drift across fires");
   mkdirSync(join(repo, "source", "deconstruction", "chunks"), { recursive: true });
@@ -126,12 +134,52 @@ try {
   const finalized = finalizeSourceAnalysis(tmp, "demo", ws.config, new Date("2026-08-11T01:04:00.000Z"));
   ok(finalized.phase === "review-ready" && finalized.remainingChunks.length === 0,
     "only committed provenance sheets and all selected chunks reach review-ready");
+  const mainline = join(repo, "source", "mainline.md");
+  const mainlineBefore = readFileSync(mainline, "utf8");
+  const symlinkVictim = join(tmp, "restart-victim.txt");
+  writeFileSync(symlinkVictim, "never overwrite\n");
+  rmSync(mainline); symlinkSync(symlinkVictim, mainline);
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-qm", "test unsafe source mirror"], { cwd: repo });
+  ok(rejects(() => restartSourceAnalysis(tmp, "demo", ws.config, plan.planId), "普通单链接文件")
+    && existsSync(join(repo, "source", "deconstruction"))
+    && readFileSync(symlinkVictim, "utf8") === "never overwrite\n",
+    "restart preflights every derived target before deleting anything and never follows a symlink");
+  rmSync(mainline); writeFileSync(mainline, mainlineBefore);
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-qm", "restore source mirror"], { cwd: repo });
+  const rawBeforeRestart = readFileSync(join(data, "demo", "source-intake.v1", "original", "source.txt"));
+  const northStar = join(repo, "bible", "north-star.md");
+  mkdirSync(join(repo, "bible"), { recursive: true });
+  writeFileSync(northStar, "# 北极星\n\n必须保留。\n");
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["commit", "-qm", "north star"], { cwd: repo });
+  ok(rejects(() => restartSourceAnalysis(tmp, "demo", ws.config, "wrong"), "确认指纹"),
+    "source restart requires the exact immutable intake fingerprint");
+  const restarted = restartSourceAnalysis(tmp, "demo", ws.config, plan.planId,
+    new Date("2026-08-11T01:05:00.000Z"));
+  const resetStatus = readSourceIntakeStatus(tmp, "demo");
+  const resetTicket = readFileSync(join(tickets, "SRC-2.md"), "utf8");
+  ok(restarted.phase === "registered" && resetStatus?.control.selectedChunks.length === 0
+    && resetStatus.control.completedChunks.length === 0 && resetTicket.includes("source-analyst")
+    && resetTicket.includes("state: Todo") && !resetTicket.includes("story-designer"),
+    "restart archives the old analysis and republishes one compact Source Analyst ticket");
+  ok(restarted.archivePath !== null && existsSync(restarted.archivePath)
+    && !existsSync(join(repo, "source", "deconstruction"))
+    && readFileSync(join(repo, "source", "mainline.md"), "utf8").includes("等待 Source Analyst")
+    && readFileSync(northStar, "utf8").includes("必须保留")
+    && Buffer.compare(rawBeforeRestart,
+      readFileSync(join(data, "demo", "source-intake.v1", "original", "source.txt"))) === 0,
+    "restart clears only derived analysis while preserving raw source, North Star and Git history");
+  ok(spawnSync("git", ["status", "--porcelain"], { cwd: repo, encoding: "utf8" }).stdout === "",
+    "restart records a clean recovery commit");
   // Real novels can have hundreds of chunks. The CLI must let its pipe drain instead of calling
   // process.exit immediately after console.log and returning a truncated, unparsable JSON value.
   const manifestFile = join(data, "demo", "source-intake.v1", "manifest.v1.json");
   const largeManifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+  const expectedLargeChunkCount = largeManifest.chunking.chunks.length + 47;
   let previousEnd = largeManifest.chunking.chunks.at(-1).endLine as number;
-  for (let index = largeManifest.chunking.chunks.length; index < 80; index++) {
+  for (let index = largeManifest.chunking.chunks.length; index < expectedLargeChunkCount; index++) {
     const id = `chunk-${String(index + 1).padStart(4, "0")}`; previousEnd++;
     largeManifest.chunking.chunks.push({ id, path: `chunks/${id}.txt`, sha256: "a".repeat(64),
       byteLength: 1, startLine: previousEnd, endLine: previousEnd, sectionCount: 1,
@@ -141,7 +189,7 @@ try {
   const statusCli = spawnSync(process.execPath, [join(import.meta.dirname, "..", "src", "source.ts"),
     "status", "--project", "demo", "--json"], { cwd: tmp, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
   let parsedStatus: any = null; try { parsedStatus = JSON.parse(statusCli.stdout); } catch { /* asserted below */ }
-  ok(statusCli.status === 0 && parsedStatus?.source?.manifest?.chunking?.chunks?.length === 80,
+  ok(statusCli.status === 0 && parsedStatus?.source?.manifest?.chunking?.chunks?.length === expectedLargeChunkCount,
     "source status lets large manifest JSON drain completely before process exit");
 } finally {
   rmSync(tmp, { recursive: true, force: true });

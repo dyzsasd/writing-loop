@@ -36,7 +36,8 @@ owner-scoped agent 各看自己的切片；**掉出所有切片**的票（缺 ow
 - **求助 / 结算**（逃逸口①③）：`∃` 本角色 `needs-*` 票（带 `blocked`），或到期
   weekly/monthly 汇总 / `reports/` 有未分发 `*.review.md`（§22）。
 
-**原著分析专注模式**：存在 Todo/In Progress 的 `source-analysis`+`story-designer` 票时，
+**原著分析专注模式**：存在 Todo/In Progress 的 `source-analysis` 票时（新票带 `source-analyst`，
+legacy 票可仍带 `story-designer`），
 关闭普通 cadence 扫描；新鲜认领及其正常 repo lock 不算卫生事件。仍必须处理认领陈旧/孤儿、
 无法判定的锁、frontmatter 损坏或真正错标。不得审计 analysis-plan 的覆盖率/预算/斜率算法，
 不得为 JSON/schema/hash/路径迁移创建项目票；这类平台问题只投 workspace 系统改进收件箱。

@@ -10,7 +10,7 @@
 ## 前提
 
 - 已安装一种一级 Harness CLI：**Claude Code、Codex 或 OpenCode**。本指南用 Claude Code
-  展示 slash onboarding；OpenCode 由 `writing-loop run` 内联传入编剧房的 9 个 agent skill，
+  展示 slash onboarding；OpenCode 由 `writing-loop run` 内联传入编剧房的 10 个 agent skill，
   不包含 attended `add-script` skill。详见 [Harness CLI 支持](HARNESS.zh-CN.md)。
 - 本机有 `git`。
 - 准备好小说的**纯文本**（`.txt` / `.md`；PDF/EPUB 请先转成文本）。
@@ -30,11 +30,11 @@
 /plugin install writing-loop
 ```
 
-装好后你会有一组 `/writing-loop:*` 斜杠命令（9 个 agent + `add-script`）。
+装好后你会有一组 `/writing-loop:*` 斜杠命令（10 个 agent + `add-script`）。
 
 Codex 提供同样的 plugin/slash 立项入口。如果只使用 OpenCode，请在 Studio 中点“新建项目”，
 或依次运行确定性的 `writing-loop project plan` / `writing-loop project create`；项目建好后再用
-`writing-loop run --cli opencode` 运行 9 个 agent skill。
+`writing-loop run --cli opencode` 运行 10 个 agent skill。
 
 ---
 
@@ -104,9 +104,9 @@ cp /path/to/你的小说.txt ~/dramas/novel.txt
 
 正常立项没有第二次手工登记。你确认的 project plan 已经绑定原著指纹、改编建议、权利范围
 和 Harness 授权；project create 会自动在本地复制/分块原著、只提交指纹与改编建议，并创建
-`source-analysis` 票。此时直接启动编剧室：Story Designer 自主选择本季范围，每 fire 连续分析
-最多 4 个、总量不超过 320 KiB 的有界批次，
-聚合三清单后交 Showrunner 验收。`writing-loop source status --project my-drama` 是只读状态面；
+`source-analysis` 票。此时直接启动编剧室：Source Analyst 最多选择32个连续块，每 fire 最多
+筛选8块/480 KiB，最终只交付最多12条主线、12个名场面和18个人物功能，再交 Showrunner 验收。
+`writing-loop source status --project my-drama` 是只读状态面；
 `source plan/register` 只用于已有项目迁移、恢复或高级 CLI 管理，**不是正常立项步骤**。
 
 拆书门通过后，Story Designer 完成全季结构、分集节拍、人物、世界、伏笔、连续性与双轨时间线，
@@ -120,13 +120,13 @@ skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 ## 第 3 步：让编剧团队跑起来
 
 每个 agent 都是**无状态 skill**：Claude Code/Codex 将其暴露为 slash 命令；OpenCode
-由 scheduler 内联同一组 9 个 agent skill。每次运行都从看板 + 仓库重读真相，做本角色
+由 scheduler 内联同一组 10 个 agent skill。每次运行都从看板 + 仓库重读真相，做本角色
 当下该做的事，没活就空转。它们**只通过工单交接**，你不用手动传递。
 
 **第一轮（改编线的自然顺序）：**
 
 ```
-/writing-loop:story-designer-agent    # 先拾 source-analysis：选季范围、逐块拆书、聚合三清单
+/writing-loop:source-analyst-agent    # 先做有界原著筛选并交付限量改编素材
 /writing-loop:showrunner-agent       # 验收拆书门；通过后才解锁 outline
 /writing-loop:story-designer-agent    # 写 story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # 带日期的题材窗口评估——大纲定稿门的市场层评分依赖它；缺数据时该项 inconclusive，红线类会人工停靠等你补
@@ -146,7 +146,7 @@ skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 ```bash
 npm i -g @dyzsasd/writing-loop     # 一次
 writing-loop run --dry-run         # 先打印每条将起命令的完整解析
-writing-loop run                   # 单进程驱动全部 9 个 agent 循环，Ctrl-C 停
+writing-loop run                   # 单进程驱动全部 10 个 agent 循环，Ctrl-C 停
 ```
 
 （不想全局安装？`npx @dyzsasd/writing-loop run` 完全等价。调度器为 npm 包内的原生实现，

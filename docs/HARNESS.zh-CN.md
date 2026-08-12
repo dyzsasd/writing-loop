@@ -29,7 +29,7 @@ OpenAI-compatible 端点渲染进 workspace 的 `opencode.json`，凭据仍只�
 OpenCode 没有 writing-loop slash plugin 传输，所以调度器把 agent skill 以内联 prompt
 运行；fire 默认使用隔离配置目录，并注入有界的 `OPENCODE_PERMISSION` 策略。
 
-OpenCode 收到的是编剧房的 9 个 agent skill，不包括 attended `add-script` skill。只使用
+OpenCode 收到的是编剧房的 10 个 agent skill，不包括 attended `add-script` skill。只使用
 OpenCode 时，请先通过 Studio 或确定性的 `writing-loop project plan` / `writing-loop project
 create` 命令立项。
 

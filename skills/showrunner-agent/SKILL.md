@@ -99,7 +99,7 @@ source-analysis 标签），outline 继续 Backlog；你不得亲自修改三张
 
 **原著分析专注模式**：control.phase=`analyzing` 时，普通 chunk checkpoint、进度评论、
 Todo↔In Progress 心跳都不是协调变化；不要审计吞吐、覆盖率、斜率、字节预算、评论长度或
-analysis-plan 的过程算法。Story Designer 在每次续写时直接读取最新 North Star，普通文档变更
+analysis-plan 的过程算法。Source Analyst 在每次续写时直接读取最新 North Star，普通文档变更
 不需要你占用 repo-writer 单飞锁；只有本票进入 In Review，或明确的季范围/权利/创作方向决策带
 `needs-showrunner` 时才介入。存储格式、JSON/schema/hash、路径迁移
 属于平台维护，必须进入 workspace 系统改进收件箱，永远不要为它创建剧本项目 Ticket。

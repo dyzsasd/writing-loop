@@ -139,8 +139,8 @@ CLI 的根解析。
       },
 
       // —— agent 档位覆盖（默认见 conventions 拓扑表；CLI 无关，Claude/Codex 名见拓扑表下映射） ——
-      "models":  { "episode-writer": "sonnet" },
-      "efforts": { "showrunner": "max", "story-designer": "max" }
+      "models":  { "source-analyst": "sonnet", "episode-writer": "sonnet" },
+      "efforts": { "showrunner": "max", "source-analyst": "high", "story-designer": "max" }
     }
   }
 }
@@ -522,15 +522,16 @@ bytes、改编设计、权利范围、授权 Harness、repo/runtime 路径与全
 
 register 将原始 bytes 与 chunks 以 mode 0600 发布到
 `.writing-loop/<key>/source-intake.v1/`，原著不进 Git；repo 只 commit
-`source/adaptation-brief.md` 与指纹。它创建 `source-analysis+story-designer` Todo 票，并给 outline
-写入 `Blocked-by`。story-designer 先用 `source select` 冻结本季范围，再每 fire 恰处理一块，
-单独 commit 带 provenance 的摘要并用 `source checkpoint` 核验；全部完成后聚合三清单并调用
+`source/adaptation-brief.md` 与指纹。它创建 `source-analysis+source-analyst` Todo 票，并给 outline
+写入 `Blocked-by`。Source Analyst 先用 `source select` 冻结最多32个连续块的本季范围，再每 fire
+最多处理8块/480 KiB，单次 commit 带 provenance 的有界摘要并用 `source checkpoint` 核验；
+全部完成后只聚合最多12条主线、12个名场面、18个人物功能并调用
 `source finalize`。只有 control.phase=`review-ready` 且 showrunner 将 source-analysis 票 Done，
 通用 Blocked-by resolver 才能解锁 outline。任何外部拆书 skill 产物都不能替代这条证据链。
 
 ### 结构化故事唯一事实源与质量门
 
-source-analysis 通过后，Story Designer 只维护严格的 `story/outline.v1.json` 与
+source-analysis 通过后，Story Designer 才开始维护严格的 `story/outline.v1.json` 与
 `story/assets.v1.json`。前者绑定 source plan、改编处置、角色
 tier、场景复用、季级 beats 与逐集 hook/agency/资产引用；后者是人物、世界、地点、组织、
 道具、场景、伏笔与连续性事实的唯一机读图，并分别记录 chronology 与 reveal order。

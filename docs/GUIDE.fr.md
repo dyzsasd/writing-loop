@@ -35,7 +35,7 @@ Dans Claude Code :
 /plugin install writing-loop
 ```
 
-Vous disposez maintenant des slash commands `/writing-loop:*` (9 agents + `add-script`).
+Vous disposez maintenant des slash commands `/writing-loop:*` (10 agents + `add-script`).
 
 Codex expose le même accueil plugin/slash. Si OpenCode est votre seul Harness, créez
 le projet via **Nouveau projet** dans Studio ou avec les commandes déterministes
@@ -135,8 +135,9 @@ Ensuite `add-script` automatiquement :
 Le parcours normal n'a pas de seconde inscription manuelle. Le project plan approuvé
 lie déjà l'empreinte du roman, le brief, les droits et le consentement du Harness ;
 project create copie/chunke localement, ne committe que provenance et brief, puis crée
-source-analysis. Démarrez la room : Story-Designer choisit la fenêtre de saison, traite
-un lot contigu borné de quatre chunks maximum par fire, agrège les trois fiches et les soumet au Showrunner. `writing-loop
+source-analysis. Démarrez la room : Source Analyst choisit au plus 32 chunks contigus,
+traite au plus 8 chunks / 480 KiB par fire, plafonne le dossier à 12 axes, 12 scènes et
+18 fonctions de personnages, puis le soumet au Showrunner. `writing-loop
 source status --project my-drama` est en lecture seule ; `source plan/register` sont
 réservées à la reprise/migration avancée et ne font pas partie du parcours normal.
 
@@ -153,7 +154,7 @@ le Showrunner conserve une validation éditoriale indépendante.
 ## Étape 3 — Faire tourner la writers' room
 
 Chaque agent est une **skill sans état** : Claude Code et Codex l'exposent comme slash
-command ; OpenCode reçoit inline les neuf mêmes skills d'agents via l'ordonnanceur.
+command ; OpenCode reçoit inline les dix mêmes skills d'agents via l'ordonnanceur.
 Chaque passage relit la vérité-terrain depuis le tableau + le repo et fait ce que son
 rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les tickets**
 — vous ne transmettez jamais le travail à la main.
@@ -161,7 +162,7 @@ rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les
 **Premier cycle (l'ordre naturel pour l'adaptation) :**
 
 ```
-/writing-loop:story-designer-agent    # source-analysis : fenêtre de saison, chunks, trois fiches
+/writing-loop:source-analyst-agent    # sélection source bornée et dossier de preuves plafonné
 /writing-loop:showrunner-agent       # accepte la porte source, puis seulement déverrouille outline
 /writing-loop:story-designer-agent    # écrit story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # évaluation datée de la fenêtre de genre — la couche marché de la porte de verrou du plan en dépend ; données manquantes = item inconclusive, et les cas ligne-rouge se garent en attendant que vous les fournissiez

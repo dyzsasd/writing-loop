@@ -105,6 +105,7 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 | agent | 原型（dev-loop） | 默认档位 | 一句话职责 |
 |---|---|---|---|
 | showrunner 总编剧 | PM | opus/max | north-star 唯一维护者、outline 闸门（写者 = story-designer，§19）；立项/方向 intake；file 创作票；大纲门验收；里程碑监测与 milestone-eval 票发起；Backlog 闸门 |
+| source-analyst 原著筛选 | researcher | sonnet/high | source-analysis 专用：选择有界第一季窗口、快速筛选分块、交付限量改编素材；不设计全季、不写故事资产 |
 | story-designer 细纲师 | senior-dev | opus/max | arc 设计票→逐集节拍单（候选竞争+弃案）→spawn 子票；keystone 亲写；`Mode: direct-write` 升级接管；punch-up 执行 |
 | episode-writer 编剧 | junior-dev | sonnet/high | 单集票→读结构化节拍+有界资产 Context Pack+上集→写正文→自检门→剧情资产 delta 声明→In Review |
 | reviewer 审读 | QA | **≥ writer 档**（受治理配置，默认 opus/high） | 单集独立验收；fail 三级路由；修订复核；邻集复核 |
@@ -125,7 +126,7 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 | 顶配 | showrunner / story-designer（设计+关键集）| `opus` / `max` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
 | 审计 | evaluator / script-doctor / reflect | `opus` / `xhigh` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
 | 审读 | reviewer（floor，见下） | `opus` / `high` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
-| 标配 | episode-writer / market-watch / sweep | `sonnet` / `high` | `gpt-5.5` / `high` | 配置 `provider/model`（无内建默认） |
+| 标配 | source-analyst / episode-writer / market-watch / sweep | `sonnet` / `high` | `gpt-5.5` / `high` | 配置 `provider/model`（无内建默认） |
 
 （opencode 列无档位名映射：模型恒取 config 配置的 `provider/model` 形启动串——Claude 档位名
 绝不透传，未配置则落 opencode 自身默认模型；effort 原样传 `--variant`（注册表条目
@@ -159,7 +160,7 @@ In Review 票时**跳过留待更高档 fire**（不橡皮图章），不 fail �
 
 流水线主干：
 ```
-add-script 立项 → showrunner file 大纲票 → story-designer 写 outline+bible
+add-script 立项 →（改编：source-analyst 筛选→showrunner source gate）→ story-designer 写 outline+bible
   → evaluator 大纲定稿门 → showrunner file arc-01 设计票
   → story-designer 写逐集节拍单 → showrunner 大纲门（design gate）→ 子票全量放行
   → episode-writer 按集序写正文（keystone 由 story-designer 亲写）
@@ -618,7 +619,7 @@ config lock 可能需 doctor 辅助人工清理。它不是后台恢复 worker�
 `<workspace>/.writing-loop/<key>/lessons/` **目录**（2026-07-19 操作者裁定：自旧单文件
 `lessons.md` 分拆——每 fire 只付本角色所需的 lessons 上下文税）：
 - `lessons/shared.md` —— 全队通用规则（原 `## Shared` 分节）。
-- `lessons/<role>.md` —— 每角色一文件，九个：showrunner / story-designer /
+- `lessons/<role>.md` —— 每角色一文件，十个：showrunner / source-analyst / story-designer /
   episode-writer / reviewer / script-doctor / evaluator / market-watch / sweep / reflect。
 每个 agent 每 fire 只读 `lessons/shared.md` + `lessons/<本角色>.md` 并遵行——**不读其他
 角色文件**（那是别人 lane 的上下文税）；**只有 reflect 可写**且策展**全部文件**（从 ≥2 次
@@ -742,8 +743,9 @@ proposedChange,source:{project,agent,projectTicket:null}}`。项目票只有在�
   连续性、时间线、版权边界与创作品质。JSON、schema、hash、文件名、路径迁移、格式转换、
   覆盖率脚本和过程遥测都是平台实现，不得成为剧本工作或验收目标。
 - 若平台实现阻碍创作，按上一节投递 workspace 系统改进提案；不得污染当前项目板。
-- source-analysis 为单写者专注阶段：Story Designer 按最多 4 chunks / 320 KiB 的连续有界批次
-  推进；普通 checkpoint 不唤醒 Showrunner，普通 cadence/正常写锁不唤醒 sweep。Showrunner 只在
+- source-analysis 为单写者专注阶段：Source Analyst 最多选择32个连续 chunks，每 fire 最多8 chunks / 480 KiB，
+  最终素材限制为12条主线、12个名场面、18个人物功能；Story Designer 不参与原著扫描。
+  普通 checkpoint 不唤醒 Showrunner，普通 cadence/正常写锁不唤醒 sweep。Showrunner 只在
   In Review 或真实创作决策时介入；sweep 只处理陈旧、孤儿、损坏与错标。
 - 底层仍可使用严格结构化存储和确定性校验，但它对编剧透明；序列化格式变更由平台迁移完成。
 

@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   checkpointSourceAnalysisChunk, commitSourceIntake, finalizeSourceAnalysis, planSourceIntake,
-  readSourceIntakeStatus, selectSourceAnalysisChunks, SourceIntakeError,
+  readSourceIntakeStatus, restartSourceAnalysis, selectSourceAnalysisChunks, SourceIntakeError,
 } from "./source-intake.ts";
 import { requireWorkspace, WsError } from "./workspace.ts";
 
@@ -16,12 +16,14 @@ function usage(): void {
   writing-loop source plan --project KEY --input request.json
   writing-loop source register --project KEY --input request.json --confirm PLAN_ID [--json]
   writing-loop source status --project KEY [--json]
+  writing-loop source restart --project KEY --confirm PLAN_ID [--json]
   writing-loop source select --project KEY --chunks chunk-0001,chunk-0002 [--json]
   writing-loop source checkpoint --project KEY --chunk chunk-0001 --commit SHA [--json]
   writing-loop source finalize --project KEY [--json]
 
 plan 严格零写、零模型调用；register 把原著复制为本地不可变分块，提交改编设计，
-并创建 story-designer/source-analysis 票。原著全文不进入剧本 Git repo。
+并创建 source-analyst/source-analysis 票。restart 保留原著与北极星，只归档并清空派生分析。
+原著全文不进入剧本 Git repo。
 只有 request 中明确授权的 Harness 才能在后续 writing-loop run 中按块读取原著。`);
 }
 
@@ -89,6 +91,18 @@ export function sourceMain(argv = process.argv.slice(2)): number {
         console.log(`  chunks: ${status.control.completedChunks.length}/${status.control.selectedChunks.length || status.manifest.chunking.chunks.length}`);
         console.log(`  phase: ${status.control.phase}`);
         console.log(`  ticket: ${status.control.analysisTicketId}`);
+      }
+      return 0;
+    }
+    if (action === "restart") {
+      if (!confirmation || input || chunks || chunk || commit) { console.error("writing-loop source restart: 需要 --confirm PLAN_ID，且不接受其他操作参数"); return 2; }
+      const result = restartSourceAnalysis(ws.root, project, ws.config, confirmation);
+      if (asJson) console.log(JSON.stringify(result, null, 2));
+      else {
+        console.log(`项目 ${project} 的派生原著分析已归档并重置。`);
+        console.log(`  source-analysis ticket: ${result.analysisTicketId}`);
+        console.log(`  archived ticket: ${result.archivePath}`);
+        console.log("NEXT: writing-loop run --project " + project + " --cli <authorized-harness>");
       }
       return 0;
     }

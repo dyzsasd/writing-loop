@@ -30,7 +30,7 @@ const runEntry = join(hubRoot, "src", "run.ts");
 const doctorEntry = join(hubRoot, "src", "doctor.ts");
 const firesEntry = join(hubRoot, "src", "fires.ts");
 
-const AGENTS = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
+const AGENTS = ["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator",
   "sweep", "script-doctor", "market-watch", "reflect"];
 
 let npass = 0, nfail = 0;

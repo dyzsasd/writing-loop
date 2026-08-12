@@ -2,7 +2,7 @@
   "name": "@dyzsasd/writing-loop",
   "version": "0.9.1",
   "type": "module",
-  "description": "An autonomous short-drama (vertical micro-drama) writers' room in a folder — nine agents plan, outline, write, review, score, and market-watch scripts through a local file board. Includes a zero-dependency scheduler, a loopback-only multi-project Studio UI, stable JSON snapshots, live agent run state, project controls, fires telemetry, and the full writing-loop plugin payload. Fires agents on Claude Code, Codex, or opencode.",
+  "description": "An autonomous short-drama (vertical micro-drama) writers' room in a folder — ten agents screen sources, plan, outline, write, review, score, and market-watch scripts through a local file board. Includes a zero-dependency scheduler, a loopback-only multi-project Studio UI, stable JSON snapshots, live agent run state, project controls, fires telemetry, and the full writing-loop plugin payload. Fires agents on Claude Code, Codex, or opencode.",
   "keywords": [
     "writing-loop",
     "agents",

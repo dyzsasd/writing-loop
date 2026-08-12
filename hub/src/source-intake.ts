@@ -20,6 +20,8 @@ const MAX_RIGHTS_CHARS = 16 * 1024;
 const TARGET_CHUNK_BYTES = 96 * 1024;
 const MAX_SECTIONS_PER_CHUNK = 6;
 const MAX_LINE_BYTES = 64 * 1024;
+const MAX_SELECTED_CHUNKS = 32;
+const MAX_SELECTED_BYTES = 2 * 1024 * 1024;
 const HARNESSES = new Set(["claude", "codex", "opencode"]);
 const ID_PATTERN = /^([A-Z][A-Z0-9]{0,7})-(\d+)\.md$/;
 const HEADING = /^(?:第[〇零一二三四五六七八九十百千万两0-9]+(?:章|节|回|卷)(?:至[〇零一二三四五六七八九十百千万两0-9]+(?:章|节|回|卷))?(?:\s+.*)?|序章(?:\s+.*)?|楔子(?:\s+.*)?|引子(?:\s+.*)?|终章(?:\s+.*)?|后记(?:\s+.*)?|番外(?:\s+.*)?)$/u;
@@ -138,6 +140,15 @@ export type SourceAnalysisProgress = {
   selectedChunks: string[];
   completedChunks: string[];
   remainingChunks: string[];
+};
+
+export type SourceAnalysisRestart = {
+  projectKey: string;
+  planId: string;
+  analysisTicketId: string;
+  archivePath: string | null;
+  repoCommit: string;
+  phase: "registered";
 };
 
 export class SourceIntakeError extends WsError {
@@ -504,7 +515,7 @@ function repoDocument(manifest: SourceIntakeManifest, brief: string): string {
   return `# 改编设计输入\n\n> 本文件由 writing-loop source intake 登记；原著全文不进入 Git。\n> Source-intake: \`${manifest.planId}\`\n\n## 原著指纹\n\n- 标题：${manifest.source.title}\n- 文件名：\`${manifest.source.fileName}\`\n- SHA-256：\`${manifest.source.sha256}\`\n- 字节数：${manifest.source.byteLength}\n- UTF-8 行数：${manifest.source.lineCount}\n- 本地分块：${manifest.chunking.chunks.length}\n\n## 操作者改编设计\n\n${brief}\n\n## 权利范围\n\n${manifest.adaptation.rightsScope}\n\n## 模型处理授权\n\n- 允许的 Harness：${consent.allowedHarnesses.join("、")}\n- 已明确允许按分析票把原著分块发送给上述 Harness：是\n- 确认时间：${consent.confirmedAt}\n`;
 }
 function sourceReadme(): string {
-  return `# 原著分析工作区\n\n- \`adaptation-brief.md\`：操作者提供的改编设计与原著指纹。\n- \`analysis-plan.md\`：由 writing-loop story-designer 的 source-analysis 模式生成。\n- \`deconstruction/chunks/\`：逐块摘要；不复制大段原文。\n- \`mainline.md\` / \`highlights.md\` / \`characters-function.md\`：只有 source-analysis 汇总门通过后才填充。\n\n原著全文只存于项目运行态，不进入 Git；未经 intake 中的明确 Harness 授权不得读取。\n`;
+  return `# 原著分析工作区\n\n- \`adaptation-brief.md\`：操作者提供的改编设计与原著指纹。\n- \`analysis-plan.md\`：由 writing-loop Source Analyst 生成的本季取材范围与筛选问题。\n- \`deconstruction/chunks/\`：有界创作摘要；不复制大段原文。\n- \`mainline.md\` / \`highlights.md\` / \`characters-function.md\`：Source Analyst 完成筛选后交给 Story Designer 的改编素材。\n\n原著全文只存于项目运行态，不进入 Git；未经 intake 中的明确 Harness 授权不得读取。\n`;
 }
 
 function ensureRuntime(root: string, key: string, facts: ReturnType<typeof sourceFacts>, createdAt: string): { manifest: SourceIntakeManifest; replayed: boolean } {
@@ -625,7 +636,7 @@ function ensureBoard(root: string, key: string, config: WlConfig, planId: string
     const [{ file: outlineFile, id: outlineTicketId }] = outlines;
     const analysisTicketId = existingAnalysis?.id ?? `${configuredPrefix}-${max + 1}`;
     if (!existingAnalysis) {
-      const ticket = `---\nid: ${analysisTicketId}\ntitle: ${JSON.stringify(`拆解《${manifest.source.title}》并生成三清单`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, story-designer]\npriority: 1\nassignee: null\nrelatedTo: [${outlineTicketId}]\nduplicateOf: null\ncreated: ${now}\nupdated: ${now}\n---\nSource-intake: ${planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\n\n## Context\n由 writing-loop 自己完成原著范围规划、逐块摘要和三清单聚合；禁止调用外部拆书 Skill。\n\n## Context-pack\n需读（≤8 指针）：\`source/adaptation-brief.md\`；\`.writing-loop/${key}/${SOURCE_DIR}/${MANIFEST_FILE}\`；本票。\n关键事实：原著 SHA-256=${manifest.source.sha256}；共 ${manifest.chunking.chunks.length} 块；允许 Harness=${manifest.adaptation.processingConsent.allowedHarnesses.join(",")}。\n禁读：首次 plan fire 不读原著全文，只读 manifest 中的标题和分块元数据。\n\n## Acceptance criteria\n- 先产出 \`source/analysis-plan.md\`，再按计划每 fire 处理一个原著 chunk。\n- 每块摘要写入 \`source/deconstruction/chunks/<chunk-id>.md\`，不复制大段原文。\n- 全部选中块完成后，由同一 source-analysis 票聚合三张拆书清单并交 showrunner 验收。\n- outline ticket 在本票通过前保持 Backlog/source-pending。\n\n## How to verify\nmanifest hash、selected/completed chunk 覆盖、三清单阈值与相似性门全部可机械核对。\n\n---\n## Comments\n### ${now} — source-intake\n原著已登记；等待 story-designer source-analysis 模式。\n`;
+      const ticket = `---\nid: ${analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${outlineTicketId}]\nduplicateOf: null\ncreated: ${now}\nupdated: ${now}\n---\nSource-intake: ${planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\n\n## Context\n由 writing-loop 的 Source Analyst 快速筛选原著，为 Story Designer 交付有界的第一季改编素材；禁止调用外部拆书 Skill。\n\n## Context-pack\n需读（≤8 指针）：\`source/adaptation-brief.md\`；\`.writing-loop/${key}/${SOURCE_DIR}/${MANIFEST_FILE}\`；本票。\n关键事实：原著 SHA-256=${manifest.source.sha256}；共 ${manifest.chunking.chunks.length} 块；允许 Harness=${manifest.adaptation.processingConsent.allowedHarnesses.join(",")}。\n禁读：首次 plan fire 不读原著全文，只读 manifest 中的标题和分块元数据。\n\n## Acceptance criteria\n- 先冻结最多 32 个连续块的第一季取材窗口。\n- 每 fire 最多处理 8 块 / 480 KiB；每块只保留有界的主线、机制、人物功能、名场面与风险。\n- 批次不维护全局大表；所选范围完成后再聚合最多 12 条主线、12 个名场面和 18 个人物功能。\n- 聚合产物交 showrunner 验收；outline ticket 在通过前保持 Backlog/source-pending。\n\n## How to verify\nmanifest provenance、selected/completed 覆盖、有界聚合与相似性门全部可机械核对。\n\n---\n## Comments\n### ${now} — source-intake\n原著已登记；等待 Source Analyst。\n`;
       writeDurable(join(tickets, `${analysisTicketId}.md`), ticket, 0o600);
     }
     let outline = readFileSync(outlineFile, "utf8");
@@ -688,12 +699,19 @@ export function selectSourceAnalysisChunks(root: string, key: string, chunkIds: 
   if (!Array.isArray(chunkIds) || chunkIds.length < 1 || new Set(chunkIds).size !== chunkIds.length) {
     throw new SourceIntakeError("必须选择至少一个且不重复的 chunk ID");
   }
+  if (chunkIds.length > MAX_SELECTED_CHUNKS) {
+    throw new SourceIntakeError(`第一季原著窗口最多 ${MAX_SELECTED_CHUNKS} 个 chunk`);
+  }
   const control = mutateControl(root, key, (manifest, current) => {
     const order = manifest.chunking.chunks.map((chunk) => chunk.id);
     const indices = chunkIds.map((id) => order.indexOf(id));
     if (indices.some((index) => index < 0)) throw new SourceIntakeError("选择包含 manifest 外的 chunk ID");
     if (indices.some((index, offset) => index !== indices[0] + offset)) {
       throw new SourceIntakeError("source analysis 必须按 manifest 顺序选择连续 chunk 窗口");
+    }
+    const selectedBytes = indices.reduce((total, index) => total + manifest.chunking.chunks[index]!.byteLength, 0);
+    if (selectedBytes > MAX_SELECTED_BYTES) {
+      throw new SourceIntakeError(`第一季原著窗口最多 ${MAX_SELECTED_BYTES} bytes`);
     }
     if (current.phase === "review-ready") throw new SourceIntakeError("source analysis 已冻结，不能重选范围");
     if (current.selectedChunks.length && canonical(current.selectedChunks) !== canonical(chunkIds)) {
@@ -752,6 +770,80 @@ export function finalizeSourceAnalysis(root: string, key: string, config: WlConf
     return { ...current, phase: "review-ready", updatedAt: now.toISOString() };
   });
   return { ...progress(control), projectKey: key };
+}
+
+// Explicit operator-authorized restart. Raw intake and the North Star remain immutable; only
+// derived source analysis is cleared. Git preserves the old creative work, while the oversized
+// board ticket is moved outside the active ticket directory before a compact replacement is
+// published under the same ID.
+export function restartSourceAnalysis(root: string, key: string, config: WlConfig, confirmation: string,
+  now = new Date()): SourceAnalysisRestart {
+  const entry = projectEntries(config).find(([candidate]) => candidate === key);
+  if (!entry) throw new SourceIntakeError(`config.json 无项目 '${key}'`);
+  const repo = resolveRepoPath(root, entry[1]);
+  const status = readSourceIntakeStatus(root, key);
+  if (!status) throw new SourceIntakeError("项目尚未登记原著");
+  if (confirmation !== status.control.planId) throw new SourceIntakeError("source restart 确认指纹不匹配");
+  if (git(repo, ["status", "--porcelain"])) throw new SourceIntakeError("repo 有未提交改动，不能重启 source analysis");
+
+  const sourceDir = join(repo, "source");
+  const sourceFact = lstatSync(sourceDir);
+  if (!sourceFact.isDirectory() || sourceFact.isSymbolicLink()) throw new SourceIntakeError("source 不是安全目录");
+  const derivedDir = join(sourceDir, "deconstruction");
+  if (existsSync(derivedDir)) {
+    const fact = lstatSync(derivedDir);
+    if (!fact.isDirectory() || fact.isSymbolicLink()) throw new SourceIntakeError("source/deconstruction 不是安全目录");
+  }
+  const derivedFiles = ["analysis-plan.md", "mainline.md", "highlights.md", "characters-function.md", "README.md"];
+  for (const name of derivedFiles) {
+    const file = join(sourceDir, name);
+    if (existsSync(file)) {
+      const fact = lstatSync(file);
+      if (!fact.isFile() || fact.isSymbolicLink() || fact.nlink !== 1) throw new SourceIntakeError(`source/${name} 必须是普通单链接文件`);
+    }
+  }
+  if (existsSync(derivedDir)) rmSync(derivedDir, { recursive: true });
+  for (const name of ["analysis-plan.md", "mainline.md", "highlights.md", "characters-function.md"]) {
+    const file = join(sourceDir, name);
+    if (name === "analysis-plan.md") rmSync(file, { force: true });
+    else writeFileSync(file, `# ${name.replace(".md", "")}\n\nSource-intake: ${status.manifest.planId}\n\n> 等待 Source Analyst 重新筛选原著。\n`);
+  }
+  writeFileSync(join(sourceDir, "README.md"), sourceReadme());
+  git(repo, ["add", "source"]);
+  if (git(repo, ["status", "--porcelain"])) {
+    git(repo, ["commit", "-m", `source(restart): 从头筛选原著 (${status.control.analysisTicketId})`]);
+  }
+  const repoCommit = git(repo, ["rev-parse", "HEAD"]);
+
+  const data = projectDataDir(root, key);
+  const board = join(data, "board");
+  const tickets = join(board, "tickets");
+  const ticketFile = join(tickets, `${status.control.analysisTicketId}.md`);
+  const lock = join(board, ".source-restart.lock");
+  let lockFd: number;
+  try {
+    lockFd = openSync(lock, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    writeFileSync(lockFd, JSON.stringify({ pid: process.pid, at: now.toISOString() }) + "\n"); fsyncSync(lockFd);
+  } catch (error) { throw new SourceIntakeError(`source restart 板锁被占用：${errno(error) ?? String(error)}`); }
+  let archivePath: string | null = null;
+  try {
+    if (!existsSync(ticketFile) || lstatSync(ticketFile).isSymbolicLink()) throw new SourceIntakeError("source-analysis ticket 缺失或不安全");
+    const archiveDir = join(board, "archive", "source-analysis");
+    mkdirSync(archiveDir, { recursive: true, mode: 0o700 });
+    const stamp = now.toISOString().replace(/[:.]/g, "-");
+    archivePath = join(archiveDir, `${status.control.analysisTicketId}-${stamp}.md`);
+    writeDurable(archivePath, readFileSync(ticketFile, "utf8"), 0o600);
+    const ticket = `---\nid: ${status.control.analysisTicketId}\ntitle: ${JSON.stringify(`筛选《${status.manifest.source.title}》并形成第一季改编素材`)}\ntype: Feature\nstate: Todo\nowner: showrunner\nlabels: [writing-loop, Feature, source-analysis, source-analyst]\npriority: 1\nassignee: null\nrelatedTo: [${status.control.outlineTicketId}]\nduplicateOf: null\ncreated: ${status.manifest.createdAt}\nupdated: ${now.toISOString()}\n---\nSource-intake: ${status.manifest.planId}\nSource-manifest: ${SOURCE_DIR}/${MANIFEST_FILE}\nSource-phase: plan\nSource-restart: ${repoCommit}\n\n## Context\n由 Source Analyst 快速筛选原著，只交付第一季所需的有界改编素材；旧分析保存在 Git 历史和板归档中。\n\n## Acceptance criteria\n- 最多选择 32 个连续块；每 fire 最多 8 块 / 480 KiB。\n- 每块最多2个名场面、3个人物功能；批次不维护全局大表。\n- 最终最多12条主线、12个名场面、18个人物功能，交 Showrunner 验收。\n- 不创建技术脚本、过程统计或格式迁移任务。\n\n---\n## Comments\n### ${now.toISOString()} — source-restart\n旧派生分析已归档；从第1块按 Source Analyst 新流程重启。\n`;
+    atomicReplace(ticketFile, ticket);
+    fsyncDir(tickets); fsyncDir(archiveDir);
+  } finally {
+    closeSync(lockFd!); unlinkSync(lock); fsyncDir(board);
+  }
+
+  mutateControl(root, key, (_manifest, current) => ({ ...current, phase: "registered",
+    selectedChunks: [], completedChunks: [], updatedAt: now.toISOString() }));
+  return { projectKey: key, planId: status.control.planId, analysisTicketId: status.control.analysisTicketId,
+    archivePath, repoCommit, phase: "registered" };
 }
 
 export const SOURCE_INTAKE_RUNTIME_DIR = SOURCE_DIR;

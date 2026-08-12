@@ -34,11 +34,12 @@ citron 十教训 → 机制载体（v2 修订后）：
 | 9 | lessons 模式复制到叙事端 | §14 lessons + reflect + 操作者点评闭环原样 |
 | 10 | 自查显式化 | 自检清单+剧情资产 delta 声明写入工单评论；机器项与判断项分工序 |
 
-## 1. 角色 roster（9 agent + 1 操作者 skill）
+## 1. 角色 roster（10 agent + 1 操作者 skill）
 
 | 角色 | dev-loop 原型 | 档位 | 职责一句话 |
 |---|---|---|---|
 | **showrunner 总编剧** | PM | opus/max | north-star+outline 唯一维护者；立项/方向 intake；file 各类创作票；大纲门验收；里程碑监测与 milestone-eval 票发起；Backlog 闸门 |
+| **source-analyst 原著筛选** | researcher | sonnet/high | 只处理 source-analysis：有界选择第一季窗口、快速筛选分块、交付限量改编素材；不设计60集、不维护故事资产 |
 | **story-designer 细纲师** | senior-dev | opus/max | arc 设计票→逐集节拍单（含候选竞争与弃案）→spawn 子票；keystone 亲写；升级接管（Mode: direct-write）；arc punch-up 执行 |
 | **episode-writer 编剧** | junior-dev | sonnet/high | 单集票→读结构化节拍+有界资产 Context Pack+上集→写正文→自检门→剧情资产 delta 声明→In Review |
 | **reviewer 审读** | QA | ≥writer 档（受治理配置，默认 opus/high） | 单集独立验收（三分类+邻集对读+delta 逐条核对，断言必须带正文引文）；fail 三级路由；修订复核；邻集复核票 |
@@ -48,7 +49,7 @@ citron 十教训 → 机制载体（v2 修订后）：
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
 | **sweep** | Sweep | sonnet/high | 生命周期卫生（机制原样 + 本设计新增票类的错标规则） |
 | **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创收定位；改编收原著路径+整体建议+权利+Harness 同意，同一次确认自动 source intake，outline 停 source-pending |
-| **source intake**（onboarding core + story-designer 模式；独立 CLI 仅迁移/恢复） | ingest/analysis | opus/max | onboarding plan 绑定 workspace-local 原著 bytes+改编设计+Harness 授权；create 自动登记/建票；不可变分块→逐块 checkpoint→三清单→showrunner 门 |
+| **source intake**（onboarding core + Source Analyst；独立 CLI 仅迁移/恢复） | ingest/analysis | sonnet/high | onboarding plan 绑定 workspace-local 原著 bytes+改编设计+Harness 授权；create 自动登记/建票；≤32块取材窗口、每 fire ≤8块/480 KiB、限量素材包→showrunner 门 |
 | **story companion + asset graph + context resolver** | design evidence | deterministic | `story/outline.v1.json` 管结构；`story/assets.v1.json` 管人物/世界/地点/道具/伏笔/连续性事实及 chronology×reveal 双轨时间线；按 ticket/agent/episode 生成有界 Context Pack，Studio 只读投影 |
 | **system proposal inbox** | framework governance | deterministic | workspace 级 `.writing-loop/system/proposals/WLSYS-*.json` 承接 scheduler/skill/跨项目机制改进；Studio `/system` 独立投影，绝不污染或阻塞任何剧集的创作看板 |
 
@@ -196,7 +197,7 @@ doctor/reflect/sweep ~1-2 ⇒ 实测预估 3.5-5 fires/集，80 集约 300-400 f
 ```
 .claude-plugin/{plugin,marketplace}.json   README.md README.zh-CN.md
 references/{conventions,script-format,craft-rules,evaluation-rubric,config-schema}.md
-skills/{showrunner,story-designer,episode-writer,reviewer,script-doctor,evaluator,
+skills/{showrunner,source-analyst,story-designer,episode-writer,reviewer,script-doctor,evaluator,
         market-watch,reflect,sweep}-agent/SKILL.md + add-script/SKILL.md
 templates/{north-star,episode,evaluation-report}.md
 templates/deconstruction/README.md
@@ -216,7 +217,7 @@ design doc→`story/outline.v1.json`；strategyDoc→north-star；Ops→market-w
 **砍掉**：PR/autoMerge/deploy、多 repo §19（change-gate 思想保留给 doctor）、
 Linear/hub backend（v1）、Communication、W5 完整外部追踪（保简化 park）。
 **Harness 的差异**：Claude/Codex 可使用 plugin/slash 传输；OpenCode 由 scheduler 内联
-相同的 9 个 agent skill。writing-loop v1 的文件板仍是本地真相源，「是哪个 agent」=
+相同的 10 个 agent skill。writing-loop v1 的文件板仍是本地真相源，「是哪个 agent」=
 「调了哪条 skill」，无需用 MCP/identity 推断角色——§25 因此更简。
 
 ## 12. v1→v2 评审决策日志（38 findings 裁决）

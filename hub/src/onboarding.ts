@@ -29,7 +29,7 @@ const SOURCE_HARNESSES = new Set(["claude", "codex", "opencode"]);
 const TICKET_PREFIX = /^[A-Z][A-Z0-9]{0,7}$/;
 const UNCALIBRATED = new Set(["sweet-pet", "angst"]);
 const AGENTS = [
-  "showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
+  "showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator",
   "script-doctor", "market-watch", "reflect", "sweep",
 ] as const;
 const OWNER_MARKER = ".writing-loop-onboarding-owner.json";
@@ -663,7 +663,7 @@ function renderNorthStar(input: OnboardingInput): string {
   raw = raw.replace(/^- 对标剧：.*$/m, `- 对标剧：${input.kind === "original" ? input.comparables : "授权原著；拆书清单见 source/"}`);
   raw = raw.replace(/^- format profile：.*$/m, `- format profile：${input.format}`);
   if (input.adaptation) {
-    const sourceDirection = `## 操作者改编方向（North Star 输入）\n<!-- 【方向级】来自立项表；writing-loop 负责拆解原著、提出执行方案，不得覆盖操作者意图。 -->\n\n${input.adaptation.adaptationBrief}\n\n- 原著输入：${input.adaptation.sourceTitle}（本地文件只按 source-analysis 票分块读取，不进入 Git）\n- 自治流程：Showrunner/Story Designer 自动建票、拆解、验收；操作者无需手工填拆书三清单。\n\n`;
+    const sourceDirection = `## 操作者改编方向（North Star 输入）\n<!-- 【方向级】来自立项表；writing-loop 负责拆解原著、提出执行方案，不得覆盖操作者意图。 -->\n\n${input.adaptation.adaptationBrief}\n\n- 原著输入：${input.adaptation.sourceTitle}（本地文件只按 source-analysis 票分块读取，不进入 Git）\n- 自治流程：Source Analyst 筛选原著，Showrunner 验收，Story Designer 再设计本季；操作者无需手工填拆书三清单。\n\n`;
     raw = raw.replace(/(## 核心情绪引擎\n)/, `${sourceDirection}$1`);
   }
   const nonGoals = [

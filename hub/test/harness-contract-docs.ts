@@ -16,6 +16,7 @@ const harnessDocs = [
   read("docs", "HARNESS.fr.md"),
 ];
 const storyDesigner = read("skills", "story-designer-agent", "SKILL.md");
+const sourceAnalyst = read("skills", "source-analyst-agent", "SKILL.md");
 const showrunner = read("skills", "showrunner-agent", "SKILL.md");
 const evaluator = read("skills", "evaluator-agent", "SKILL.md");
 const episodeWriter = read("skills", "episode-writer-agent", "SKILL.md");
@@ -68,12 +69,13 @@ ok(read("references", "config-schema.md").includes("Harness 契约只有 `claude
   && read("references", "config-schema.md").includes("ComfyUI/H3/GPU 是独立的镜头制作执行层"),
 "配置 schema 同步一级 Harness 集合与 GPU 边界");
 
-ok(storyDesigner.includes("SOURCE-ANALYSIS 模式（writing-loop 内生拆书）")
-  && storyDesigner.includes("writing-loop source checkpoint")
-  && storyDesigner.includes("writing-loop source finalize")
-  && storyDesigner.includes("不回读整个历史评论区")
-  && storyDesigner.includes("最多 4 个") && storyDesigner.includes("320 KiB")
-  && storyDesigner.includes("不得调用 `story-long-analyze`")
+ok(sourceAnalyst.includes("Source Analyst Agent")
+  && sourceAnalyst.includes("writing-loop source checkpoint")
+  && sourceAnalyst.includes("writing-loop source finalize")
+  && sourceAnalyst.includes("不回读完整评论历史")
+  && sourceAnalyst.includes("8 chunks / 480 KiB")
+  && sourceAnalyst.includes("不调用外部拆书 skill")
+  && storyDesigner.includes("source-analysis` 属 Source Analyst")
   && showrunner.includes("A0 · source-analysis ⇒ 原著拆解门")
   && showrunner.includes("control.phase=`review-ready`")
   && showrunner.includes("outline 继续 Backlog"),
@@ -101,9 +103,9 @@ const automaticSourcePhrases = [
   "Le parcours normal n'a pas de seconde inscription manuelle",
 ];
 const boundedBatchPhrases = [
-  "bounded consecutive batch of up to four chunks",
-  "最多 4 个、总量不超过 320 KiB 的有界批次",
-  "lot contigu borné de quatre chunks maximum",
+  "8 chunks / 480 KiB per fire",
+  "8块/480 KiB",
+  "8 chunks / 480 KiB par fire",
 ];
 const contentFirstPatterns = [
   /structured serialization is an internal platform detail and\s+never becomes a creative ticket/,

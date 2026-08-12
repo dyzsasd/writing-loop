@@ -3,8 +3,8 @@
 // 并入三引擎车道（claude/codex/opencode）、promptMode（slash|inline）与 --cli 顶层覆盖。
 //
 // 核心裁决（WL-55）：conventions §15.6「同一时刻至多一个 fire 在写 repo」由本调度器
-// **以构造保证**——写 repo 四角色（showrunner / story-designer / episode-writer /
-// evaluator，§15.6 逐字列举的 stage+commit 主体）全局单飞（at most ONE in flight）；
+// **以构造保证**——写 repo 五角色（showrunner / source-analyst / story-designer /
+// episode-writer / evaluator，§15.6 逐字列举的 stage+commit 主体）全局单飞（at most ONE in flight）；
 // 板上角色（reviewer / sweep / script-doctor / market-watch / reflect，绝不向剧本 repo
 // 落 commit）可与写者并发、彼此至多 2 路。于是共享 checkout + repo.lock 的默认轨道
 // 恒为合规，不必 worktree。
@@ -68,6 +68,7 @@ import {
 export const AGENT_SPECS: ReadonlyArray<readonly [string, string, string, number, number, number]> = [
   //  agent            model     effort   interval  cap   stagger
   ["showrunner",     "opus",   "max",     600,  3600,  0],
+  ["source-analyst", "sonnet", "high",     60,  1800,  5],
   ["story-designer", "opus",   "max",     300,  3600, 10],
   ["episode-writer", "sonnet", "high",    180,  2400, 20],
   ["reviewer",       "opus",   "high",    300,  2400, 30],
@@ -81,7 +82,7 @@ export const AGENT_ORDER: readonly string[] = AGENT_SPECS.map((s) => s[0]);
 
 // 写者/板上分类 —— 依据 conventions §15.6 逐字列举的 repo commit 主体；
 // reviewer 的 §15.4 revert 是写进跟进票 AC 由 writer 层执行的，reviewer 本体不 commit。
-export const REPO_WRITERS: ReadonlySet<string> = new Set(["showrunner", "story-designer", "episode-writer", "evaluator"]);
+export const REPO_WRITERS: ReadonlySet<string> = new Set(["showrunner", "source-analyst", "story-designer", "episode-writer", "evaluator"]);
 export const BOARD_ONLY_MAX = 2;    // 板上角色彼此的并发上限
 const GRACE_DEFAULT = 30;           // Ctrl-C / --for 到点后等 in-flight 收尾的宽限秒数
 export const KEYSTONE_DEFAULT = { model: "opus", effort: "max" } as const;
@@ -369,7 +370,7 @@ export function resolveTier(sched: Sched, agent: string, boardDir: string): { mo
 //    可证明的空，不是含糊。
 // ② 每个谓词并入对应 SKILL §0 的全部逃逸口：Ⅰ needs-\*（§4 闭集——仅 designer/reviewer/
 //    showrunner 存在入口）；Ⅱ 孤儿（认领陈旧 >60min，§7；updated 缺失/未来戳 = stale-可疑
-//    立即命中，§18 时钟纪律）；Ⅲ 报告结算（九个角色的 SKILL §0 全都有，reportsEscape 统一
+//    立即命中，§18 时钟纪律）；Ⅲ 报告结算（十个角色的 SKILL §0 全都有，reportsEscape 统一
 //    并入）；Ⅳ doc-watch + 里程碑监测（仅 showrunner——板快照哈希 + north-star 哈希承载）。
 // ③ showrunner 的变化检测基线只在其 fire **干净退出**（exit 0 且未超时）后提交；崩溃/
 //    超时 ⇒ 基线清空 ⇒ 下次求值恒「已变」。孤儿老化这类纯墙钟转变对快照不可见——由
@@ -531,13 +532,13 @@ export type SourceHarnessGate = { allowed: true } | { allowed: false; reason: st
 
 // Raw novel chunks are a stronger boundary than ordinary repo documents. An adaptation
 // intake names the exact Harnesses allowed to receive them, so the scheduler refuses to
-// launch the story-designer lane on an open source-analysis ticket with any other CLI.
+// launch the source-analyst lane on an open source-analysis ticket with any other CLI.
 export function sourceAnalysisHarnessGate(projData: string, ticketsDir: string,
   cli: Sched["cli"]): SourceHarnessGate {
   const board = readBoardTickets(ticketsDir);
   if (board.unreadable || board.anyMalformed) return { allowed: false, reason: "无法安全判定 source-analysis 板状态" };
   const open = board.tickets.some((ticket) => (ticket.state === "Todo" || ticket.state === "In Progress")
-    && ticket.labels.includes("source-analysis") && ticket.labels.includes("story-designer"));
+    && ticket.labels.includes("source-analysis"));
   if (!open) return { allowed: true };
   const file = join(projData, "source-intake.v1", "manifest.v1.json");
   let fd: number | undefined;
@@ -593,7 +594,7 @@ export function boardSnapshotHash(tickets: LaneTicket[]): string {
   return createHash("sha256").update(rows.join("\n")).digest("hex");
 }
 
-// 原著拆解属于写作专注阶段。Story Designer 在一次 checkpoint 中会依次写 assignee、
+// 原著筛选属于写作专注阶段。Source Analyst 在一次 checkpoint 中会依次写 assignee、
 // Todo/In Progress、updated 与评论；这些是同一创作任务的进度心跳，不是需要 Showrunner
 // 重新协调的板变化。只规范化仍处于 Todo/In Progress 的 source-analysis 票；进入 In Review、
 // 新增求助标签或其他票变化仍会改变快照并唤醒 Showrunner。
@@ -602,7 +603,7 @@ export function showrunnerBoardSnapshotHash(tickets: LaneTicket[]): string {
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((t) => {
       const activeSource = (t.state === "Todo" || t.state === "In Progress")
-        && t.labels.includes("source-analysis") && t.labels.includes("story-designer");
+        && t.labels.includes("source-analysis");
       return activeSource
         ? [t.id, "source-analysis-active", t.labels.join(","), "", "", "0"].join("\0")
         : [t.id, t.state, t.labels.join(","), t.assignee ?? "", t.updatedRaw, String(t.mtimeMs)].join("\0");
@@ -654,17 +655,30 @@ export function laneEpisodeWriter(tickets: LaneTicket[], nowMs: number): string[
   return hits;
 }
 
+// source-analyst（SKILL §0）：唯一拾取 source-analysis；legacy 票即使仍带 story-designer
+// tier 也由本车道接管，避免升级后两个创作角色竞争同一原著票。
+export function laneSourceAnalyst(tickets: LaneTicket[], nowMs: number): string[] {
+  const hits: string[] = [];
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("source-analysis"));
+  if (todo) hits.push(fmtHit("∃ Todo+source-analysis", todo));
+  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("source-analysis") && orphaned(t, nowMs));
+  if (orphan) hits.push(fmtHit("孤儿 In Progress source-analysis（§7）", orphan));
+  return hits;
+}
+
 // story-designer（SKILL §0）：∃ Todo+tier（arc-design/keystone 集/direct-write 升级/
 // punch-up 全在本切片；**不排除 blocked**——SKILL 谓词原文未排除，与 evaluator 同口径）
 // ∪ Ⅰ needs-designer 求助（节拍修正提案裁决——非终态即有活）∪
 // Ⅱ孤儿。不按生产阶段收窄（SKILL 明令：量产段仍需接 keystone/下一 arc）。
 export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number): string[] {
   const hits: string[] = [];
-  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("story-designer"));
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("story-designer")
+    && !t.labels.includes("source-analysis"));
   if (todo) hits.push(fmtHit("∃ Todo+story-designer", todo));
   const needs = tickets.find((t) => !TERMINAL_STATES.has(t.state) && t.labels.includes("needs-designer"));
   if (needs) hits.push(fmtHit("needs-designer 求助（§9）", needs));
-  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("story-designer") && orphaned(t, nowMs));
+  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("story-designer")
+    && !t.labels.includes("source-analysis") && orphaned(t, nowMs));
   if (orphan) hits.push(fmtHit("孤儿 In Progress（§7 认领陈旧）", orphan));
   return hits;
 }
@@ -741,7 +755,7 @@ export function laneShowrunner(
 
 // sweep（SKILL §0 + 操作者裁定五枝）：∃ In Progress（孤儿回收候选面）∨ ∃ 任何 .lock
 // （板票锁/结构化剧情资产锁/repo 写锁——Job 3 陈旧锁清理）∨ 错标即时枝（SKILL §0 逃逸口②前半，
-// frontmatter 机械可判：非终态票缺全部九个 tier 标签或 owner 字段缺失——Fix 轮 1 前靠
+// frontmatter 机械可判：非终态票缺全部十个 tier 标签或 owner 字段缺失——Fix 轮 1 前靠
 // cadence 枝兜底，interval<30min 配置下会延迟清理）∨ keystone-stall（In Review+keystone 且
 // updated 陈旧 >30min——比 SKILL 判据少 assignee 合取，更保守）∨ 兜底节拍（距上次 sweep
 // 干净 fire 超卫生周期 cadenceMs = min(config interval, 30min)——SKILL「默认 30min 级」，
@@ -753,7 +767,7 @@ export function laneSweep(
 ): string[] {
   const hits: string[] = [];
   const activeSource = tickets.find((t) => (t.state === "Todo" || t.state === "In Progress")
-    && t.labels.includes("source-analysis") && t.labels.includes("story-designer"));
+    && t.labels.includes("source-analysis"));
   const freshSource = activeSource?.state === "In Progress" && !orphaned(activeSource, nowMs);
   const ip = tickets.find((t) => t.state === "In Progress"
     && (t !== activeSource || orphaned(t, nowMs)));
@@ -811,7 +825,7 @@ export function laneReflect(nowMs: number, lastRetroMs: number | null): string[]
   return [];
 }
 
-// —— 逃逸口Ⅲ：报告结算（§22——九个角色的 SKILL §0 全都并入本枝）——机械化口径：
+// —— 逃逸口Ⅲ：报告结算（§22——十个角色的 SKILL §0 全都并入本枝）——机械化口径：
 // - 未分发点评：reports/*.review.md 的 mtime 晚于本 agent 上次**干净** fire 结束时刻 ⇒
 //   该 agent 还没有过「boot 第 5 步分发」的机会 ⇒ 命中；上次干净 fire 无从考证 ⇒ 保守
 //   命中。（点评文件永不删除（§22 retention），存在性判定会永久假命中——mtime×fire 时刻
@@ -990,8 +1004,7 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   const snap = readBoardTickets(io.boardDir);
   const sourceAnalysisFocused = snap.tickets.some((ticket) =>
     (ticket.state === "Todo" || ticket.state === "In Progress")
-    && ticket.labels.includes("source-analysis")
-    && ticket.labels.includes("story-designer"));
+    && ticket.labels.includes("source-analysis"));
   const reasons: string[] = [];
   // frontmatter 边缘形态/板不可读 ⇒ 对**全部** agent 保守放行——统一的安全不变量：
   // 解析不出的票可能属于任何 lane，agent 侧探针（LLM 解析更宽容）是修复它的机会。
@@ -1005,6 +1018,9 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   switch (agent) {
     case "episode-writer":
       reasons.push(...laneEpisodeWriter(snap.tickets, nowMs));
+      break;
+    case "source-analyst":
+      reasons.push(...laneSourceAnalyst(snap.tickets, nowMs));
       break;
     case "story-designer":
       reasons.push(...laneStoryDesigner(snap.tickets, nowMs));
@@ -1868,7 +1884,7 @@ export class Scheduler {
   //（spawnError 的「下 tick 立即重试」语义有意保留：二进制装好即恢复，与 guard 不同）。
   launch(agent: string, gate: GateEval | null = null): boolean {
     const { model, effort, escalated } = resolveTier(this.sched, agent, this.boardDir);
-    const sourceGate: SourceHarnessGate = agent === "story-designer"
+    const sourceGate: SourceHarnessGate = agent === "source-analyst"
       ? sourceAnalysisHarnessGate(this.projData, this.boardDir, this.sched.cli) : { allowed: true };
     if (!sourceGate.allowed) {
       const nowIso = utcIso();

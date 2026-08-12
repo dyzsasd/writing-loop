@@ -27,7 +27,7 @@ import { pluginRoot } from "../src/paths.ts";
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const runEntry = join(hubRoot, "src", "run.ts");
 
-const AGENTS = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
+const AGENTS = ["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator",
   "sweep", "script-doctor", "market-watch", "reflect"];
 
 let npass = 0, nfail = 0;
@@ -180,11 +180,11 @@ writeFileSync(process.argv[2], process.env.OPENCODE_PERMISSION ?? "MISSING");
 }
 
 function testSourceHarnessAuthorization(): void {
-  const ws = makeWs({ "story-designer": { enabled: true } });
+  const ws = makeWs({ "source-analyst": { enabled: true } });
   const projData = join(ws, ".writing-loop", "t1");
   const tickets = join(projData, "board", "tickets");
   mkdirSync(tickets, { recursive: true });
-  writeFileSync(join(tickets, "WL-1.md"), `---\nid: WL-1\ntitle: source\ntype: Feature\nstate: Todo\nowner: showrunner\nassignee: null\nlabels: [writing-loop, source-analysis, story-designer]\npriority: 1\nupdated: 2026-08-11T00:00:00.000Z\n---\n`);
+  writeFileSync(join(tickets, "WL-1.md"), `---\nid: WL-1\ntitle: source\ntype: Feature\nstate: Todo\nowner: showrunner\nassignee: null\nlabels: [writing-loop, source-analysis, source-analyst]\npriority: 1\nupdated: 2026-08-11T00:00:00.000Z\n---\n`);
   const sourceDir = join(projData, "source-intake.v1");
   mkdirSync(sourceDir, { recursive: true });
   const manifest = { kind: "writing-loop/source-intake", adaptation: {
@@ -192,7 +192,7 @@ function testSourceHarnessAuthorization(): void {
       confirmedAt: "2026-08-11T00:00:00.000Z" },
   } };
   writeFileSync(join(sourceDir, "manifest.v1.json"), JSON.stringify(manifest));
-  check("source consent：授权 Harness 可启动 story-designer source-analysis",
+  check("source consent：授权 Harness 可启动 Source Analyst",
     sourceAnalysisHarnessGate(projData, tickets, "claude").allowed);
   const denied = sourceAnalysisHarnessGate(projData, tickets, "codex");
   check("source consent：未授权 Harness 在 spawn 前 fail closed",
@@ -266,6 +266,7 @@ function testSpecs060Defaults(): void {
   const want: Record<string, [string, string, number, number, number]> = {
     //                model     effort  interval  cap  stagger
     "showrunner":     ["opus",   "max",     600, 3600,  0],
+    "source-analyst": ["sonnet", "high",     60, 1800,  5],
     "story-designer": ["opus",   "max",     300, 3600, 10],
     "episode-writer": ["sonnet", "high",    180, 2400, 20],
     "reviewer":       ["opus",   "high",    300, 2400, 30], // 默认档回落——顶配归 keystone 升档
@@ -277,7 +278,7 @@ function testSpecs060Defaults(): void {
   };
   const got: typeof want = {};
   for (const [a, m, e, i, c, s] of AGENT_SPECS) got[a] = [m, e, i, c, s];
-  check("SPECS 0.6.0：九 agent 档位/间隔/cap/stagger 逐格与操作者裁定一致",
+  check("SPECS：十 agent 档位/间隔/cap/stagger 逐格与操作者裁定一致",
     JSON.stringify(got) === JSON.stringify(want), `got=${JSON.stringify(got)}`);
   const project = { repoPath: "t1" };
   const sched = buildSched({ projects: { t1: project } }, "t1", project);

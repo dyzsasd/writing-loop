@@ -222,20 +222,21 @@ ground truths:
 
 For an adaptation, the same confirmation binds the novel bytes, copies/chunks them
 into local runtime storage, files the `source-analysis` ticket, and leaves the outline
-as `source-pending`. Writing-loop then chooses the season window, processes durable
-chunks, and aggregates the three worksheets; the Showrunner unlocks the outline only
+as `source-pending`. Source Analyst then chooses the season window, processes bounded
+durable batches, and aggregates a capped source package; the Showrunner unlocks the outline only
 after that gate. `source plan/register` remain advanced recovery/migration commands,
 not a second onboarding step. `add-script` itself never substitutes an external
 novel-analysis skill.
 
 **3. Run the room.** Each agent is a stateless skill: Claude Code and Codex can
-invoke it as a slash command, while the OpenCode Harness receives the same nine
+invoke it as a slash command, while the OpenCode Harness receives the same ten
 agent skills inline. Every fire re-reads ground truth from the board + repo. Drive
 them in the natural order, or point external `cron` at them:
 
 ```
-/writing-loop:story-designer-agent     # adaptations: chunked source-analysis; then outline and beat cards
+/writing-loop:source-analyst-agent     # adaptations: bounded source screening and evidence package
 /writing-loop:showrunner-agent        # accepts source/outline gates and promotes the queue
+/writing-loop:story-designer-agent     # turns approved evidence into outline and beat cards
 /writing-loop:episode-writer-agent     # pulls episode tickets in order, writes drafts, declares structured story-fact deltas
 /writing-loop:reviewer-agent           # independent per-episode verification (three-way classification, cited assertions)
 /writing-loop:evaluator-agent          # runs milestone-eval gates (outline lock, first-paywall pack, finale …)

@@ -20,9 +20,9 @@ import { fileURLToPath } from "node:url";
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const runEntry = join(hubRoot, "src", "run.ts");
 
-const AGENTS = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator",
+const AGENTS = ["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator",
   "sweep", "script-doctor", "market-watch", "reflect"];
-const WRITERS = new Set(["showrunner", "story-designer", "episode-writer", "evaluator"]);
+const WRITERS = new Set(["showrunner", "source-analyst", "story-designer", "episode-writer", "evaluator"]);
 
 // 假 agent（node 版，语义同 python 版）：markers 文件记 start/end/msg 三类行，可指定睡眠秒数。
 const FAKE_AGENT = `import { appendFileSync } from "node:fs";
@@ -168,7 +168,7 @@ function testIntervalNoopLedger(): void {
 function testSingleFlight(): void {
   const ws = makeWs({});
   const overrides: Record<string, AgentOverride> = {};
-  for (const a of ["showrunner", "story-designer", "episode-writer",   // 写者 3 名
+  for (const a of ["showrunner", "source-analyst", "story-designer", "episode-writer", // 写者 4 名
     "reviewer", "sweep", "market-watch"]) {                            // 板上 3 名（争 2 槽）
     overrides[a] = { enabled: true, intervalSeconds: 1, capSeconds: 30, staggerSeconds: 0, command: fakeCmd(ws, 0.7) };
   }

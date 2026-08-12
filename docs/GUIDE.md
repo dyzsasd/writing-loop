@@ -35,12 +35,12 @@ Inside Claude Code:
 /plugin install writing-loop
 ```
 
-You now have the `/writing-loop:*` slash commands (9 agents + `add-script`).
+You now have the `/writing-loop:*` slash commands (10 agents + `add-script`).
 
 Codex exposes the same plugin/slash onboarding. If OpenCode is your only Harness,
 create the project through Studio's **New project** flow or the deterministic
 `writing-loop project plan` then `writing-loop project create` commands; after that,
-run the nine agent skills with `writing-loop run --cli opencode`.
+run the ten agent skills with `writing-loop run --cli opencode`.
 
 ---
 
@@ -134,8 +134,9 @@ Then `add-script` automatically:
 There is no second manual registration step in normal onboarding. The approved project
 plan already binds the novel fingerprint, brief, rights and Harness consent. Project
 creation copies/chunks the novel locally, commits only its provenance and your brief,
-and files source-analysis. Start the room; Story-Designer selects the season range,
-analyzes a bounded consecutive batch of up to four chunks per fire, aggregates the three worksheets, and hands them to the
+and files source-analysis. Start the room; Source Analyst selects at most 32 contiguous
+chunks, screens at most 8 chunks / 480 KiB per fire, caps the source package at 12 mainline
+units, 12 highlights and 18 character functions, and hands it to the
 Showrunner gate. `writing-loop source status --project my-drama` is read-only; `source
 plan/register` are advanced recovery/migration commands, not the normal onboarding path.
 
@@ -152,14 +153,14 @@ and Showrunner still performs an independent editorial review after machine-gree
 ## Step 3 — Run the writers' room
 
 Each agent is a **stateless skill**: Claude Code and Codex expose it as a slash command;
-OpenCode receives the same nine agent skills inline from the scheduler. Every run
+OpenCode receives the same ten agent skills inline from the scheduler. Every run
 re-reads ground truth from the board + repo and does whatever its role has ready, or
 no-ops. Agents hand off **only through tickets** — you never pass work by hand.
 
 **First cycle (the natural order for adaptation):**
 
 ```
-/writing-loop:story-designer-agent    # first runs source-analysis: season range, chunks, three worksheets
+/writing-loop:source-analyst-agent    # bounded source screening and capped adaptation evidence
 /writing-loop:showrunner-agent       # accepts the source gate and only then unlocks the outline
 /writing-loop:story-designer-agent    # writes story/outline.v1.json + story/assets.v1.json
 /writing-loop:market-watch-agent      # dated genre-window assessment — the outline-lock gate's market layer depends on it; missing data makes that item inconclusive, and red-line cases park for you to supply it
@@ -190,7 +191,7 @@ CLI — install once globally, then run from the workspace folder:
 ```bash
 npm i -g @dyzsasd/writing-loop     # once
 writing-loop run --dry-run         # print every resolved fire command first
-writing-loop run                   # one process drives all 9 agent loops, Ctrl-C to stop
+writing-loop run                   # one process drives all 10 agent loops, Ctrl-C to stop
 ```
 
 (Prefer no global install? `npx @dyzsasd/writing-loop run` works the same. The

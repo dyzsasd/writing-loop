@@ -21,7 +21,7 @@ const ok = (condition: boolean, message: string): void => {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 const hubRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const runEntry = join(hubRoot, "src", "run.ts");
-const agents = ["showrunner", "story-designer", "episode-writer", "reviewer", "evaluator", "sweep", "script-doctor", "market-watch", "reflect"];
+const agents = ["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer", "evaluator", "sweep", "script-doctor", "market-watch", "reflect"];
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "wl-run-state-")));
 let child: ChildProcess | null = null;
