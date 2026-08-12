@@ -102,7 +102,8 @@ punch-up（Step 6）；无法判 ⇒ block `decision-needed`。
 writing-loop 的票据状态机完成。不得调用 `story-long-analyze`、其他外部拆书 skill 或另起
 旁路 agent；否则产物没有本项目的 provenance、逐块进度和 showrunner 门，等同未完成。
 
-1. **只信登记证据**：先读票、`source/adaptation-brief.md`、
+1. **只信登记证据**：先读票的 frontmatter、Context、Acceptance criteria 与最新一条创作交接；
+   **不回读整个历史评论区**，旧 fire 的过程讨论不属于本次创作上下文。再读 `source/adaptation-brief.md`、
    `.writing-loop/<project>/source-intake.v1/manifest.v1.json` 与
    `writing-loop source status --project <project> --json`。以调度器注入的
    `WRITING_LOOP_HARNESS` 为当前 Harness，并确认它位于 manifest 的

@@ -71,6 +71,8 @@ ok(read("references", "config-schema.md").includes("Harness 契约只有 `claude
 ok(storyDesigner.includes("SOURCE-ANALYSIS 模式（writing-loop 内生拆书）")
   && storyDesigner.includes("writing-loop source checkpoint")
   && storyDesigner.includes("writing-loop source finalize")
+  && storyDesigner.includes("不回读整个历史评论区")
+  && storyDesigner.includes("最多 4 个") && storyDesigner.includes("320 KiB")
   && storyDesigner.includes("不得调用 `story-long-analyze`")
   && showrunner.includes("A0 · source-analysis ⇒ 原著拆解门")
   && showrunner.includes("control.phase=`review-ready`")
