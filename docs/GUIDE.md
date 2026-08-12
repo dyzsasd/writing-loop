@@ -163,7 +163,7 @@ no-ops. Agents hand off **only through tickets** — you never pass work by hand
 /writing-loop:source-analyst-agent    # bounded source screening and capped adaptation evidence
 /writing-loop:showrunner-agent       # accepts the source gate and only then unlocks the outline
 /writing-loop:story-designer-agent    # writes story/outline.v1.json + story/assets.v1.json
-/writing-loop:market-watch-agent      # dated genre-window assessment — the outline-lock gate's market layer depends on it; missing data makes that item inconclusive, and red-line cases park for you to supply it
+/writing-loop:market-watch-agent      # project market baseline; refresh only for an explicit milestone, distribution change, or new supplied data
 /writing-loop:evaluator-agent         # outline-lock gate (market + content pre-score + compliance)
 /writing-loop:episode-writer-agent    # writes episodes in order; keystone episodes are written by the Story-Designer
 /writing-loop:reviewer-agent          # independent per-episode review (three-way classification + adjacent read + quoted assertions); fails route three ways

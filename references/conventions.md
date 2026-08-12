@@ -111,7 +111,7 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 | reviewer 审读 | QA | **≥ writer 档**（受治理配置，默认 opus/high） | 单集独立验收；fail 三级路由；修订复核；邻集复核 |
 | script-doctor 剧本医生 | Architect | opus/xhigh | 慢频轮换维度剧级审计（§21）；结构地标区间强制定维 |
 | evaluator 评估官 | — | opus/xhigh | 执行 milestone-eval 票（六道门 + rubric + 红线，§21） |
-| market-watch 市场监察 | Ops | sonnet/high | 周频扫榜+政策；带日期题材窗口评估；变化⇒needs-showrunner 票（§21） |
+| market-watch 市场监察 | Ops | sonnet/high | 立项市场基线；仅显式里程碑/新投喂刷新；变化⇒needs-showrunner 票（§21） |
 | reflect | Reflect | opus/xhigh | retro + lessons 策展（§14/§17/§22） |
 | sweep | Sweep | sonnet/high | 生命周期卫生：错标修复、孤儿回收、板健康摘要 |
 
@@ -166,7 +166,7 @@ add-script 立项 →（改编：source-analyst 筛选→showrunner source gate�
   → episode-writer 按集序写正文（keystone 由 story-designer 亲写）
   → reviewer 逐集独立验收 → ep3 后前三集微门 → arc 完集后 punch-up
   → 一卡门 → 操作者决策点（投放/续产）→ arc-02 … 卡二门 … 卡三门 … 完本门
-（全程伴随：doctor 轮换审计、market-watch 周频监察、reflect 日频 retro、sweep 捡漏）
+（全程伴随：doctor 轮换审计、market-watch 按需刷新、reflect 日频 retro、sweep 捡漏）
 ```
 
 ## §2. 安全边界 — `writing-loop` 标签
@@ -1012,14 +1012,15 @@ milestone-eval 票 ⇒ 新设计票出生即 `blocked` + `Blocked-by: <eval票>`
 永久卡死。showrunner 的 Step-0 探针谓词必须并入此条件（∃ blocked 票其 Blocked-by
 目标已 Done）。
 
-### market-watch（周频）
+### market-watch（立项基线 + 显式里程碑刷新）
 从 `marketDataPath`（操作者投喂优先）+ WebSearch（平台热榜/政策公告/编剧社群
 风向）产出**带日期**的题材窗口评估（state 目录 + 摘要进 north-star「定位」节
 经由 needs-showrunner 票——「定位」是方向级节，showrunner 起草 diff 停靠票经操作者
 批准后才回写（§20 节分级）；observe-and-file，自己不动 bible）。
 本项目题材转入打压期/红海、或政策新规触及本剧 ⇒ file `market` Bug/needs-showrunner
-（Urgent 视严重度）。反抖动：单次信号不 file，两个独立来源或两周连续信号才 file。
-无数据可得 ⇒ 记「本周无数据」，不编造。
+（Urgent 视严重度）。反抖动：单一非权威来源不 file，两个独立来源或权威官方公告才
+file。无数据可得 ⇒ 记「本次无数据」，不编造。成功基线后不按时间复跑；仅显式
+`market-watch` Ticket、`marketDataPath` 新内容或人工调用刷新。
 
 ## §21a. 两层创作 — story-designer / episode-writer
 
@@ -1138,7 +1139,7 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
   **evaluator**（产新报告的同一动作）。
 - `state/market-assessment.md`（带日期证据，evaluator 按日期引用）：保留当前 +
   尾随 8 周，更旧条目滚存 `state/market-archive.md`（留索引；归档不删，已出报告
-  的引用链不断）。执行者 = **market-watch**（周频 fire 顺手滚存）。
+  的引用链不断）。执行者 = **market-watch**（显式刷新时顺手滚存）。
 - **Context 预算**：`story/assets.v1.json` 可随项目增长，但任何单票 Context Pack 默认 ≤64 KiB；
   大文件不等于全量加载。历史 facts/events 通过 episode validity 与选择器寻址，不另建归档 Markdown。
   north-star 的 `当前进度` 节同受尺约束：**≤15KB**，
@@ -1248,7 +1249,7 @@ skill」（showrunner / reviewer / …），不靠环境变量区分。各 CLI �
 - **权限 = OPENCODE_PERMISSION 环境变量**：通配符 `"*":"deny"` 拒绝打底 + 白名单放行
   （read/edit/glob/grep/bash/task/skill/lsp…）。相对 dev-loop 认证集**三处放行**：
   `external_directory`——板目录是剧本 repo **之外**的兄弟目录（§11），等价 claude 车道的
-  `--add-dir`；`webfetch` / `websearch`——market-watch 周频扫榜需要出网。`question` /
+  `--add-dir`；`webfetch` / `websearch`——market-watch 建立/刷新市场基线需要出网。`question` /
   `doom_loop` 保持 deny（非交互 fire 无人可问）。整对象可由 `scheduler.opencodePermission`
   覆盖（见 config-schema「内建调度器」节）。
 - **fire 密闭 = XDG_CONFIG_HOME 隔离**（默认开，`scheduler.opencodeHermetic:false` 可关）：

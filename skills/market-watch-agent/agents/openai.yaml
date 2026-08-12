@@ -1,0 +1,4 @@
+interface:
+  display_name: "Market Watch"
+  short_description: "建立并按里程碑刷新市场基线"
+  default_prompt: "Use $market-watch-agent to establish or explicitly refresh this project's dated market baseline."

@@ -45,7 +45,7 @@ citron 十教训 → 机制载体（v2 修订后）：
 | **reviewer 审读** | QA | ≥writer 档（受治理配置，默认 opus/high） | 单集独立验收（三分类+邻集对读+delta 逐条核对，断言必须带正文引文）；fail 三级路由；修订复核；邻集复核票 |
 | **script-doctor 剧本医生** | Architect | opus/xhigh | 慢频轮换维度剧级审计（伏笔闭环/钩型序列/五锚点/同构/声纹/指纹一致性/被动率/资产图回放），结构地标区间强制定维 |
 | **evaluator 评估官** | （新增） | opus/xhigh | 执行 milestone-eval 票：前三集微门/大纲定稿门/一卡门/卡二门/卡三门/完本门；rubric+红线；报告分「机内断言/待实测」 |
-| **market-watch 市场监察** | Ops | sonnet/high | 慢频（周）扫榜+平台政策：带日期的题材窗口评估；窗口/政策变化⇒needs-showrunner 票。evaluator 市场层打分必须引用其评估（过期⇒inconclusive） |
+| **market-watch 市场监察** | Ops | sonnet/high | 立项后、Story Designer 前建立带日期市场基线；此后仅显式里程碑/发行条件/新投喂触发刷新。窗口或政策变化⇒needs-showrunner 票；过期评估⇒inconclusive |
 | **reflect** | Reflect | opus/xhigh | retro + lessons 策展（机制原样） |
 | **sweep** | Sweep | sonnet/high | 生命周期卫生（机制原样 + 本设计新增票类的错标规则） |
 | **add-script**（skill） | add-project | — | 立项 interview（含合规预筛+受众画像必填）：原创收定位；改编收原著路径+整体建议+权利+Harness 同意，同一次确认自动 source intake，outline 停 source-pending |
@@ -179,7 +179,8 @@ frontmatter 求本 lane 谓词，空则不读 conventions/lessons 直接退出�
 
 **launcher（层③，未来工作，非 v1）**：更彻底的解是补一个 `wl run` 混合 **work-gated
 dispatch**——关键路径（writer→reviewer→门）事件驱动（板出现票才 spawn LLM），背景观察者
-（doctor/market-watch/reflect/sweep）保留 cadence；消除空跑 boot **与** ~100min handoff 延迟。
+（doctor/reflect/sweep）保留 cadence；market-watch 改为一次基线+事件触发；消除空跑 boot
+**与** ~100min handoff 延迟。
 契约：dispatcher **advisory + 保守**，agent 自己的 §5/§21 拾取仍是唯一真相源（同 §24 Codex
 「advisory 绝不权威」）。诚实边界：launcher 不加速写作本身（keystone designer 串行、
 15-20min/集，wall-clock work-bound），只消 idle boot + 跳间等待 + 两个 stall

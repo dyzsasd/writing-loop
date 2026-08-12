@@ -161,7 +161,8 @@
 - **敏感题材**：时政/宗教/民族相关内容一律回避；医疗/法律等职业剧不得教唆
   可模仿的危险行为。
 - **平台政策项**：立项时由 market-watch 的政策快照确定当期打压题材清单，
-  写入 north-star Non-goals；生产中政策变化由 market-watch 触发 needs-showrunner 票。
+  写入 north-star Non-goals；发行条件变化时由操作者/Showrunner 建显式 market-watch
+  刷新票，确认的新政策再触发 needs-showrunner 票。
 
 ## R11 改编技法（小说 → 短剧，`add-script` 改编立项用）
 

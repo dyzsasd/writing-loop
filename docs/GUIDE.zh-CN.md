@@ -129,7 +129,7 @@ skipped 不会被当作 pass，机器全绿仍须 Showrunner 独立验收。
 /writing-loop:source-analyst-agent    # 先做有界原著筛选并交付限量改编素材
 /writing-loop:showrunner-agent       # 验收拆书门；通过后才解锁 outline
 /writing-loop:story-designer-agent    # 写 story/outline.v1.json + story/assets.v1.json
-/writing-loop:market-watch-agent      # 带日期的题材窗口评估——大纲定稿门的市场层评分依赖它；缺数据时该项 inconclusive，红线类会人工停靠等你补
+/writing-loop:market-watch-agent      # 立项市场基线；仅在里程碑、发行条件或投喂资料变化时显式刷新
 /writing-loop:evaluator-agent         # 大纲定稿门（市场层+内容层预评+合规）
 /writing-loop:episode-writer-agent    # 按集号顺序写正文；keystone 集由 story-designer 亲写
 /writing-loop:reviewer-agent          # 逐集独立审读（三分类 + 邻集对读 + 每条论断带原文引用），fail 走三级回炉

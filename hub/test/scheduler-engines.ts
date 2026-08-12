@@ -273,7 +273,7 @@ function testSpecs060Defaults(): void {
     "evaluator":      ["opus",   "xhigh",   600, 2400, 40],
     "sweep":          ["sonnet", "high",   1800, 1200, 50],
     "script-doctor":  ["opus",   "xhigh",  7200, 2400, 60],
-    "market-watch":   ["sonnet", "high",  14400, 1200, 70],
+    "market-watch":   ["sonnet", "high",    300, 1200, 70],
     "reflect":        ["opus",   "xhigh", 14400, 2400, 80],
   };
   const got: typeof want = {};

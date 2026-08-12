@@ -210,7 +210,7 @@ tableau + le repo. Pilotez-les dans l'ordre naturel, ou pointez un `cron` extern
 /writing-loop:reviewer-agent           # vérification indépendante par épisode (classification à trois voies, assertions citées)
 /writing-loop:evaluator-agent          # exécute les portes milestone-eval (verrou du plan, pack premier-paywall, finale …)
 /writing-loop:script-doctor-agent      # audit lent, rotatif, au niveau de la série
-/writing-loop:market-watch-agent       # veille hebdomadaire des tendances + politiques de plateforme
+/writing-loop:market-watch-agent       # base marché initiale ; actualisation seulement à un jalon explicite
 /writing-loop:reflect-agent            # rétro quotidienne + curation des leçons
 /writing-loop:sweep-agent              # hygiène du tableau, réparation d'étiquetage, récupération des orphelins
 ```

@@ -75,7 +75,7 @@ export const AGENT_SPECS: ReadonlyArray<readonly [string, string, string, number
   ["evaluator",      "opus",   "xhigh",   600,  2400, 40],
   ["sweep",          "sonnet", "high",   1800,  1200, 50],
   ["script-doctor",  "opus",   "xhigh",  7200,  2400, 60],
-  ["market-watch",   "sonnet", "high",  14400,  1200, 70],
+  ["market-watch",   "sonnet", "high",    300,  1200, 70],
   ["reflect",        "opus",   "xhigh", 14400,  2400, 80],
 ];
 export const AGENT_ORDER: readonly string[] = AGENT_SPECS.map((s) => s[0]);
@@ -100,7 +100,7 @@ export const CODEX_EFFORT_MAP: Readonly<Record<string, string>> = { max: "xhigh"
 // 认证集的三处放行及理由：
 // - external_directory：板目录是 repo 外的兄弟目录（conventions §11），等价 claude
 //   车道的 --add-dir；
-// - webfetch / websearch：market-watch 周频扫榜需要出网。
+// - webfetch / websearch：market-watch 建立或显式刷新市场基线需要出网。
 // 其余逐字沿用 dev-loop 认证集。可被 config scheduler.opencodePermission 整对象覆盖
 // （不做 deep-merge）。
 export const OPENCODE_PERMISSION_DEFAULT: Readonly<Record<string, string>> = {
@@ -370,8 +370,9 @@ export function resolveTier(sched: Sched, agent: string, boardDir: string): { mo
 //    可证明的空，不是含糊。
 // ② 每个谓词并入对应 SKILL §0 的全部逃逸口：Ⅰ needs-\*（§4 闭集——仅 designer/reviewer/
 //    showrunner 存在入口）；Ⅱ 孤儿（认领陈旧 >60min，§7；updated 缺失/未来戳 = stale-可疑
-//    立即命中，§18 时钟纪律）；Ⅲ 报告结算（十个角色的 SKILL §0 全都有，reportsEscape 统一
-//    并入）；Ⅳ doc-watch + 里程碑监测（仅 showrunner——板快照哈希 + north-star 哈希承载）。
+//    立即命中，§18 时钟纪律）；Ⅲ 报告结算（reportsEscape 统一并入；market-watch 只响应
+//    人工点评，不因 weekly/monthly 汇总窗口自动唤醒）；Ⅳ doc-watch + 里程碑监测（仅
+//    showrunner——板快照哈希 + north-star 哈希承载）。
 // ③ showrunner 的变化检测基线只在其 fire **干净退出**（exit 0 且未超时）后提交；崩溃/
 //    超时 ⇒ 基线清空 ⇒ 下次求值恒「已变」。孤儿老化这类纯墙钟转变对快照不可见——由
 //    sweep 的 30min 兜底节拍回收孤儿后经板写唤醒（SKILL 同款设计：sweep 是系统兜底）。
@@ -395,7 +396,6 @@ const CLAIM_STALE_MS = 60 * 60_000;       // §7 认领陈旧阈值（60min）
 const KEYSTONE_STALL_MS = 30 * 60_000;    // §1 keystone-stall 护栏阈值（默认 30min）
 const SWEEP_CADENCE_MS = 30 * 60_000;     // sweep 兜底节拍（SKILL §0 cadence gate，30min 级）
 const PARK_REMIND_MS = 24 * 60 * 60_000;  // §9 停靠 24h 重提醒
-const MARKET_WEEK_MS = 7 * 24 * 60 * 60_000;   // market-watch 周频窗口
 const RETRO_WINDOW_MS = 24 * 60 * 60_000;      // reflect 日频窗口
 const CLOCK_SKEW_MS = 2 * 60_000;         // 容忍的正向时钟偏差；再往后即未来戳 = stale-可疑（§18）
 
@@ -670,7 +670,8 @@ export function laneSourceAnalyst(tickets: LaneTicket[], nowMs: number): string[
 // punch-up 全在本切片；**不排除 blocked**——SKILL 谓词原文未排除，与 evaluator 同口径）
 // ∪ Ⅰ needs-designer 求助（节拍修正提案裁决——非终态即有活）∪
 // Ⅱ孤儿。不按生产阶段收窄（SKILL 明令：量产段仍需接 keystone/下一 arc）。
-export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number): string[] {
+export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number, marketReady = true): string[] {
+  if (!marketReady) return [];
   const hits: string[] = [];
   const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("story-designer")
     && !t.labels.includes("source-analysis"));
@@ -785,14 +786,20 @@ export function laneSweep(
   return hits;
 }
 
-// market-watch（SKILL §0 cadence gate，零板依赖）：state/market-state.json 的 lastRun
-// 周频到期 ∨ marketDataPath 有新内容（mtime 越过 lastRun）∨ state 缺失/不可读（保守
-// spawn）。Ⅰ needs-\* 不适用（无求助入口）。
-export function laneMarketWatch(nowMs: number, lastRunMs: number | null, dataNewestMs: number | null): string[] {
-  if (lastRunMs === null) return ["market-state.json 缺失/lastRun 不可解析——保守 spawn"];
+// market-watch（SKILL §0 milestone gate）：每个项目先建立一次市场基线；此后只有显式
+// Todo+market-watch 请求、孤儿恢复，或 marketDataPath 有新内容才复跑。时间流逝本身
+// 不是创作期刷新理由，避免数日写作冲刺中反复花 token、扰动既定方向。
+export function laneMarketWatch(
+  tickets: LaneTicket[], nowMs: number, lastRunMs: number | null, dataNewestMs: number | null,
+): string[] {
   const hits: string[] = [];
+  if (lastRunMs === null) hits.push("项目尚无市场基线（market-state lastRun 缺失/不可解析）");
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("market-watch"));
+  if (todo) hits.push(fmtHit("显式市场研究请求（Todo+market-watch）", todo));
+  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("market-watch") && orphaned(t, nowMs));
+  if (orphan) hits.push(fmtHit("孤儿 In Progress market-watch（§7）", orphan));
+  if (lastRunMs === null) return hits;
   if (lastRunMs > nowMs + CLOCK_SKEW_MS) hits.push("lastRun 是未来戳——stale-可疑（§18 时钟纪律）");
-  else if (nowMs - lastRunMs >= MARKET_WEEK_MS) hits.push("周频到期（距上次 ≥7 天）");
   if (dataNewestMs !== null && dataNewestMs > lastRunMs) hits.push("marketDataPath 有新内容（mtime 越过 lastRun）");
   return hits;
 }
@@ -842,7 +849,9 @@ export function lastMonthlyBoundaryMs(nowMs: number): number {
   const d = new Date(nowMs);
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
 }
-export function reportsEscape(reportsDir: string, nowMs: number, lastCleanEndMs: number | null): string | null {
+export function reportsEscape(
+  reportsDir: string, nowMs: number, lastCleanEndMs: number | null, includePeriodicRollups = true,
+): string | null {
   let names: string[];
   try { names = readdirSync(reportsDir); }
   catch (e) {
@@ -861,7 +870,7 @@ export function reportsEscape(reportsDir: string, nowMs: number, lastCleanEndMs:
       try { dailyMtimes.push(statSync(p).mtimeMs); } catch { /* 消失中的文件忽略 */ }
     }
   }
-  if (dailyMtimes.length) {
+  if (includePeriodicRollups && dailyMtimes.length) {
     const wk = lastWeeklyBoundaryMs(nowMs);
     const mo = lastMonthlyBoundaryMs(nowMs);
     if ((lastCleanEndMs === null || lastCleanEndMs < wk) && dailyMtimes.some((m) => m < wk)) {
@@ -1005,6 +1014,16 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   const sourceAnalysisFocused = snap.tickets.some((ticket) =>
     (ticket.state === "Todo" || ticket.state === "In Progress")
     && ticket.labels.includes("source-analysis"));
+  const marketRaw = stateStr(readStateJson(join(io.projData, "state", "market-state.json")), "lastRun");
+  const marketLastRunMs = marketRaw === null ? NaN : Date.parse(marketRaw);
+  const marketAssessmentExists = existsSync(join(io.projData, "state", "market-assessment.md"));
+  const marketDataNewestMs = io.marketDataPath ? newestMtimeUnder(io.marketDataPath) : null;
+  const marketFeedPending = !Number.isNaN(marketLastRunMs) && marketDataNewestMs !== null
+    && marketDataNewestMs > marketLastRunMs;
+  const marketRefreshPending = snap.tickets.some((ticket) => !TERMINAL_STATES.has(ticket.state)
+    && ticket.labels.includes("market-watch"));
+  const marketBaselineReady = !Number.isNaN(marketLastRunMs)
+    && marketAssessmentExists && !marketRefreshPending && !marketFeedPending;
   const reasons: string[] = [];
   // frontmatter 边缘形态/板不可读 ⇒ 对**全部** agent 保守放行——统一的安全不变量：
   // 解析不出的票可能属于任何 lane，agent 侧探针（LLM 解析更宽容）是修复它的机会。
@@ -1023,7 +1042,7 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       reasons.push(...laneSourceAnalyst(snap.tickets, nowMs));
       break;
     case "story-designer":
-      reasons.push(...laneStoryDesigner(snap.tickets, nowMs));
+      reasons.push(...laneStoryDesigner(snap.tickets, nowMs, marketBaselineReady));
       break;
     case "reviewer": {
       // Job C change-gate 现行判据（reviewer-state gateNote 现场裁定，fire #177 实测）：
@@ -1060,10 +1079,9 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       break;
     }
     case "market-watch": {
-      const raw = stateStr(readStateJson(statePath("market-state.json")), "lastRun");
-      const parsed = raw === null ? NaN : Date.parse(raw);
-      const newest = io.marketDataPath ? newestMtimeUnder(io.marketDataPath) : null;
-      reasons.push(...laneMarketWatch(nowMs, Number.isNaN(parsed) ? null : parsed, newest));
+      reasons.push(...laneMarketWatch(snap.tickets, nowMs,
+        Number.isNaN(marketLastRunMs) || !marketAssessmentExists ? null : marketLastRunMs,
+        marketDataNewestMs));
       break;
     }
     case "script-doctor": {
@@ -1095,7 +1113,9 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
     default:
       reasons.push(`未知 agent '${agent}'——保守放行`);
   }
-  const rep = reportsEscape(join(io.projData, "reports"), nowMs, lastClean);
+  // Market Watch 是立项基线 + 显式里程碑角色：旧 daily 报告跨周/月不得把它重新唤醒。
+  // 人工 *.review.md 仍是明确输入，保留一次结算机会。
+  const rep = reportsEscape(join(io.projData, "reports"), nowMs, lastClean, agent !== "market-watch");
   if (rep) reasons.push(`逃逸口Ⅲ：${rep}`);
   return { open: reasons.length > 0, reasons, boardHash, northStarHash };
 }

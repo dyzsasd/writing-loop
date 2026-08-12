@@ -173,7 +173,7 @@ Studio SSE 的 event ID 由稳定 snapshot 与各项目持久 index revision 共
 /writing-loop:reviewer-agent            # 逐集独立验收（三分类、断言带正文引文）
 /writing-loop:evaluator-agent           # 执行里程碑门（大纲定稿、一卡包、完本…）
 /writing-loop:script-doctor-agent       # 慢频轮换维度的剧级审计
-/writing-loop:market-watch-agent        # 周频扫榜 + 平台政策监察
+/writing-loop:market-watch-agent        # 建立市场基线；仅在里程碑/发行条件变化时刷新
 /writing-loop:reflect-agent             # 日频 retro + lessons 策展
 /writing-loop:sweep-agent               # 板生命周期卫生：错标修复、孤儿回收
 ```

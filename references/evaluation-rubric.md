@@ -66,7 +66,8 @@
   human-park**（行业失败第一梯队，每道门都查——rubric 原表未列，writing-loop 增补为第 7 线）
 
 **数据依赖纪律**：市场层四指标与红线②③④需要外部数据（榜单/政策/投放）。evaluator
-打分必须引用 market-watch 的带日期评估（超 2 周 ⇒ inconclusive）；无数据源时输出
+打分必须引用 market-watch 的带日期评估（超 2 周 ⇒ 先建显式 market-watch 刷新票，
+完成前 inconclusive）；无数据源时输出
 「无法评估 + 置疑」，禁止用模型先验编造分数。
 
 ## 定级与决策

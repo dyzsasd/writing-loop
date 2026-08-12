@@ -241,7 +241,7 @@ them in the natural order, or point external `cron` at them:
 /writing-loop:reviewer-agent           # independent per-episode verification (three-way classification, cited assertions)
 /writing-loop:evaluator-agent          # runs milestone-eval gates (outline lock, first-paywall pack, finale …)
 /writing-loop:script-doctor-agent      # slow-cadence rotating series-level audit
-/writing-loop:market-watch-agent       # weekly trend + platform-policy watch
+/writing-loop:market-watch-agent       # establish the market baseline; refresh only on explicit milestones
 /writing-loop:reflect-agent            # daily retro + lessons curation
 /writing-loop:sweep-agent              # board hygiene, mislabel repair, orphan recovery
 ```

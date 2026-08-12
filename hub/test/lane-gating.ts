@@ -268,13 +268,18 @@ function testSweep(): void {
 }
 
 function testMarketWatch(): void {
-  check("market 保守：state 缺失/lastRun 不可解析 ⇒ spawn", laneMarketWatch(NOW, null, null).length > 0);
-  check("market 正例：周频到期（≥7 天）", laneMarketWatch(NOW, NOW - 8 * DAY, null).length > 0);
-  check("market 反例：未到周频且无投喂 ⇒ 空", laneMarketWatch(NOW, NOW - DAY, null).length === 0);
+  check("market 基线：state 缺失/lastRun 不可解析 ⇒ spawn", laneMarketWatch([], NOW, null, null).length > 0);
+  check("market 反例：仅时间流逝一年也不自动复跑", laneMarketWatch([], NOW, NOW - 365 * DAY, null).length === 0);
+  check("market 正例：显式 Todo+market-watch 请求", laneMarketWatch([
+    tk({ state: "Todo", labels: ["writing-loop", "market-watch"] }),
+  ], NOW, NOW - DAY, null).length > 0);
+  check("market 正例：孤儿 In Progress 可恢复", laneMarketWatch([
+    tk({ state: "In Progress", labels: ["writing-loop", "market-watch"], assignee: "market-watch", updatedMs: NOW - 2 * HOUR }),
+  ], NOW, NOW - DAY, null).length > 0);
   check("market 正例：marketDataPath 有新内容（mtime 越过 lastRun）",
-    laneMarketWatch(NOW, NOW - DAY, NOW - HOUR).length > 0);
-  check("market 反例：投喂内容早于 lastRun ⇒ 空", laneMarketWatch(NOW, NOW - DAY, NOW - 2 * DAY).length === 0);
-  check("market 正例：lastRun 未来戳 ⇒ stale-可疑命中", laneMarketWatch(NOW, NOW + DAY, null).length > 0);
+    laneMarketWatch([], NOW, NOW - DAY, NOW - HOUR).length > 0);
+  check("market 反例：投喂内容早于 lastRun ⇒ 空", laneMarketWatch([], NOW, NOW - DAY, NOW - 2 * DAY).length === 0);
+  check("market 正例：lastRun 未来戳 ⇒ stale-可疑命中", laneMarketWatch([], NOW, NOW + DAY, null).length > 0);
 }
 
 function testScriptDoctor(): void {
@@ -455,6 +460,7 @@ function testStateAndGitSeams(): void {
   // market：真实投喂文件 mtime × lastRun
   writeFileSync(join(w.projData, "state", "market-state.json"),
     JSON.stringify({ lastRun: new Date(NOW - DAY).toISOString() }));
+  writeFileSync(join(w.projData, "state", "market-assessment.md"), "# 市场基线\n");
   const feed = join(w.ws, "market-feed");
   mkdirSync(feed, { recursive: true });
   const feedFile = join(feed, "榜单.md");
@@ -468,6 +474,38 @@ function testStateAndGitSeams(): void {
     writeFileSync(join(w.projData, "state", "market-state.json"), JSON.stringify({ signals: {} }));
     return evalLaneGate("market-watch", w.io()).open;
   })());
+  writeFileSync(join(w.projData, "state", "market-state.json"),
+    JSON.stringify({ lastRun: new Date(NOW - 365 * DAY).toISOString() }));
+  check("market：基线再旧也不会仅因时间流逝而 open", !evalLaneGate("market-watch", w.io()).open);
+  const reportsDir = join(w.projData, "reports");
+  mkdirSync(reportsDir, { recursive: true });
+  const oldDaily = join(reportsDir, "2026-07-01.md");
+  writeFileSync(oldDaily, "# old daily\n");
+  touch(oldDaily, NOW - 14 * DAY);
+  check("market：旧日报跨周/月也不会自动唤醒 LLM",
+    !evalLaneGate("market-watch", w.io({ lastCleanEndMs: NOW - 14 * DAY })).open);
+  const operatorReview = join(reportsDir, "market.review.md");
+  writeFileSync(operatorReview, "请按新的发行平台刷新市场基线。\n");
+  touch(operatorReview, NOW - HOUR);
+  check("market：人工点评仍是明确刷新输入",
+    evalLaneGate("market-watch", w.io({ lastCleanEndMs: NOW - 2 * HOUR })).open);
+  rmSync(operatorReview);
+
+  const storyTicket = join(w.boardDir, "WL-STORY.md");
+  mkdirSync(w.boardDir, { recursive: true });
+  writeFileSync(storyTicket, `---\nid: WL-STORY\ntitle: 设计第一季\nstate: Todo\nowner: story-designer\n` +
+    `labels: [writing-loop, Feature, story-designer]\nassignee: null\nupdated: 2026-07-15T11:00:00Z\n---\n`);
+  rmSync(join(w.projData, "state", "market-assessment.md"), { force: true });
+  check("story-designer：市场基线缺失时即使有 Todo 也 gated", !evalLaneGate("story-designer", w.io()).open);
+  check("market：只有 lastRun 而评估正文缺失时重新建立基线", evalLaneGate("market-watch", w.io()).open);
+  writeFileSync(join(w.projData, "state", "market-assessment.md"), "# 市场基线\n");
+  check("story-designer：市场基线形成后 Todo lane 打开", evalLaneGate("story-designer", w.io()).open);
+  check("story-designer：新投喂资料尚未刷新时保持 gated", !evalLaneGate("story-designer", w.io({ marketDataPath: feed })).open);
+  const marketTicket = join(w.boardDir, "WL-MARKET.md");
+  writeFileSync(marketTicket, `---\nid: WL-MARKET\ntitle: 更新发行市场\nstate: Todo\nowner: market-watch\n` +
+    `labels: [writing-loop, Improvement, market-watch]\nassignee: null\nupdated: 2026-07-15T11:00:00Z\n---\n`);
+  check("story-designer：显式市场更新未完成时保持 gated", !evalLaneGate("story-designer", w.io()).open);
+  check("market：显式市场更新 Ticket 立即打开", evalLaneGate("market-watch", w.io()).open);
 
   // reflect：字段别名与到期
   writeFileSync(join(w.projData, "state", "reflect-state.json"),

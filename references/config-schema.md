@@ -273,7 +273,7 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //    "question":"deny","doom_loop":"deny"}
                                           //   相对 dev-loop 认证集三处放行：external_directory——板是 repo 外
                                           //   兄弟目录（§11），等价 claude 车道的 --add-dir；webfetch/websearch——
-                                          //   market-watch 周频扫榜需要出网。其余逐字沿用 dev-loop 认证集
+                                          //   market-watch 建立/显式刷新市场基线需要出网。其余逐字沿用 dev-loop 认证集
     "laneGating": true,                   // 0.6.0 调度器门控层（work-gated dispatch）总开关——操作者
                                           //   2026-07-19 裁定①「no-op 判定移到调度器」的实装：每次到点起
                                           //   fire 前按该 agent SKILL §0 的 lane 谓词做纯函数求值（板
@@ -315,7 +315,9 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   evaluator      opus/xhigh  600s   cap 2400  stagger 40
                                           //   sweep          sonnet/high 1800s  cap 1200  stagger 50
                                           //   script-doctor  opus/xhigh  7200s  cap 2400  stagger 60
-                                          //   market-watch   sonnet/high 14400s cap 1200  stagger 70
+                                          //   market-watch   sonnet/high 300s   cap 1200  stagger 70
+                                          //     （5min 仅为本地 milestone gate 响应延迟；基线完成且无
+                                          //      market-watch Ticket/新投喂时零 LLM spawn）
                                           //   reflect        opus/xhigh  14400s cap 2400  stagger 80
       "episode-writer": {
         "model": "sonnet",                // 档位取值优先序（低→高）：SPECS 默认 < workspace scheduler

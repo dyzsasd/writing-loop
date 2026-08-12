@@ -165,7 +165,7 @@ rôle a de prêt, ou ne fait rien. Ils se passent le relais **uniquement par les
 /writing-loop:source-analyst-agent    # sélection source bornée et dossier de preuves plafonné
 /writing-loop:showrunner-agent       # accepte la porte source, puis seulement déverrouille outline
 /writing-loop:story-designer-agent    # écrit story/outline.v1.json + story/assets.v1.json
-/writing-loop:market-watch-agent      # évaluation datée de la fenêtre de genre — la couche marché de la porte de verrou du plan en dépend ; données manquantes = item inconclusive, et les cas ligne-rouge se garent en attendant que vous les fournissiez
+/writing-loop:market-watch-agent      # base marché du projet ; actualisation seulement à un jalon, un changement de diffusion ou avec de nouvelles données
 /writing-loop:evaluator-agent         # porte de verrou du plan (marché + pré-notation contenu + conformité)
 /writing-loop:episode-writer-agent    # écrit les épisodes dans l'ordre ; les épisodes pivots sont écrits par le Story-Designer
 /writing-loop:reviewer-agent          # révision indépendante par épisode (classification à trois voies + lecture adjacente + assertions citées) ; les échecs routent de trois façons

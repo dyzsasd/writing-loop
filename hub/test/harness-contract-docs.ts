@@ -23,6 +23,7 @@ const episodeWriter = read("skills", "episode-writer-agent", "SKILL.md");
 const reviewer = read("skills", "reviewer-agent", "SKILL.md");
 const reflect = read("skills", "reflect-agent", "SKILL.md");
 const scriptDoctor = read("skills", "script-doctor-agent", "SKILL.md");
+const marketWatch = read("skills", "market-watch-agent", "SKILL.md");
 const pluginDescriptions = [
   read(".claude-plugin", "plugin.json"),
   read(".claude-plugin", "marketplace.json"),
@@ -145,6 +146,13 @@ ok(read("references", "conventions.md").includes(".writing-loop/system/proposals
   && read("hub", "README.md").includes("/system")
   && guides.every((guide) => guide.includes("writing-loop system proposal list")),
 "规范、schema、Studio 与三语指南固定 workspace 系统收件箱，不把机制改进伪装为剧集 Ticket");
+ok(marketWatch.includes("milestone gate")
+  && marketWatch.includes("绝不因\n  时间流逝自行刷新")
+  && !marketWatch.includes("未到周频")
+  && read("docs", "DESIGN.md").includes("一次基线+事件触发")
+  && read("references", "config-schema.md").includes("market-watch Ticket/新投喂时零 LLM spawn")
+  && guides.every((guide) => !/weekly trend|周频扫榜|veille hebdomadaire/.test(guide)),
+"Market Watch 只建立一次基线并按显式里程碑刷新，不因时间流逝重复消耗 token");
 
 console.log(fails === 0 ? "\nHARNESS_CONTRACT_DOCS_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);
