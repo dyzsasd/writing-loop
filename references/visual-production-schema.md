@@ -76,7 +76,9 @@ H3 v1 不直接消费 Blender depth/normal。约束图用于生成稳定关键�
 - `keyframe-review`：至少一张带 workflow/model/prompt digest 与 seed 的候选图片。
 - `approved`：至少一张候选图由人工标成 `approved`。
 
-候选图必须引用同一机位的 render IDs，且至少有一个 `depth | normal | lineart` 空间约束。这样 Blender
+候选图必须绑定一个精确的机位、灯光状态和陈设版本；引用的所有 render IDs 必须属于同一组合，且
+至少有一个 `depth | normal | lineart` 空间约束。`approved/rejected` 还必须登记 `reviewedBy` 与
+canonical UTC `reviewedAt`，pending candidate 两项必须为 `null`。这样 Blender
 不是一张一次性参考图，而是每次生成都可复验的几何来源。raw prompt、raw workflow、模型路径、任意
 URL、远程凭据和绝对本机路径都不属于 schema。
 

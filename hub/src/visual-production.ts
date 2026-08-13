@@ -39,6 +39,8 @@ export type VisualRenderPass = {
 export type VisualGenerationCandidate = {
   id: string;
   cameraId: string;
+  lightingStateId: string;
+  dressingVariantId: string;
   sourceRenderIds: string[];
   workflowProfileId: string;
   workflowSha256: string;
@@ -47,6 +49,8 @@ export type VisualGenerationCandidate = {
   seed: number;
   asset: AssetRef;
   status: "candidate" | "approved" | "rejected";
+  reviewedBy: string | null;
+  reviewedAt: string | null;
   notes: string;
 };
 export type VisualProductionScene = {
@@ -88,6 +92,7 @@ export class VisualProductionError extends WsError {
 type Obj = Record<string, unknown>;
 const ID = /^[A-Z][A-Z0-9_-]{0,63}$/;
 const PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
+const ACTOR_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA = /^[a-f0-9]{64}$/;
 const isObj = (value: unknown): value is Obj => value !== null && typeof value === "object" && !Array.isArray(value);
 const object = (value: unknown, label: string): Obj => {
@@ -129,6 +134,14 @@ const enumValue = <T extends string>(value: unknown, allowed: readonly T[], labe
 };
 const sha = (value: unknown, label: string): string => {
   if (typeof value !== "string" || !SHA.test(value)) throw new VisualProductionError(`${label} 必须是 64 位小写 sha256`);
+  return value;
+};
+const iso = (value: unknown, label: string): string => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    throw new VisualProductionError(`${label} 必须是 canonical UTC ISO 时间`);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) throw new VisualProductionError(`${label} 无效`);
   return value;
 };
 const unique = <T>(rows: T[], key: (row: T) => string, label: string): void => {
@@ -178,8 +191,8 @@ function parseRender(value: unknown, label: string): VisualRenderPass {
 
 function parseCandidate(value: unknown, label: string): VisualGenerationCandidate {
   const row = object(value, label);
-  exactKeys(row, ["id", "cameraId", "sourceRenderIds", "workflowProfileId", "workflowSha256", "modelSha256",
-    "promptSha256", "seed", "asset", "status", "notes"], label);
+  exactKeys(row, ["id", "cameraId", "lightingStateId", "dressingVariantId", "sourceRenderIds", "workflowProfileId",
+    "workflowSha256", "modelSha256", "promptSha256", "seed", "asset", "status", "reviewedBy", "reviewedAt", "notes"], label);
   if (!Array.isArray(row.sourceRenderIds) || row.sourceRenderIds.length < 1 || row.sourceRenderIds.length > 32) {
     throw new VisualProductionError(`${label}.sourceRenderIds 必须是 1–32 项数组`);
   }
@@ -189,12 +202,22 @@ function parseCandidate(value: unknown, label: string): VisualGenerationCandidat
   if (!PROFILE_ID.test(workflowProfileId)) throw new VisualProductionError(`${label}.workflowProfileId 无效`);
   const asset = parseAsset(row.asset, `${label}.asset`);
   if (!asset.mediaType.startsWith("image/")) throw new VisualProductionError(`${label}.asset 必须是图片 AssetRef`);
-  return { id: id(row.id, `${label}.id`), cameraId: id(row.cameraId, `${label}.cameraId`), sourceRenderIds,
+  const status = enumValue(row.status, ["candidate", "approved", "rejected"] as const, `${label}.status`);
+  let reviewedBy: string | null = null; let reviewedAt: string | null = null;
+  if (status === "candidate") {
+    if (row.reviewedBy !== null || row.reviewedAt !== null) throw new VisualProductionError(`${label} candidate 不能伪造已审核事实`);
+  } else {
+    reviewedBy = text(row.reviewedBy, `${label}.reviewedBy`, 128);
+    if (!ACTOR_ID.test(reviewedBy)) throw new VisualProductionError(`${label}.reviewedBy 无效`);
+    reviewedAt = iso(row.reviewedAt, `${label}.reviewedAt`);
+  }
+  return { id: id(row.id, `${label}.id`), cameraId: id(row.cameraId, `${label}.cameraId`),
+    lightingStateId: id(row.lightingStateId, `${label}.lightingStateId`),
+    dressingVariantId: id(row.dressingVariantId, `${label}.dressingVariantId`), sourceRenderIds,
     workflowProfileId, workflowSha256: sha(row.workflowSha256, `${label}.workflowSha256`),
     modelSha256: sha(row.modelSha256, `${label}.modelSha256`), promptSha256: sha(row.promptSha256, `${label}.promptSha256`),
     seed: integer(row.seed, `${label}.seed`, 0, Number.MAX_SAFE_INTEGER), asset,
-    status: enumValue(row.status, ["candidate", "approved", "rejected"] as const, `${label}.status`),
-    notes: text(row.notes, `${label}.notes`, 1_000) };
+    status, reviewedBy, reviewedAt, notes: text(row.notes, `${label}.notes`, 1_000) };
 }
 
 function parseScene(value: unknown, index: number): VisualProductionScene {
@@ -281,10 +304,15 @@ export function validateVisualProduction(manifest: VisualProductionManifest, bin
       renderSlots.add(slot);
     }
     for (const candidate of scene.candidates) {
-      if (!cameras.has(candidate.cameraId)) throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 引用了不存在的 camera`);
+      if (!cameras.has(candidate.cameraId) || !lighting.has(candidate.lightingStateId) || !dressing.has(candidate.dressingVariantId)) {
+        throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 引用了不存在的 camera/light/dressing`);
+      }
       const sources = candidate.sourceRenderIds.map((source) => renders.get(source));
       if (sources.some((source) => !source)) throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 引用了不存在的 render`);
-      if (sources.some((source) => source!.cameraId !== candidate.cameraId)) throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 混用了其他机位的约束图`);
+      if (sources.some((source) => source!.cameraId !== candidate.cameraId
+        || source!.lightingStateId !== candidate.lightingStateId || source!.dressingVariantId !== candidate.dressingVariantId)) {
+        throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 混用了其他机位、灯光或陈设的约束图`);
+      }
       if (!sources.some((source) => source && ["depth", "normal", "lineart"].includes(source.pass))) {
         throw new VisualProductionError(`${scene.sceneId}/${candidate.id} 缺少 depth/normal/lineart 空间约束`);
       }

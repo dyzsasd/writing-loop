@@ -38,9 +38,11 @@ const manifest: VisualProductionManifest = {
       { id: "R_DEPTH", cameraId: "CAM_EST", lightingStateId: "LIGHT_DAY", dressingVariantId: "DRESS_BASE", pass: "depth", asset: asset("passes/s01-depth.exr", "image/x-exr") },
       { id: "R_LINE", cameraId: "CAM_EST", lightingStateId: "LIGHT_DAY", dressingVariantId: "DRESS_BASE", pass: "lineart", asset: asset("passes/s01-line.png") },
     ],
-    candidates: [{ id: "K_MAIN", cameraId: "CAM_EST", sourceRenderIds: ["R_DEPTH", "R_LINE"],
+    candidates: [{ id: "K_MAIN", cameraId: "CAM_EST", lightingStateId: "LIGHT_DAY", dressingVariantId: "DRESS_BASE",
+      sourceRenderIds: ["R_DEPTH", "R_LINE"],
       workflowProfileId: "keyframe/depth-lineart-v1", workflowSha256: "c".repeat(64), modelSha256: "d".repeat(64),
       promptSha256: "e".repeat(64), seed: 42, asset: asset("approved/s01-main.png"), status: "approved",
+      reviewedBy: "operator:demo", reviewedAt: "2026-08-13T09:00:00.000Z",
       notes: "人工批准的空间与光影基准，不是 H3 输出" }],
   }, {
     sceneId: "S02", phase: "planned", blendAsset: null, geometryRevision: 0,
@@ -95,6 +97,15 @@ const noSpatialConstraint = clone(manifest); noSpatialConstraint.scenes[0]!.rend
 noSpatialConstraint.scenes[0]!.renders[1]!.pass = "pose";
 let constraintRejected = false; try { validateVisualProduction(noSpatialConstraint, binding); } catch { constraintRejected = true; }
 ok(constraintRejected, "候选关键帧缺少 depth/normal/lineart 空间约束时拒绝");
+
+const mixedState = clone(manifest); mixedState.scenes[0]!.renders[0]!.lightingStateId = "LIGHT_OTHER";
+mixedState.scenes[0]!.lightingStates.push({ id: "LIGHT_OTHER", label: "另一灯光", notes: "仅用于混用回归" });
+let mixedRejected = false; try { validateVisualProduction(mixedState, binding); } catch { mixedRejected = true; }
+ok(mixedRejected, "同一候选不能混用另一机位、灯光或陈设状态的约束图");
+
+const fakeApproval = clone(manifest); fakeApproval.scenes[0]!.candidates[0]!.reviewedBy = null;
+let approvalRejected = false; try { parseVisualProductionManifest(fakeApproval); } catch { approvalRejected = true; }
+ok(approvalRejected, "approved/rejected 必须留下操作者与 canonical 审核时间");
 
 const unsafe = clone(manifest); unsafe.scenes[0]!.blendAsset = {
   ...asset("sets/s01.blend", "application/x-blender"), uri: "/Users/operator/scene.blend",
