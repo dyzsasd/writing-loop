@@ -55,7 +55,8 @@ Showrunner、Evaluator、Studio 与确定性质量门直接读取它；不存在
 
 场景精确字段：`id/name/primary/variantOf/reusePlan/productionNotes`。一次性使用的场景必须写
 `reusePlan`；`variantOf` 显式表达同一空间的时代、天气或状态变体。Studio 的美术资产页只从这里
-派生，禁止模型另写会漂移的场景 registry。
+派生，禁止模型另写会漂移的场景 registry。场景进入 Blender 灰模与关键帧制作后，生产状态进入
+[`visual/production.v1.json`](visual-production-schema.md)；该清单只能引用 scene ID，不能复制剧情事实。
 
 节拍精确字段：`id/episode/weight/label/setup/payoff`。`weight` 为 `major | minor`；主节拍之间
 不能超过 `maxBeatGap`。

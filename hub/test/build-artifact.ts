@@ -60,8 +60,8 @@ try {
   ok(existsSync(join(distDir, "source.js")) && existsSync(join(distDir, "source-intake.js")),
   "dist emit source intake CLI / immutable chunking core");
   ok(existsSync(join(distDir, "story.js")) && existsSync(join(distDir, "story-design.js"))
-    && existsSync(join(distDir, "story-assets.js")),
-  "dist emit story quality CLI / strict companion + asset graph/context resolver");
+    && existsSync(join(distDir, "story-assets.js")) && existsSync(join(distDir, "visual-production.js")),
+  "dist emit story quality CLI / strict companion + story/visual asset resolvers");
   ok(existsSync(join(distDir, "system.js")) && existsSync(join(distDir, "system-inbox.js")),
   "dist emit workspace-level system proposal CLI / immutable inbox");
   ok(existsSync(join(distDir, "production-intent.js"))
@@ -114,6 +114,7 @@ try {
     && packed.has("dist/workspace-registry-cli.js") && packed.has("dist/studio-view.js")
     && packed.has("dist/source.js") && packed.has("dist/source-intake.js")
     && packed.has("dist/story.js") && packed.has("dist/story-design.js") && packed.has("dist/story-assets.js")
+    && packed.has("dist/visual-production.js")
     && packed.has("dist/system.js") && packed.has("dist/system-inbox.js")
     && packed.has("dist/production.js") && packed.has("dist/production-domain.js")
     && packed.has("dist/production-store.js") && packed.has("dist/production-read-model.js")
@@ -140,10 +141,11 @@ try {
     && packed.has(packagedH3SmokePath)
     && packed.has("skills/showrunner-agent/SKILL.md")
     && packed.has("references/story-design-schema.md") && packed.has("references/story-assets-schema.md")
+    && packed.has("references/visual-production-schema.md")
     && packed.has("scripts/board-lock.sh")
     && packed.has(".claude-plugin/plugin.json")
     && ![...packed].some((p) => p.endsWith("wl-run.py")),
-    "npm pack 装载 dist + 插件负载 + 自洽 H3 runtime/template/smoke example，且不含 wl-run.py");
+    "npm pack 装载 story/visual resolver + 插件负载 + 自洽 H3 runtime/template/smoke example，且不含 wl-run.py");
 
   // ── AC2：编译产物能跑（.ts→.js 兄弟 import 改写成立） ──
   const ver = run(process.execPath, [join(distDir, "cli.js"), "version"]);

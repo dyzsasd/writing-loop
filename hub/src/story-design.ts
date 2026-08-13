@@ -9,6 +9,10 @@ import {
   readStoryAssetCatalog, validateStoryAssetCatalog, STORY_ASSETS_RELATIVE_PATH,
   type StoryAssetCatalog, type StoryAssetCatalogRead,
 } from "./story-assets.ts";
+import {
+  readVisualProduction, validateVisualProduction, VISUAL_PRODUCTION_RELATIVE_PATH,
+  type VisualProductionManifest,
+} from "./visual-production.ts";
 import { projectEntries, resolveRepoPath, type WlConfig, WsError } from "./workspace.ts";
 
 export const STORY_DESIGN_RELATIVE_PATH = "story/outline.v1.json";
@@ -94,6 +98,8 @@ export type StoryStudioReadModel = {
   };
   story: null | { path: string; sha256: string; manifest: StoryDesignManifest; assets: StoryAssetPlan;
     catalog: null | { path: string; digest: string; manifest: StoryAssetCatalog } };
+  visualProduction: null | { path: string; digest: string; manifest: VisualProductionManifest };
+  visualProductionError: string | null;
   gates: StoryGate[];
   summary: { stage: "source" | StoryDesignStage; passed: number; failed: number; skipped: number; readyForEpisodes: boolean };
   warnings: string[];
@@ -336,6 +342,8 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
     }
   } catch (error) { warnings.push(`原著状态不可读：${error instanceof Error ? error.message : String(error)}`); }
   let story: StoryStudioReadModel["story"] = null;
+  let visualProduction: StoryStudioReadModel["visualProduction"] = null;
+  let visualProductionError: string | null = null;
   let gates: StoryGate[] = [];
   const entry = projectEntries(config).find(([candidate]) => candidate === key);
   if (!entry) throw new StoryDesignError(`config.json 无项目 '${key}'`);
@@ -375,6 +383,16 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
       story = { path: STORY_DESIGN_RELATIVE_PATH, sha256: read.sha256, manifest: read.manifest,
         assets: deriveStoryAssets(read.manifest), catalog: catalog ? { path: STORY_ASSETS_RELATIVE_PATH,
           digest: catalog.digest, manifest: catalog.manifest } : null };
+      try {
+        const visual = readVisualProduction(repo);
+        if (visual) {
+          validateVisualProduction(visual.manifest, { project: key, storyDesignSha256: read.sha256,
+            scenes: read.manifest.scenes.map((scene) => ({ id: scene.id, variantOf: scene.variantOf })) });
+          visualProduction = { path: VISUAL_PRODUCTION_RELATIVE_PATH, digest: visual.digest, manifest: visual.manifest };
+        }
+      } catch (error) {
+        visualProductionError = error instanceof Error ? error.message : String(error);
+      }
     }
     else gates = [gate("S00", "结构化故事资产已建立", "skeleton", "fail", `等待 story-designer 创建 ${STORY_DESIGN_RELATIVE_PATH}`)];
   } catch (error) { gates = [gate("S00", "结构化故事资产可解析", "skeleton", "fail", error instanceof Error ? error.message : String(error))]; }
@@ -389,6 +407,6 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
   const stage: StoryStudioReadModel["summary"]["stage"] = source && source.phase !== "review-ready" ? "source"
     : !story ? "skeleton" : story.manifest.episodes.length === story.manifest.parameters.totalEpisodes ? "full"
       : story.manifest.beats.length ? "beats" : "skeleton";
-  return { version: 1, project: key, source, story, gates,
+  return { version: 1, project: key, source, story, visualProduction, visualProductionError, gates,
     summary: { stage, passed, failed, skipped, readyForEpisodes: story !== null && failed === 0 && stage === "full" }, warnings };
 }

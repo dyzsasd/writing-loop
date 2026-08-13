@@ -135,6 +135,12 @@ Les améliorations du framework, du scheduler et des skills communs vont dans la
 `writing-loop system proposal list` expose les mêmes enregistrements immuables `WLSYS-*` ;
 un ticket projet reste réservé à un travail dont la destination est le produit narratif.
 
+Le bureau artistique peut aussi lire le companion strict
+[`visual/production.v1.json`](references/visual-production-schema.md), lié au digest du récit. Il
+associe les scènes existantes aux révisions Blender, caméras fixes, passes depth/normal/lineart et
+images-clés approuvées, sans recopier les faits narratifs. Les gros fichiers restent hors Git et ne
+sont référencés que par des `AssetRef` immuables ; cette couche n'active jamais H3/GPU seule.
+
 Dans un projet, Studio suit les responsabilités créatives : **Vue d'ensemble / Analyse de
 la source / Architecture / Timeline / Assets narratifs / Personnages / Assets visuels / Épisodes et qualité**. La vue source
 n'affiche que les empreintes locales, la fenêtre de saison et les checkpoints des chunks —

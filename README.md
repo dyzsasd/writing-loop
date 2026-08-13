@@ -127,6 +127,13 @@ import into, or start video-creation-studio. Treat every emitted `AssetRef.uri` 
 an opaque identity: only a trusted scheme-and-authority allowlist resolver may open
 it, and consumers must never pass an arbitrary `https:` URI directly to `fetch`.
 
+Studio's art desk can additionally read the strict, story-bound
+[`visual/production.v1.json`](references/visual-production-schema.md) companion. It maps existing
+scene IDs to Blender geometry revisions, fixed cameras, depth/normal/lineart passes and
+human-approved keyframes without duplicating story facts. Large `.blend`, EXR and image files stay
+outside Git and are referenced only by immutable `AssetRef`s; this planning/review layer never
+starts ComfyUI, H3 or a GPU by itself.
+
 `init` gives the workspace a durable opaque ID in
 `.writing-loop/workspace.json` and attempts to register its canonical path in the
 bounded, machine-local registry at `$WRITING_LOOP_HOME/workspaces.json` (default:

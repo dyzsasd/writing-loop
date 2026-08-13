@@ -116,6 +116,9 @@ plan/create/verify 边界。自动立项只
 不可变 `WLSYS-*` 记录；项目 Ticket 只承载目的地确实属于该故事产品的工作。
 
 项目内部现在按创作职责分为 **概览 / 原著分析 / 全季结构 / 时间线 / 人物与世界 / 美术资产 / 分集与质量**。
+美术资产页支持独立的 Blender 预演生产清单：它把结构场景映射为布景版本、固定机位、
+Depth/Normal/Lineart 等约束通道和人工批准关键帧；大型二进制只以 AssetRef 登记，不复制剧情事实。
+详见 [`references/visual-production-schema.md`](references/visual-production-schema.md)。
 原著页只显示本地指纹、选中窗口和逐块 checkpoint，不回显正文；Story Designer 维护季结构、
 人物、世界规则、地点、道具、伏笔、连续性及“真实发生顺序 × 观众揭示顺序”。其底层结构化
 序列化对编剧透明，不进入项目 Ticket。Harness 按 ticket、
