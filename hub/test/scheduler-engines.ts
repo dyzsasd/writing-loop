@@ -1,6 +1,7 @@
-// scheduler 引擎车道自测（0.4.0 奇偶校验 + 本轮新车道）：
+// scheduler 引擎车道自测（Claude 0.4.0 奇偶校验 + 当前 Codex 映射 + 本轮新车道）：
 //   1. 0.4.0 字节奇偶校验：cli=claude/codex 默认配置（slash promptMode）下渲染的 argv
-//      逐 token 不变（斜杠 prompt、flag 顺序、codex 的 opus/max→gpt-5.5/xhigh 映射）
+//      形状稳定（斜杠 prompt、flag 顺序、codex 的 opus/max→gpt-5.6-sol/max 与
+//      sonnet/high→gpt-5.6-terra/high 映射）
 //   2. opencode 车道：argv 形状、Claude 档位名不传 -m、provider/model 形才传 -m、
 //      effort 原样 --variant（不 clamp）、dry-run 截断展示 prompt + 打印权限摘要
 //   3. OPENCODE_PERMISSION 注入 spawn env：合法 JSON、wildcard-deny 基线含三处放行、
@@ -85,7 +86,7 @@ function dryCmds(stdout: string): Record<string, string> {
 }
 
 // ---------------------------------------------------------------------------
-// 1. 0.4.0 字节奇偶校验：默认配置（slash promptMode）下 claude/codex 渲染逐 token 不变
+// 1. 默认配置（slash promptMode）下 Claude 奇偶校验 + 当前 Codex 映射
 // ---------------------------------------------------------------------------
 function testArgvParity040(): void {
   const project = { repoPath: "t1" };
@@ -99,11 +100,19 @@ function testArgvParity040(): void {
     `argv=${JSON.stringify(r.argv)}`);
   sched.cli = "codex";
   r = fireArgv(sched, "showrunner", "opus", "max", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
-  check("奇偶校验：cli=codex 默认渲染 argv 与 0.4.0 逐 token 一致（含 opus/max→gpt-5.5/xhigh 映射）",
+  check("codex 映射：opus/max→gpt-5.6-sol/max",
     JSON.stringify(r.argv) === JSON.stringify([
       "codex", "exec", "-C", "/abs/repo", "--dangerously-bypass-approvals-and-sandbox",
-      "--skip-git-repo-check", "--model", "gpt-5.5", "-c", 'model_reasoning_effort="xhigh"',
+      "--skip-git-repo-check", "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="max"',
       "/writing-loop:showrunner-agent",
+    ]) && r.inlinePrompt === null,
+    `argv=${JSON.stringify(r.argv)}`);
+  r = fireArgv(sched, "episode-writer", "sonnet", "high", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
+  check("codex 映射：sonnet/high→gpt-5.6-terra/high",
+    JSON.stringify(r.argv) === JSON.stringify([
+      "codex", "exec", "-C", "/abs/repo", "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check", "--model", "gpt-5.6-terra", "-c", 'model_reasoning_effort="high"',
+      "/writing-loop:episode-writer-agent",
     ]) && r.inlinePrompt === null,
     `argv=${JSON.stringify(r.argv)}`);
 }
@@ -127,7 +136,7 @@ function testOpencodeDryRun(): void {
     `sr=${sr.slice(0, 80)} rv=${rv.slice(0, 80)}`);
   check("opencode：Claude 档位名（opus）不传 -m（落 opencode 默认模型）", !` ${sr}`.includes(" -m "), `cmd=${sr.slice(0, 120)}`);
   check("opencode：provider/model 形（含 /）传 -m", rv.includes("-m anthropic/claude-opus-4"), `cmd=${rv.slice(0, 120)}`);
-  check("opencode：effort 原样 --variant（max 不做 codex 的 xhigh clamp）",
+  check("opencode：effort 原样 --variant（不做 codex effort 映射）",
     sr.includes("--variant max") && rv.includes("--variant high") && !sr.includes("xhigh"));
   check("opencode：dry-run 截断展示 prompt（120 字符 + …[N chars]）",
     sr.includes("…[") && sr.includes("chars]") && sr.includes("【writing-loop 调度器上下文】"));

@@ -326,7 +326,7 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   < 项目 models/efforts 映射 < 项目 scheduler。
                                           //   cli=opencode 时取 provider/model 形（含 "/"，如 "openrouter/…"）——
                                           //   Claude 档位名（opus/sonnet…）绝不透传 opencode（省略 -m 落其默认）
-        "effort": "high",                 //   effort：codex 换算 reasoning effort（max→xhigh）；
+        "effort": "high",                 //   effort：codex 换算 reasoning effort（GPT-5.6 保留 max）；
                                           //   opencode 原样传 --variant（不换算）
         "intervalSeconds": 180,           // 上一 fire 结束 → 下一 fire 开始的间隔（非固定频率）
         "capSeconds": 2400,               // 每 fire 墙钟上限；超时 TERM→KILL 并记 timedOut

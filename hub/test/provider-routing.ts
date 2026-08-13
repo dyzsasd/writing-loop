@@ -51,7 +51,7 @@ function testPureHelpers(): void {
   check("opencodeProviderPrefix：undefined ⇒ null", opencodeProviderPrefix(undefined) === null);
 
   check("providerOf：claude 车道恒 anthropic", providerOf("claude", "opus") === "anthropic");
-  check("providerOf：codex 车道恒 openai", providerOf("codex", "gpt-5.5") === "openai");
+  check("providerOf：codex 车道恒 openai", providerOf("codex", "gpt-5.6-sol") === "openai");
   check("providerOf：opencode + provider/model 形 ⇒ 取前缀", providerOf("opencode", "testprov/m1") === "testprov");
   check("providerOf：opencode + Claude 档位名（无 /）⇒ null（不虚构归因）", providerOf("opencode", "opus") === null);
 

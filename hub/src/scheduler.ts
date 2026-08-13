@@ -91,8 +91,17 @@ const TICK_MS = 200;                // 主循环轮询周期（0.4.0 的 TICK_S=
 
 // cli:"codex" 时把配置里的 Claude 档位名映射为 Codex 名（conventions 拓扑一览映射表）；
 // 不在表内的值原样透传（操作者已直接写 Codex 名）。
-export const CODEX_MODEL_MAP: Readonly<Record<string, string>> = { opus: "gpt-5.5", sonnet: "gpt-5.5" };
-export const CODEX_EFFORT_MAP: Readonly<Record<string, string>> = { max: "xhigh", xhigh: "xhigh", high: "high", medium: "medium", low: "low" };
+export const CODEX_MODEL_MAP: Readonly<Record<string, string>> = {
+  opus: "gpt-5.6-sol",
+  sonnet: "gpt-5.6-terra",
+};
+export const CODEX_EFFORT_MAP: Readonly<Record<string, string>> = {
+  max: "max",
+  xhigh: "xhigh",
+  high: "high",
+  medium: "medium",
+  low: "low",
+};
 
 // cli:"opencode" fire 的权限基线（dev-loop docs/PORTABILITY.md §5 认证集 + 三处放行）：
 // wildcard-deny 关掉调度器不认识的一切 exec 工具（dev-loop 认证时的 tmux 侧门发现——
@@ -1258,7 +1267,7 @@ export function fireArgv(
     // 模型名规则：Claude 档位名（opus/sonnet…不含 "/"）绝不传给 opencode——省略 -m
     // 落 opencode 自身默认模型；仅 provider/model 形（含 "/"）才传。effort 原样传
     // --variant（opencode 的 reasoning-effort 旗标，值随模型而定 —— 不做 codex 的
-    // max→xhigh clamp），但 model 前缀命中注册表且该条目 effortMode:"strip" ⇒ 整个省略
+    // effort 换算），但 model 前缀命中注册表且该条目 effortMode:"strip" ⇒ 整个省略
     // --variant（dev-loop run-agents passEffort 同款：strip 是「端点不认 variant 值」的
     // 逃生口，没有它这类端点每 fire 必错）。cwd 与 claude 车道一致 = repoPath（spawn 处统一）。
     const argv = ["opencode", "run"];

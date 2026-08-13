@@ -123,10 +123,10 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 
 | 抽象等级 | 用途 | Claude | Codex | opencode |
 |---|---|---|---|---|
-| 顶配 | showrunner / story-designer（设计+关键集）| `opus` / `max` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
-| 审计 | evaluator / script-doctor / reflect | `opus` / `xhigh` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
-| 审读 | reviewer（floor，见下） | `opus` / `high` | `gpt-5.5` / `xhigh` | 配置 `provider/model`（无内建默认） |
-| 标配 | source-analyst / episode-writer / market-watch / sweep | `sonnet` / `high` | `gpt-5.5` / `high` | 配置 `provider/model`（无内建默认） |
+| 顶配 | showrunner / story-designer（设计+关键集）| `opus` / `max` | `gpt-5.6-sol` / `max` | 配置 `provider/model`（无内建默认） |
+| 审计 | evaluator / script-doctor / reflect | `opus` / `xhigh` | `gpt-5.6-sol` / `xhigh` | 配置 `provider/model`（无内建默认） |
+| 审读 | reviewer（floor，见下） | `opus` / `high` | `gpt-5.6-sol` / `high` | 配置 `provider/model`（无内建默认） |
+| 标配 | source-analyst / episode-writer / market-watch / sweep | `sonnet` / `high` | `gpt-5.6-terra` / `high` | 配置 `provider/model`（无内建默认） |
 
 （opencode 列无档位名映射：模型恒取 config 配置的 `provider/model` 形启动串——Claude 档位名
 绝不透传，未配置则落 opencode 自身默认模型；effort 原样传 `--variant`（注册表条目
@@ -1261,7 +1261,7 @@ skill」（showrunner / reviewer / …），不靠环境变量区分。各 CLI �
   会在无头 fire 内间歇卡死、烧满 cap。OPENCODE_CONFIG 显式路径与 XDG_DATA 认证不受影响。
 - **模型 = provider/model 启动串，无内建默认**：opencode 的 `-m` 只认 `provider/model` 形
   （含 `/`）；Claude 档位名（`opus`/`sonnet`…）**绝不透传**——档位名 ⇒ 省略 `-m`，落
-  opencode 自身默认模型。effort 原样传 `--variant`（不做 codex 车道的 max→xhigh 换算；
+  opencode 自身默认模型。effort 原样传 `--variant`（不做 codex 车道的 effort 换算；
   例外：model 前缀命中 provider 注册表且该条目 `effortMode:"strip"` ⇒ 整个省略
   `--variant`——不认 variant 值的端点的逃生口）。
 - **认证基线**：opencode 1.2.24（沿 dev-loop 2026-07-16 P8 认证记录，见其 PORTABILITY.md）。
