@@ -95,6 +95,9 @@ writing-loop story context --project KEY --ticket WL-12 --agent episode-writer -
 timeline 及相关前置事件；按稳定顺序填入默认 64 KiB（可配置 4–256 KiB）预算。输出包含
 catalog/design SHA、选择原因、omitted IDs、实际字节和稳定 digest。
 
+预算顺序是：required 资产 → 本集 timeline → supporting/optional 资产 → 相关前置 timeline。
+本集 timeline 的空间必须在可选内容之前预留；不得因可选资产先到而把本集事件挤出。
+
 required asset 或本集 timeline 放不进预算、引用不闭合、事实冲突、ticket 未授权当前 agent
 时硬停。绝不回退成全文扫 bible/ledger，也不把原著正文放入 pack。票里的 `## Context-pack`
 仅是人读预览，不能替代这份确定性输出。

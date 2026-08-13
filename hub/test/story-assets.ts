@@ -77,6 +77,23 @@ try {
   ok(!JSON.stringify(pack).includes("官居一品.txt") && !JSON.stringify(pack).includes("markdown"),
   "Context Pack 只含结构化事实，不携原著正文或平行 Markdown 指针");
 
+  const crowdedCatalog = clone(parsed);
+  crowdedCatalog.assets.push(asset("D01", "continuity", "可选旁支", { first: 2, last: 2 }, "optional"));
+  crowdedCatalog.timeline[1].summary = "本集时间线必须先于可选资产进入预算。".repeat(70);
+  const crowdedRead = { path: "fixture", digest: "b".repeat(64), manifest: parseStoryAssetCatalog(crowdedCatalog) };
+  let reservedPack: ReturnType<typeof buildStoryContextPack> | null = null;
+  for (let maxBytes = 4_096; maxBytes <= 32_768 && reservedPack === null; maxBytes += 32) {
+    try {
+      reservedPack = buildStoryContextPack(crowdedRead, binding,
+        { project: "demo", ticketId: "DEMO-2", agent: "episode-writer", episode: 2, maxBytes });
+    } catch (caught) {
+      if (!(caught instanceof Error) || !caught.message.includes("context budget")) throw caught;
+    }
+  }
+  ok(reservedPack !== null && reservedPack.timeline.some((row) => row.id === "T02")
+    && reservedPack.omittedAssetIds.includes("D01") && reservedPack.budget.usedBytes <= reservedPack.budget.maxBytes,
+  "本集 timeline 先预留预算，可选资产不得把它挤出 Context Pack");
+
   const orphan = clone(parsed); orphan.assets[0].relations[0].targetId = "MISSING";
   throws(() => validateStoryAssetCatalog(orphan, binding), /不存在|无效/, "孤儿关系 fail-closed");
   const conflict = clone(parsed); conflict.assets[0].facts.push({ ...conflict.assets[0].facts[0], id: "F_C01_OTHER", value: "相反目标" });

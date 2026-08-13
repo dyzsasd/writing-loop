@@ -401,22 +401,43 @@ export function buildStoryContextPack(
     }
     return used;
   };
-  for (const candidate of candidates) {
+  const omittedAssetIdsFor = (assets: StoryContextAsset[]): string[] => {
+    const included = new Set(assets.map((asset) => asset.id));
+    return candidates.filter((asset) => !included.has(asset.id)).map((asset) => asset.id);
+  };
+  const omittedTimelineIdsFor = (timeline: Array<StoryTimelineEvent & { selectedBecause: string }>): string[] => {
+    const included = new Set(timeline.map((event) => event.id));
+    return timelineCandidates.filter((event) => !included.has(event.id)).map((event) => event.id);
+  };
+  const selectAsset = (candidate: StoryAsset, required: boolean): void => {
     const item = projected(candidate); const next = [...selected, item];
-    const omitted = candidates.slice(next.length).map((asset) => asset.id);
-    if (sizeOf(next, selectedTimeline, omitted, timelineCandidates.map((event) => event.id)) <= maxBytes) selected.push(item);
-    else if (mandatory.has(candidate.id)) throw new StoryAssetError(`context budget 无法容纳 required asset ${candidate.id}`);
-  }
-  for (const event of timelineCandidates) {
+    if (sizeOf(next, selectedTimeline, omittedAssetIdsFor(next), omittedTimelineIdsFor(selectedTimeline)) <= maxBytes) {
+      selected.push(item); return;
+    }
+    if (required) throw new StoryAssetError(`context budget 无法容纳 required asset ${candidate.id}`);
+  };
+  const selectTimelineEvent = (event: StoryTimelineEvent, required: boolean): void => {
     const item = { ...event, reveal: { ...event.reveal }, assetIds: [...event.assetIds], sourceRefs: [...event.sourceRefs],
       selectedBecause: request.episode !== null && event.reveal.episode === request.episode ? "revealed-in-target-episode" : "related-prior-event" };
-    if (!event.assetIds.every((id) => selected.some((asset) => asset.id === id))) continue;
+    if (!event.assetIds.every((id) => selected.some((asset) => asset.id === id))) {
+      if (required) throw new StoryAssetError(`本集 timeline event ${event.id} 引用的 required asset 未进入 context`);
+      return;
+    }
     const next = [...selectedTimeline, item];
-    const omittedAssets = candidates.filter((asset) => !selected.some((selectedAsset) => selectedAsset.id === asset.id)).map((asset) => asset.id);
-    const omittedTimeline = timelineCandidates.filter((candidate) => !next.some((selectedEvent) => selectedEvent.id === candidate.id)).map((candidate) => candidate.id);
-    if (sizeOf(selected, next, omittedAssets, omittedTimeline) <= maxBytes) selectedTimeline.push(item);
-    else if (request.episode !== null && event.reveal.episode === request.episode) throw new StoryAssetError(`context budget 无法容纳本集 timeline event ${event.id}`);
-  }
+    if (sizeOf(selected, next, omittedAssetIdsFor(selected), omittedTimelineIdsFor(next)) <= maxBytes) {
+      selectedTimeline.push(item); return;
+    }
+    if (required) throw new StoryAssetError(`context budget 无法容纳本集 timeline event ${event.id}`);
+  };
+  // Reserve semantic requirements before optional context. Previously optional assets were packed
+  // before target-episode timeline events, so a valid catalog could crowd a required event out even
+  // when the required assets plus that event fit within the configured budget.
+  for (const candidate of candidates.filter((asset) => mandatory.has(asset.id))) selectAsset(candidate, true);
+  for (const event of timelineCandidates.filter((candidate) => request.episode !== null
+    && candidate.reveal.episode === request.episode)) selectTimelineEvent(event, true);
+  for (const candidate of candidates.filter((asset) => !mandatory.has(asset.id))) selectAsset(candidate, false);
+  for (const event of timelineCandidates.filter((candidate) => request.episode === null
+    || candidate.reveal.episode !== request.episode)) selectTimelineEvent(event, false);
   const omitted = candidates.filter((asset) => !selected.some((item) => item.id === asset.id)).map((asset) => asset.id);
   const omittedTimeline = timelineCandidates.filter((event) => !selectedTimeline.some((item) => item.id === event.id)).map((event) => event.id);
   const usedBytes = sizeOf(selected, selectedTimeline, omitted, omittedTimeline);
