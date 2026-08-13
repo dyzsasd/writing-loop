@@ -319,7 +319,7 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   script-doctor  opus/xhigh  7200s  cap 2400  stagger 60
                                           //   market-watch   sonnet/high 300s   cap 1200  stagger 70
                                           //     （5min 仅为本地 milestone gate 响应延迟；基线完成且无
-                                          //      market-watch Ticket/新投喂时零 LLM spawn）
+                                          //      market Ticket/新投喂时零 LLM spawn）
                                           //   reflect        opus/xhigh  14400s cap 2400  stagger 80
       "episode-writer": {
         "model": "sonnet",                // 档位取值优先序（低→高）：SPECS 默认 < workspace scheduler

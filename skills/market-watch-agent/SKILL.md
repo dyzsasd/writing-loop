@@ -27,10 +27,10 @@ observe-and-file）。数日创作冲刺中不得仅因时间流逝反复扫榜�
 ### Step 0 —— 廉价车道探针（lane 谓词本体；动机/判定语义/单向安全铁律见 §0 Step 0）
 
 **本 agent 的 lane 谓词（milestone gate）**：项目尚无成功基线（`lastRun` 或
-`market-assessment.md` 缺失）∨ 板上有 `Todo+market-watch` 显式请求 ∨ 有陈旧的
-`In Progress+market-watch` 孤儿 ∨ `marketDataPath` 有新内容（mtime 越过 `lastRun`）。
+`market-assessment.md` 缺失）∨ 板上有未停靠的 `Todo+market` 显式请求 ∨ 有陈旧且未停靠的
+`In Progress+market` 孤儿 ∨ `marketDataPath` 有新内容（mtime 越过 `lastRun`）。
 单纯经过一天、一周或更久都不命中。不读正文或故事资产。逃逸口：①显式请求由
-`market-watch` 标签承载；
+§4 合法的 `market` 子类型标签承载（`market-watch` 是 agent 名，不是票标签）；
 **③报告结算只接人工输入**——`reports/` 有未分发 `*.review.md` ⇒ 视作命中，落全
 boot；旧 daily 跨 weekly/monthly 窗口不构成市场刷新理由，也不得因此启动 LLM。
 
@@ -148,7 +148,7 @@ owner 的职责（§3），你只记录市场层面已缓解。
 - §16 内容安全：真实姓名/隐私/内部数据只蒸馏摘要 + 引来源；更广越权访问 = 停下
   上报事实。
 - dry-run（§12）：不写板、不写 state、不推通知——只打印将 file/刷新什么。
-- 里程碑触发：成功基线后只响应显式 `market-watch` 票、新投喂资料或人工调用；绝不因
+- 里程碑触发：成功基线后只响应显式 `market` 票、新投喂资料或人工调用；绝不因
   时间流逝自行刷新。若拾取显式票，按 §7 认领；成功写入评估后追加日期/结论/路径，标
   `Done` 并清 assignee。人类专属决定仍以停靠票呈现（§9），不聊天等待。
 

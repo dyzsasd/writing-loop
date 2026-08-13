@@ -162,7 +162,7 @@ ok(marketWatch.includes("milestone gate")
   && marketWatch.includes("绝不因\n  时间流逝自行刷新")
   && !marketWatch.includes("未到周频")
   && read("docs", "DESIGN.md").includes("一次基线+事件触发")
-  && read("references", "config-schema.md").includes("market-watch Ticket/新投喂时零 LLM spawn")
+  && read("references", "config-schema.md").includes("market Ticket/新投喂时零 LLM spawn")
   && guides.every((guide) => !/weekly trend|周频扫榜|veille hebdomadaire/.test(guide)),
 "Market Watch 只建立一次基线并按显式里程碑刷新，不因时间流逝重复消耗 token");
 

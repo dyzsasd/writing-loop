@@ -787,17 +787,19 @@ export function laneSweep(
 }
 
 // market-watch（SKILL §0 milestone gate）：每个项目先建立一次市场基线；此后只有显式
-// Todo+market-watch 请求、孤儿恢复，或 marketDataPath 有新内容才复跑。时间流逝本身
+// Todo+market 请求、孤儿恢复，或 marketDataPath 有新内容才复跑。`market` 是 §4 唯一
+// 合法的市场子类型标签；agent 名 `market-watch` 绝不能被误用为票标签。时间流逝本身
 // 不是创作期刷新理由，避免数日写作冲刺中反复花 token、扰动既定方向。
 export function laneMarketWatch(
   tickets: LaneTicket[], nowMs: number, lastRunMs: number | null, dataNewestMs: number | null,
 ): string[] {
   const hits: string[] = [];
   if (lastRunMs === null) hits.push("项目尚无市场基线（market-state lastRun 缺失/不可解析）");
-  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("market-watch"));
-  if (todo) hits.push(fmtHit("显式市场研究请求（Todo+market-watch）", todo));
-  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("market-watch") && orphaned(t, nowMs));
-  if (orphan) hits.push(fmtHit("孤儿 In Progress market-watch（§7）", orphan));
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("market") && !t.labels.includes("blocked"));
+  if (todo) hits.push(fmtHit("显式市场研究请求（Todo+market）", todo));
+  const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("market")
+    && !t.labels.includes("blocked") && orphaned(t, nowMs));
+  if (orphan) hits.push(fmtHit("孤儿 In Progress market（§7）", orphan));
   if (lastRunMs === null) return hits;
   if (lastRunMs > nowMs + CLOCK_SKEW_MS) hits.push("lastRun 是未来戳——stale-可疑（§18 时钟纪律）");
   if (dataNewestMs !== null && dataNewestMs > lastRunMs) hits.push("marketDataPath 有新内容（mtime 越过 lastRun）");
@@ -1021,7 +1023,7 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
   const marketFeedPending = !Number.isNaN(marketLastRunMs) && marketDataNewestMs !== null
     && marketDataNewestMs > marketLastRunMs;
   const marketRefreshPending = snap.tickets.some((ticket) => !TERMINAL_STATES.has(ticket.state)
-    && ticket.labels.includes("market-watch"));
+    && ticket.labels.includes("market") && !ticket.labels.includes("blocked"));
   const marketBaselineReady = !Number.isNaN(marketLastRunMs)
     && marketAssessmentExists && !marketRefreshPending && !marketFeedPending;
   const reasons: string[] = [];
