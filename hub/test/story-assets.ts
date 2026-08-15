@@ -170,7 +170,7 @@ try {
   "预算收紧时本集设计引用面与 required 资产仍全部保留");
   ok(tightPack.omittedAssetIds.some((id) => ["O91", "O92", "O93"].includes(id)),
   "经一跳关系带入、不在本集设计引用面内的 optional 资产可被预算裁掉并登记在 omitted");
-  const relationReason = full.assets.find((row) => row.id === "O91")?.selectedBecause ?? [];
+  const relationReason = full.selection["O91"] ?? [];
   ok(relationReason.some((reason) => reason.startsWith("relation:C01:")),
   "关系带入的资产在预算允许时仍进包，并保留 relation 选中理由");
 
@@ -200,13 +200,45 @@ try {
   "全局请求预算收紧时，跨集 required 资产（世界规则、主角）仍是必载面");
   ok(seasonTight.omittedAssetIds.some((id) => ["EP01", "EP02"].includes(id)),
   "全局请求预算收紧时，只覆盖单一集的 required 资产降级为候选并可被裁掉");
-  const scopedReason = seasonFull.assets.find((row) => row.id === "EP01")?.selectedBecause ?? [];
+  const scopedReason = seasonFull.selection["EP01"] ?? [];
   ok(scopedReason.includes("agent:required-episode-scoped"),
   "降级的逐集 required 资产在预算允许时仍进包，并标注降级理由");
   const episodeScoped = buildStoryContextPack(seasonRead, seasonBinding,
     { project: "demo", ticketId: "DEMO-2", agent: "story-designer", episode: 1 });
-  ok((episodeScoped.assets.find((row) => row.id === "EP01")?.selectedBecause ?? []).includes("episode:required"),
+  ok((episodeScoped.selection["EP01"] ?? []).includes("episode:required"),
   "指定本集时，该集的 required 资产仍是硬性必载，不受全局降级影响");
+
+  // 缓存契约：pack 的稳定段必须先于每请求可变段序列化，否则据此拼的 prompt 无公共前缀可缓存。
+  const byteCommonPrefix = (left: unknown, right: unknown): number => {
+    const a = Buffer.from(JSON.stringify(left)), b = Buffer.from(JSON.stringify(right));
+    let index = 0; while (index < a.length && index < b.length && a[index] === b[index]) index++; return index;
+  };
+  const keys = Object.keys(seasonFull);
+  ok(keys.indexOf("assets") < keys.indexOf("agent") && keys.indexOf("assets") < keys.indexOf("ticketId")
+    && keys.indexOf("assets") < keys.indexOf("episode") && keys.indexOf("assets") < keys.indexOf("assetCatalogSha256")
+    && keys.indexOf("assets") < keys.indexOf("selection") && keys.indexOf("assets") < keys.indexOf("digest"),
+  "Context Pack 字段顺序把 assets 排在 agent/ticketId/episode/catalog digest/selection/digest 之前");
+  const ticketA = buildStoryContextPack(seasonRead, seasonBinding,
+    { project: "demo", ticketId: "DEMO-2", agent: "story-designer", episode: 1 });
+  const ticketB = buildStoryContextPack(seasonRead, seasonBinding,
+    { project: "demo", ticketId: "DEMO-77", agent: "story-designer", episode: 1 });
+  const assetsEnd = JSON.stringify(ticketA).indexOf("\"ticketId\"");
+  ok(byteCommonPrefix(ticketA, ticketB) >= assetsEnd && assetsEnd > 0,
+  "同集不同 ticket 的两个 pack 共享覆盖整个 assets 段的字节前缀");
+  const emitted = ticketA.assets.map((row) => row.id);
+  const reordered = [...ticketA.assets].sort((left, right) => {
+    const l = Number(left.episodes !== null && left.episodes.first === left.episodes.last);
+    const r = Number(right.episodes !== null && right.episodes.first === right.episodes.last);
+    return l - r || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  }).map((row) => row.id);
+  ok(emitted.filter((id) => reordered.includes(id)).length === emitted.length
+    && emitted[0] !== undefined && !emitted.slice(0, -1).some((_id, index) => {
+      const current = ticketA.assets[index], next = ticketA.assets[index + 1];
+      const cs = Number(current.episodes !== null && current.episodes.first === current.episodes.last);
+      const ns = Number(next.episodes !== null && next.episodes.first === next.episodes.last);
+      return cs > ns;
+    }),
+  "assets 输出顺序把跨集资产排在单集资产之前，与本集 tier 无关");
 } finally { rmSync(tmp, { recursive: true, force: true }); }
 
 console.log(fails === 0 ? "\nSTORY_ASSETS_OK" : `\n${fails} 项检查失败`);

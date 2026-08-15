@@ -87,21 +87,26 @@ export type StoryContextRequest = {
   maxBytes?: number;
 };
 
-export type StoryContextAsset = Omit<StoryAsset, "context"> & {
-  selectedBecause: string[];
-};
+export type StoryContextAsset = Omit<StoryAsset, "context">;
 
+// Field order is part of the contract: everything that stays byte-identical between neighbouring
+// episodes is serialised first, so a prompt built from this pack keeps a long stable prefix and
+// stays cacheable. Per-request identity (ticket, episode, catalog digest) and per-request
+// provenance (`selection`) therefore sit after `assets`, never before it. `agent` is included in
+// that group: the same episode is written then reviewed, and only the assets each lane may see
+// differ, so keeping it behind `assets` lets the shared head of those two packs stay cacheable.
 export type StoryContextPack = {
   version: 1;
   kind: "writing-loop/story-context-pack";
   project: string;
-  ticketId: string;
+  assets: StoryContextAsset[];
+  timeline: Array<StoryTimelineEvent & { selectedBecause: string }>;
   agent: StoryAssetAgent;
+  ticketId: string;
   episode: number | null;
   storyDesignSha256: string;
   assetCatalogSha256: string;
-  assets: StoryContextAsset[];
-  timeline: Array<StoryTimelineEvent & { selectedBecause: string }>;
+  selection: Record<string, string[]>;
   omittedAssetIds: string[];
   omittedTimelineEventIds: string[];
   budget: { maxBytes: number; usedBytes: number; selectedAssets: number; omittedAssets: number;
@@ -386,8 +391,20 @@ export function buildStoryContextPack(
   const projected = (asset: StoryAsset): StoryContextAsset => ({ id: asset.id, type: asset.type, label: asset.label,
     status: asset.status, importance: asset.importance, episodes: asset.episodes ? { ...asset.episodes } : null,
     summary: asset.summary, sourceRefs: [...asset.sourceRefs], facts: asset.facts.map((fact) => ({ ...fact, sourceRefs: [...fact.sourceRefs] })),
-    relations: asset.relations.map((relation) => ({ ...relation })),
-    selectedBecause: mandatory.get(asset.id) ?? related.get(asset.id) ?? [`agent:${request.agent}:${asset.context.priority}`] });
+    relations: asset.relations.map((relation) => ({ ...relation })) });
+  const reasonFor = (id: string): string[] => {
+    const asset = byId.get(id);
+    return mandatory.get(id) ?? related.get(id) ?? [`agent:${request.agent}:${asset ? asset.context.priority : "supporting"}`];
+  };
+  // Emission order is decoupled from selection order. Selection ranks by tier so the budget protects
+  // the mandatory set first; emission ranks by a key that does not move with the target episode, so
+  // assets carrying identical content land at identical positions across neighbouring episodes.
+  const emissionOrder = (left: StoryContextAsset, right: StoryContextAsset): number => {
+    const leftScoped = Number(left.episodes !== null && left.episodes.first === left.episodes.last);
+    const rightScoped = Number(right.episodes !== null && right.episodes.first === right.episodes.last);
+    return leftScoped - rightScoped || typeRank(left.type) - typeRank(right.type)
+      || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+  };
   const selected: StoryContextAsset[] = [];
   const timelineCandidates = catalogRead.manifest.timeline.filter((event) => request.episode === null
     ? ["story-designer", "showrunner", "evaluator"].includes(request.agent)
@@ -404,10 +421,12 @@ export function buildStoryContextPack(
   const selectedTimeline: Array<StoryTimelineEvent & { selectedBecause: string }> = [];
   const make = (assets: StoryContextAsset[], timeline: Array<StoryTimelineEvent & { selectedBecause: string }>, omitted: string[],
     omittedTimeline: string[], usedBytes: number, digest: string): StoryContextPack => ({
-    version: 1, kind: "writing-loop/story-context-pack", project: request.project, ticketId: request.ticketId,
-    agent: request.agent, episode: request.episode, storyDesignSha256: binding.storyDesignSha256,
-    assetCatalogSha256: catalogRead.digest, assets, timeline, omittedAssetIds: omitted,
-    omittedTimelineEventIds: omittedTimeline,
+    version: 1, kind: "writing-loop/story-context-pack", project: request.project,
+    assets: [...assets].sort(emissionOrder), timeline,
+    agent: request.agent, ticketId: request.ticketId, episode: request.episode, storyDesignSha256: binding.storyDesignSha256,
+    assetCatalogSha256: catalogRead.digest,
+    selection: Object.fromEntries([...assets].sort(emissionOrder).map((asset) => [asset.id, reasonFor(asset.id)])),
+    omittedAssetIds: omitted, omittedTimelineEventIds: omittedTimeline,
     budget: { maxBytes, usedBytes, selectedAssets: assets.length, omittedAssets: omitted.length,
       selectedTimelineEvents: timeline.length, omittedTimelineEvents: omittedTimeline.length }, digest,
   });
