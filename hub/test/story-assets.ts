@@ -135,6 +135,78 @@ try {
   const unauthorized = spawnSync(process.execPath, [join(import.meta.dirname, "..", "src", "story.ts"), "context", "--project", "demo",
     "--ticket", "DEMO-2", "--agent", "market-watch", "--json"], { cwd: tmp, encoding: "utf8" });
   ok(unauthorized.status === 2 && unauthorized.stderr.includes("未授权"), "ticket 未授权的 agent 在读取任何剧情资产前被拒绝");
+
+  // 一跳关系闭包不得把资产升级为硬性必载：本集设计引用面之外、经 relation 带入的 supporting/
+  // optional 资产必须可被预算裁掉，否则它们会挤掉本集 timeline event 使该集无合法开工路径。
+  const relationCatalog: StoryAssetCatalog = clone(catalog);
+  const bulk = (id: string, label: string) => ({
+    ...asset(id, "object" as const, label, { first: 1, last: 2 }, "optional" as const),
+    facts: [1, 2, 3, 4].map((number) => ({ id: `F_${id}_${number}`, key: `k-${number}`,
+      value: "关系闭包带入的旁支事实".repeat(100), state: "current" as const,
+      basis: "original" as const, sourceRefs: ["design:side"] })),
+  });
+  relationCatalog.assets = [
+    ...relationCatalog.assets.map((row) => row.id !== "C01" ? row : { ...clone(row),
+      relations: [{ kind: "rival", targetId: "C02" }, { kind: "carries", targetId: "O91" },
+        { kind: "carries", targetId: "O92" }, { kind: "carries", targetId: "O93" }] }),
+    bulk("O91", "旁支册一"), bulk("O92", "旁支册二"), bulk("O93", "旁支册三"),
+  ];
+  const relationParsed = parseStoryAssetCatalog(JSON.parse(JSON.stringify(relationCatalog)));
+  validateStoryAssetCatalog(relationParsed, binding);
+  const relationRepo = join(tmp, "relation-repo"); mkdirSync(join(relationRepo, "story"), { recursive: true });
+  writeFileSync(join(relationRepo, "story", "assets.v1.json"), JSON.stringify(relationParsed, null, 2));
+  const relationRead = readStoryAssetCatalog(relationRepo)!;
+  const relationRequest = { project: "demo", ticketId: "DEMO-2", agent: "episode-writer" as const, episode: 2 };
+  const full = buildStoryContextPack(relationRead, { ...binding, repo: relationRepo }, relationRequest);
+  const sideBytes = Math.max(...["O91", "O92", "O93"].map((id) =>
+    Buffer.byteLength(JSON.stringify(full.assets.find((row) => row.id === id) ?? {}), "utf8")));
+  // 预算取「完整包再减去一条旁支」——修复前三条旁支是 mandatory 会硬装并挤掉 T02，修复后它们让位。
+  const tight = full.budget.usedBytes - sideBytes;
+  const tightPack = buildStoryContextPack(relationRead, { ...binding, repo: relationRepo }, { ...relationRequest, maxBytes: tight });
+  ok(tightPack.timeline.some((row) => row.id === "T02" && row.selectedBecause === "revealed-in-target-episode"),
+  "预算收紧时本集 timeline event 仍在包内，不被关系闭包带入的旁支资产挤出");
+  ok(tightPack.assets.some((row) => row.id === "C01") && tightPack.assets.some((row) => row.id === "S02")
+    && tightPack.assets.some((row) => row.id === "F01"),
+  "预算收紧时本集设计引用面与 required 资产仍全部保留");
+  ok(tightPack.omittedAssetIds.some((id) => ["O91", "O92", "O93"].includes(id)),
+  "经一跳关系带入、不在本集设计引用面内的 optional 资产可被预算裁掉并登记在 omitted");
+  const relationReason = full.assets.find((row) => row.id === "O91")?.selectedBecause ?? [];
+  ok(relationReason.some((reason) => reason.startsWith("relation:C01:")),
+  "关系带入的资产在预算允许时仍进包，并保留 relation 选中理由");
+
+  // 全局请求（episode: null）下，只覆盖单一集的 required 资产必须降级为候选：它的 required 是
+  // 相对那一集而言的。否则逐集资产随交付集数线性累积，最终超过任何预算使设计车道无法开工。
+  const seasonCatalog: StoryAssetCatalog = clone(catalog);
+  const perEpisode = (id: string, episode: number) => ({
+    ...asset(id, "episode" as const, `第 ${episode} 集设计`, { first: episode, last: episode }, "required" as const),
+    facts: [1, 2, 3, 4].map((number) => ({ id: `F_${id}_${number}`, key: `beat-${number}`,
+      value: "逐集节拍与制作说明".repeat(100), state: "current" as const,
+      basis: "original" as const, sourceRefs: ["design:beat"] })),
+  });
+  seasonCatalog.assets = [...seasonCatalog.assets, perEpisode("EP01", 1), perEpisode("EP02", 2)];
+  const seasonParsed = parseStoryAssetCatalog(JSON.parse(JSON.stringify(seasonCatalog)));
+  validateStoryAssetCatalog(seasonParsed, binding);
+  const seasonRepo = join(tmp, "season-repo"); mkdirSync(join(seasonRepo, "story"), { recursive: true });
+  writeFileSync(join(seasonRepo, "story", "assets.v1.json"), JSON.stringify(seasonParsed, null, 2));
+  const seasonRead = readStoryAssetCatalog(seasonRepo)!;
+  const seasonBinding = { ...binding, repo: seasonRepo };
+  const seasonFull = buildStoryContextPack(seasonRead, seasonBinding,
+    { project: "demo", ticketId: "DEMO-9", agent: "story-designer", episode: null });
+  const epBytes = Math.max(...["EP01", "EP02"].map((id) =>
+    Buffer.byteLength(JSON.stringify(seasonFull.assets.find((row) => row.id === id) ?? {}), "utf8")));
+  const seasonTight = buildStoryContextPack(seasonRead, seasonBinding,
+    { project: "demo", ticketId: "DEMO-9", agent: "story-designer", episode: null, maxBytes: seasonFull.budget.usedBytes - epBytes });
+  ok(seasonTight.assets.some((row) => row.id === "W01") && seasonTight.assets.some((row) => row.id === "C01"),
+  "全局请求预算收紧时，跨集 required 资产（世界规则、主角）仍是必载面");
+  ok(seasonTight.omittedAssetIds.some((id) => ["EP01", "EP02"].includes(id)),
+  "全局请求预算收紧时，只覆盖单一集的 required 资产降级为候选并可被裁掉");
+  const scopedReason = seasonFull.assets.find((row) => row.id === "EP01")?.selectedBecause ?? [];
+  ok(scopedReason.includes("agent:required-episode-scoped"),
+  "降级的逐集 required 资产在预算允许时仍进包，并标注降级理由");
+  const episodeScoped = buildStoryContextPack(seasonRead, seasonBinding,
+    { project: "demo", ticketId: "DEMO-2", agent: "story-designer", episode: 1 });
+  ok((episodeScoped.assets.find((row) => row.id === "EP01")?.selectedBecause ?? []).includes("episode:required"),
+  "指定本集时，该集的 required 资产仍是硬性必载，不受全局降级影响");
 } finally { rmSync(tmp, { recursive: true, force: true }); }
 
 console.log(fails === 0 ? "\nSTORY_ASSETS_OK" : `\n${fails} 项检查失败`);

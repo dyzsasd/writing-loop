@@ -338,18 +338,35 @@ export function buildStoryContextPack(
       for (const id of event.assetIds) addReason(id, `timeline:${event.id}`);
     }
   }
+  // "required" means required within the asset's own episode range. A global request (no target
+  // episode) therefore only takes cross-episode assets as mandatory: an asset scoped to a single
+  // episode is required for that episode, not for season-wide design work. Treating them as global
+  // mandatory made the closure grow linearly with delivered episodes until it exceeded any budget.
+  const related = new Map<string, string[]>();
+  const addRelated = (id: string, reason: string): void => {
+    if (mandatory.has(id)) { addReason(id, reason); return; }
+    const current = related.get(id) ?? []; if (!current.includes(reason)) current.push(reason); related.set(id, current);
+  };
+  const singleEpisodeScoped = (asset: StoryAsset): boolean => asset.episodes !== null && asset.episodes.first === asset.episodes.last;
   for (const asset of catalogRead.manifest.assets) {
     if (asset.status === "retired" || !asset.context.agents.includes(request.agent) || !intersects(asset, request.episode)) continue;
-    if (asset.context.priority === "required") addReason(asset.id, request.episode === null ? "agent:required-global" : "episode:required");
+    if (asset.context.priority !== "required") continue;
+    if (request.episode === null && singleEpisodeScoped(asset)) { addRelated(asset.id, "agent:required-episode-scoped"); continue; }
+    addReason(asset.id, request.episode === null ? "agent:required-global" : "episode:required");
   }
   // One-hop relation closure gives the selected facts their named counterparts without opening a
   // free graph traversal. Only already-visible, in-scope assets may enter the pack.
+  // Closure results are preferred candidates, never mandatory: the mandatory set must stay equal to
+  // this episode's own reference surface (design characterIds/sceneIds, its timeline events' assets,
+  // and assets declaring priority "required"). Promoting closure targets to mandatory made a
+  // declared-optional asset unskippable, so a large graph could crowd out the target episode's own
+  // timeline event and leave the episode with no legal way to start.
   for (const id of [...mandatory.keys()]) {
     const source = byId.get(id); if (!source) throw new StoryAssetError(`required asset ${id} 不存在`);
     for (const relation of source.relations) {
       const target = byId.get(relation.targetId);
       if (target && target.status !== "retired" && target.context.agents.includes(request.agent) && intersects(target, request.episode)) {
-        addReason(target.id, `relation:${id}:${relation.kind}`);
+        addRelated(target.id, `relation:${id}:${relation.kind}`);
       }
     }
   }
@@ -360,16 +377,17 @@ export function buildStoryContextPack(
       throw new StoryAssetError(`required asset ${id} 不允许进入 ${request.agent} 的当前 context`);
     }
   }
+  const tierRank = (asset: StoryAsset): number => mandatory.has(asset.id) ? 0 : related.has(asset.id) ? 1 : 2;
   const candidates = catalogRead.manifest.assets.filter((asset) => asset.status !== "retired"
     && asset.context.agents.includes(request.agent) && intersects(asset, request.episode))
-    .sort((left, right) => Number(!mandatory.has(left.id)) - Number(!mandatory.has(right.id))
+    .sort((left, right) => tierRank(left) - tierRank(right)
       || priorityRank(left.context.priority) - priorityRank(right.context.priority)
       || typeRank(left.type) - typeRank(right.type) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
   const projected = (asset: StoryAsset): StoryContextAsset => ({ id: asset.id, type: asset.type, label: asset.label,
     status: asset.status, importance: asset.importance, episodes: asset.episodes ? { ...asset.episodes } : null,
     summary: asset.summary, sourceRefs: [...asset.sourceRefs], facts: asset.facts.map((fact) => ({ ...fact, sourceRefs: [...fact.sourceRefs] })),
     relations: asset.relations.map((relation) => ({ ...relation })),
-    selectedBecause: mandatory.get(asset.id) ?? [`agent:${request.agent}:${asset.context.priority}`] });
+    selectedBecause: mandatory.get(asset.id) ?? related.get(asset.id) ?? [`agent:${request.agent}:${asset.context.priority}`] });
   const selected: StoryContextAsset[] = [];
   const timelineCandidates = catalogRead.manifest.timeline.filter((event) => request.episode === null
     ? ["story-designer", "showrunner", "evaluator"].includes(request.agent)
