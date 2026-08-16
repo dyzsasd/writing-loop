@@ -213,9 +213,12 @@ export function bundleExport(argv: string[]): number {
       workspaceLabel: label, projects, sourceFiles: [...sourceFiles].sort(), files, totalBytes };
     writeFileSync(join(stageRoot, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 
-    // 5) tar.gz
+    // 5) tar.gz。macOS 的 bsdtar 默认把扩展属性写成 AppleDouble（._*）条目，Linux 解包后变成
+    //    清单外文件——导入端会正确地拒绝，但那等于 Mac 导出的包在 Linux 上一律不可用。
+    //    COPYFILE_DISABLE 关掉这一行为（GNU tar 忽略该变量，跨平台无害）；--no-xattrs 双保险。
     mkdirSync(dirname(outAbs), { recursive: true });
-    const tar = spawnSync("tar", ["-czf", outAbs, "-C", stage, BUNDLE_DIR], { encoding: "utf8" });
+    const tar = spawnSync("tar", ["--no-xattrs", "-czf", outAbs, "-C", stage, BUNDLE_DIR],
+      { encoding: "utf8", env: { ...process.env, COPYFILE_DISABLE: "1" } });
     if (tar.status !== 0) return die(`tar 失败: ${tar.stderr}`);
     const outBytes = statSync(outAbs).size;
     console.log(`writing-loop bundle: 已导出 ${outAbs}`);
@@ -264,11 +267,16 @@ export function bundleImport(argv: string[]): number {
 
     // 1) 逐文件校验指纹——任一不符整体拒绝，目标目录零写入
     const declared = Object.keys(manifest.files);
-    const present = walk(stageRoot).filter((r) => r !== "manifest.json");
+    const allPresent = walk(stageRoot).filter((r) => r !== "manifest.json");
+    // AppleDouble 元数据（旧版导出或第三方工具重打包时混入）：不是内容，剔除后继续校验；
+    // 只要清单里的每个文件指纹都对，这类残渣不影响导入结果。
+    const appleDouble = allPresent.filter((r) => basename(r).startsWith("._"));
+    const present = allPresent.filter((r) => !basename(r).startsWith("._"));
     const missing = declared.filter((r) => !present.includes(r));
     const extra = present.filter((r) => !declared.includes(r));
     if (missing.length) return die(`bundle 缺 ${missing.length} 个清单文件，例如 ${missing.slice(0, 3).join(", ")}`);
     if (extra.length) return die(`bundle 含 ${extra.length} 个清单外文件，例如 ${extra.slice(0, 3).join(", ")}——拒绝`);
+    if (appleDouble.length) console.error(`writing-loop bundle: 忽略 ${appleDouble.length} 个 macOS AppleDouble 元数据条目（._*）`);
     for (const rel of declared) {
       const abs = join(stageRoot, rel);
       const got = sha256File(abs); const want = manifest.files[rel];
