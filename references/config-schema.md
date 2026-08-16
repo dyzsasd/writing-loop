@@ -117,6 +117,11 @@ CLI 的根解析。
       "maxPrimaryScenes": 5,
       "assetLibrary": null,                // 公司 AI 资产库清单路径（或 null=无）——rubric 资产复用度的打分输入
       "marketDataPath": null,              // 操作者投喂的市场数据目录（榜单快照/政策摘要）；market-watch 优先读取
+      "contextPack": {                     // 可缺省。`writing-loop story context` 的字节预算配置口（WLSYS-3685fbc /
+        "maxBytes": 98304,                 //   ef70be05 / 78ca9e8e ②）：4096–262144 的整数，缺省 65536（64 KiB）。
+        "perAgent": { "reviewer": 131072 } //   perAgent 按车道覆盖（键 = 十个 agent 名）。优先序：--max-bytes flag >
+      },                                   //   perAgent[agent] > maxBytes > 内建默认。越界/未知字段报错，不静默回落。
+                                          //   预算是审读门看得见的东西：改它 = 每集必载闭包上限变化，按 §12a 属操作者决定
 
       // —— 流程旋钮 ——
       "intake": {

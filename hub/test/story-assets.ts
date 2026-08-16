@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildStoryContextPack, parseStoryAssetCatalog, readStoryAssetCatalog, validateStoryAssetCatalog,
+  buildStoryContextPack, parseStoryAssetCatalog, readStoryAssetCatalog, resolveStoryContextBudget, validateStoryAssetCatalog,
   type StoryAssetCatalog, type StoryAssetDesignBinding,
 } from "../src/story-assets.ts";
 
@@ -240,6 +240,23 @@ try {
     }),
   "assets 输出顺序把跨集资产排在单集资产之前，与本集 tier 无关");
 } finally { rmSync(tmp, { recursive: true, force: true }); }
+
+// Context Pack 预算配置口（WLSYS-3685fbc / ef70be05 / 78ca9e8e 辅项②）：projects.<key>.contextPack
+// 让操作者按项目（可按 agent 车道）设预算；优先序 --max-bytes flag > perAgent[agent] > maxBytes > 内建
+// 64 KiB。此前只有 CLI flag，而 agent 侧调用从不带 flag ⇒ 必载闭包一过 64 KiB 全项目硬停、无处可调。
+{
+  ok(resolveStoryContextBudget(undefined, "reviewer", undefined) === 64 * 1024, "预算配置口：无配置 ⇒ 内建 64 KiB");
+  ok(resolveStoryContextBudget({ contextPack: { maxBytes: 98_304 } }, "reviewer", undefined) === 98_304,
+    "预算配置口：projects.<key>.contextPack.maxBytes 生效（修复前恒 64 KiB）");
+  ok(resolveStoryContextBudget({ contextPack: { maxBytes: 98_304, perAgent: { reviewer: 131_072 } } }, "reviewer", undefined) === 131_072
+    && resolveStoryContextBudget({ contextPack: { maxBytes: 98_304, perAgent: { reviewer: 131_072 } } }, "episode-writer", undefined) === 98_304,
+    "预算配置口：perAgent 车道覆盖压过 maxBytes，其他车道回落 maxBytes");
+  ok(resolveStoryContextBudget({ contextPack: { maxBytes: 98_304 } }, "reviewer", 70_000) === 70_000, "预算配置口：--max-bytes flag 压过配置");
+  throws(() => resolveStoryContextBudget({ contextPack: { maxBytes: 1_000 } }, "reviewer", undefined), /contextPack\.maxBytes/, "预算配置口：越界值报错而非静默回落");
+  throws(() => resolveStoryContextBudget({ contextPack: { maxBytes: 98_304, perAgent: { nonesuch: 70_000 } } }, "reviewer", undefined), /perAgent/, "预算配置口：未知 agent 键报错");
+  throws(() => resolveStoryContextBudget({ contextPack: { bytes: 98_304 } }, "reviewer", undefined), /contextPack/, "预算配置口：未知字段报错");
+  throws(() => resolveStoryContextBudget({ contextPack: { maxBytes: 98_304 } }, "reviewer", 99), /max-bytes/, "预算配置口：flag 越界同样报错");
+}
 
 console.log(fails === 0 ? "\nSTORY_ASSETS_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

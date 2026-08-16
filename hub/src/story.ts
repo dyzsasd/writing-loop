@@ -2,7 +2,7 @@
 // Internal story-design quality gate. Scheduler agents call this automatically; operators normally
 // use Studio. The command is intentionally read-only and never generates story content.
 import { buildStoryStudioReadModel, readStoryDesign, type StoryDesignStage } from "./story-design.ts";
-import { buildStoryContextPack, readStoryAssetCatalog, type StoryAssetAgent } from "./story-assets.ts";
+import { buildStoryContextPack, readStoryAssetCatalog, type StoryAssetAgent, resolveStoryContextBudget } from "./story-assets.ts";
 import { readProjectResource } from "./project-detail.ts";
 import { findWorkspaceRoot, loadConfig, projectEntries, resolveRepoPath, WsError } from "./workspace.ts";
 
@@ -45,7 +45,8 @@ try {
     if (!entry) throw new WsError(`config.json 无项目 '${key}'`);
     const repo = resolveRepoPath(root, entry[1]); const catalog = readStoryAssetCatalog(repo);
     if (!catalog) throw new WsError("尚无 story/assets.v1.json");
-    const rawMax = flag("--max-bytes"); const maxBytes = rawMax === null ? undefined : Number(rawMax);
+    const rawMax = flag("--max-bytes");
+    const maxBytes = resolveStoryContextBudget(entry[1] as Record<string, unknown>, agent, rawMax === null ? undefined : Number(rawMax));
     const pack = buildStoryContextPack(catalog, { project: key, repo, sourcePlanId: read.policy.sourcePlanId,
       storyDesignSha256: read.sha256, totalEpisodes: read.policy.totalEpisodes,
       characters: read.manifest.characters.map((row) => ({ id: row.id, name: row.name,

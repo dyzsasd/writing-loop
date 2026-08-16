@@ -12,7 +12,44 @@ import { WsError } from "./workspace.ts";
 export const STORY_ASSETS_RELATIVE_PATH = "story/assets.v1.json";
 export const MAX_STORY_ASSETS_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_STORY_CONTEXT_BYTES = 64 * 1024;
+export const MIN_STORY_CONTEXT_BYTES = 4 * 1024;
 export const MAX_STORY_CONTEXT_BYTES = 256 * 1024;
+const CONTEXT_PACK_AGENTS = new Set(["showrunner", "source-analyst", "story-designer", "episode-writer", "reviewer",
+  "evaluator", "sweep", "script-doctor", "market-watch", "reflect"]);
+
+// Context Pack 预算配置口（WLSYS-3685fbc / ef70be05 / 78ca9e8e 辅项②）：
+//   projects.<key>.contextPack = { maxBytes?: N, perAgent?: { <agent>: N } }
+// 优先序：--max-bytes flag > perAgent[agent] > maxBytes > 内建 DEFAULT_STORY_CONTEXT_BYTES。
+// 越界/未知字段一律报错（不静默回落）：预算是审读门看得见的东西，错配必须可见。
+export function resolveStoryContextBudget(project: Record<string, unknown> | undefined, agent: string, flagBytes: number | undefined): number {
+  const checkBytes = (value: unknown, label: string): number => {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < MIN_STORY_CONTEXT_BYTES || value > MAX_STORY_CONTEXT_BYTES) {
+      throw new WsError(`${label} 必须是 ${MIN_STORY_CONTEXT_BYTES}–${MAX_STORY_CONTEXT_BYTES} 的整数（得到 ${JSON.stringify(value)}）`);
+    }
+    return value;
+  };
+  if (flagBytes !== undefined) return checkBytes(flagBytes, "--max-bytes");
+  const raw = project?.contextPack;
+  if (raw === undefined || raw === null) return DEFAULT_STORY_CONTEXT_BYTES;
+  if (typeof raw !== "object" || Array.isArray(raw)) throw new WsError("projects.<key>.contextPack 必须是对象");
+  const block = raw as Record<string, unknown>;
+  for (const key of Object.keys(block)) {
+    if (key !== "maxBytes" && key !== "perAgent") throw new WsError(`projects.<key>.contextPack 含未知字段 '${key}'（合法：maxBytes, perAgent）`);
+  }
+  let budget = DEFAULT_STORY_CONTEXT_BYTES;
+  if (block.maxBytes !== undefined) budget = checkBytes(block.maxBytes, "projects.<key>.contextPack.maxBytes");
+  if (block.perAgent !== undefined) {
+    if (block.perAgent === null || typeof block.perAgent !== "object" || Array.isArray(block.perAgent)) {
+      throw new WsError("projects.<key>.contextPack.perAgent 必须是对象");
+    }
+    for (const [name, value] of Object.entries(block.perAgent as Record<string, unknown>)) {
+      if (!CONTEXT_PACK_AGENTS.has(name)) throw new WsError(`projects.<key>.contextPack.perAgent 含未知 agent '${name}'`);
+      const bytes = checkBytes(value, `projects.<key>.contextPack.perAgent.${name}`);
+      if (name === agent) budget = bytes;
+    }
+  }
+  return budget;
+}
 
 export type StoryAssetType = "character" | "world" | "location" | "organization" | "object"
   | "scene" | "foreshadow" | "continuity" | "episode";
