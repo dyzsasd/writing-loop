@@ -290,7 +290,12 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   保留作双保险（门控是其外层实装）。--once = 操作者显式点火 ⇒
                                           //   绕过拦截照 fire（[gate] 逐 agent 求值行仅诊断）；--dry-run 下
                                           //   门控照算并逐 agent 打印求值结果。false ⇒ 关闭门控，恒 spawn
-                                          //   （回退 0.5.0 行为）
+                                          //   （回退 0.5.0 行为）。**state 键名契约**（agent 写、门控读，
+                                          //   两侧必须同名——键名对不上 = 门恒开、每 tick 白 boot）：
+                                          //   reviewer-state.json.lastAuditedSha（Job C change-gate 基点；
+                                          //   旧 lastAuditSha/lastAuditedEpisodesSha 仅作 fallback）、
+                                          //   doctor-state.json.lastAuditSha、reflect-state.json.lastRetro、
+                                          //   market-state.json.lastRun
     "trimFirePlugins": true,              // fire 系统面减肥（仅 cli=claude 车道生效）：每 fire 追加
                                           //   --settings '{"enabledPlugins":{…}}'——仅 writing-loop 插件保持
                                           //   启用，其余插件逐一置 false（清单**动态**读自 ~/.claude/
@@ -303,8 +308,10 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   消失；doctor W08 预检同一降级链
     "graceSeconds": 30,                   // Ctrl-C / --for 到点后等 in-flight 收尾的宽限；超时 TERM→KILL
     "keystoneReviewer": {                 // keystone 升档档位（拓扑一览 keystone-stall 护栏的 launcher 分支）：
-      "model": "opus", "effort": "max"    //   起 reviewer 前 glob 板 frontmatter，∃ In Review+keystone 票
-    },                                    //   ⇒ 该 fire 用此档。advisory 选档——floor 判定仍归 reviewer 本体
+      "model": "opus", "effort": "max"    //   起 reviewer 前 glob 板，∃ In Review 且（labels∋keystone ∨ 票面机读行
+    },                                    //   `Mode: direct-write`）⇒ 该 fire 用此档（direct-write 升级重写票由
+                                          //   story-designer 顶配亲写，§21a-gate 要求审读档 ≥ 创作档，WLSYS-95eb134a）。
+                                          //   advisory 选档——floor 判定仍归 reviewer 本体
     "agents": {                           // 每 agent 一块；全部字段可缺省。默认 = 0.6.0 SPECS 参数表
                                           //   （操作者 T1/T3 裁定：门控上线后间隔全面放宽；写作用小模型、
                                           //   设计/建票用大模型；cap/stagger 与 0.4.0/0.5.0 逐格不变）：

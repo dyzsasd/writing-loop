@@ -46,7 +46,7 @@ const tk = (o: Partial<LaneTicket>): LaneTicket => ({
   owner: o.owner ?? null, assignee: o.assignee ?? null, updatedRaw: o.updatedRaw ?? "t",
   updatedMs: o.updatedMs === undefined ? NOW - MIN : o.updatedMs,
   mtimeMs: o.mtimeMs ?? NOW - MIN, episode: o.episode ?? null,
-  blockedBy: o.blockedBy ?? [], notifiedMs: o.notifiedMs ?? null, malformed: o.malformed ?? false,
+  blockedBy: o.blockedBy ?? [], notifiedMs: o.notifiedMs ?? null, directWrite: o.directWrite ?? false, malformed: o.malformed ?? false,
 });
 
 const tmp = (): string => realpathSync(mkdtempSync(join(tmpdir(), "wl-gate-test.")));
@@ -133,8 +133,13 @@ function testEpisodeWriter(): void {
   check("episode-writer 正例：∃ Todo+tier", laneEpisodeWriter([tk({ labels: ew })], NOW).length > 0);
   check("episode-writer 正例：修订 Bug（无 episode 子标签）不被子类型收窄",
     laneEpisodeWriter([tk({ labels: ["writing-loop", "Bug", "reviewer", "episode-writer"] })], NOW).length > 0);
-  check("episode-writer 保守超集：blocked 的 Todo 票也命中（SKILL 谓词原文未排除；与 evaluator 同口径）",
-    laneEpisodeWriter([tk({ labels: [...ew, "blocked"] })], NOW).length > 0);
+  // WLSYS-6267a4c：主进件排除 blocked——§9 blocked 票不在任何拾取序内，命中它只能产出又一次
+  // no-op；人工停靠（external-prereq/fix-exhausted）可站 24h+，「一次白 boot」实为每 tick 白 boot。
+  // 解封 = §18 labels update op，主进件项随即恢复为真——不存在假退出窗口。
+  check("episode-writer 主进件排除 blocked：Todo+tier+blocked 不命中（WLSYS-6267a4c）",
+    laneEpisodeWriter([tk({ labels: [...ew, "blocked"] })], NOW).length === 0);
+  check("episode-writer 孤儿口不受 blocked 收窄：In Progress+blocked+认领陈旧仍命中",
+    laneEpisodeWriter([tk({ state: "In Progress", labels: [...ew, "blocked"], assignee: "x", updatedMs: NOW - 2 * HOUR })], NOW).length > 0);
   check("episode-writer 反例：Backlog 暂存不可见", laneEpisodeWriter([tk({ state: "Backlog", labels: ew })], NOW).length === 0);
   check("episode-writer 反例：他 tier 不拾",
     laneEpisodeWriter([tk({ labels: ["writing-loop", "Feature", "story-designer"] })], NOW).length === 0);
@@ -155,8 +160,10 @@ function testEpisodeWriter(): void {
 function testStoryDesigner(): void {
   const sd = ["writing-loop", "Feature", "arc-design", "showrunner", "story-designer"];
   check("story-designer 正例：∃ Todo+tier", laneStoryDesigner([tk({ labels: sd })], NOW).length > 0);
-  check("story-designer 保守超集：blocked 的 Todo 票也命中（SKILL 谓词原文未排除）",
-    laneStoryDesigner([tk({ labels: [...sd, "blocked"] })], NOW).length > 0);
+  check("story-designer 主进件排除 blocked：Todo+tier+blocked 不命中（WLSYS-6267a4c）",
+    laneStoryDesigner([tk({ labels: [...sd, "blocked"] })], NOW).length === 0);
+  check("story-designer 孤儿口不受 blocked 收窄：In Progress+blocked+认领陈旧仍命中",
+    laneStoryDesigner([tk({ state: "In Progress", labels: [...sd, "blocked"], assignee: "x", updatedMs: NOW - 2 * HOUR })], NOW).length > 0);
   check("story-designer 逃逸口Ⅰ正例：needs-designer 求助（带 blocked 的非终态）",
     laneStoryDesigner([tk({ state: "Todo", labels: ["writing-loop", "blocked", "needs-designer"] })], NOW).length > 0);
   check("story-designer 逃逸口Ⅰ反例：终态票残留 needs-designer 不命中",
@@ -184,13 +191,32 @@ function testReviewer(): void {
   check("reviewer 反例：板空 + 零 diff ⇒ 谓词为空", laneReviewer([], NOW, false).length === 0);
   check("reviewer 反例：Todo 票不触发（验收门只看 In Review）",
     laneReviewer([tk({ state: "Todo", labels: ["writing-loop", "episode", "reviewer"] })], NOW, false).length === 0);
+  check("reviewer 主进件排除 blocked：In Review+owner:reviewer+blocked（§9 停靠）不命中（WLSYS-6267a4c）",
+    laneReviewer([tk({ state: "In Review", owner: "reviewer", labels: ["writing-loop", "Feature", "episode", "reviewer", "episode-writer", "blocked"] })], NOW, false).length === 0);
+  check("reviewer 主进件排除 blocked：In Review+punch-up+blocked 同样不命中",
+    laneReviewer([tk({ state: "In Review", labels: ["writing-loop", "Improvement", "punch-up", "showrunner", "blocked"] })], NOW, false).length === 0);
+  check("reviewer 逃逸口Ⅰ不受收窄：In Review+blocked+needs-reviewer 仍命中",
+    laneReviewer([tk({ state: "In Review", labels: ["writing-loop", "reviewer", "blocked", "needs-reviewer"] })], NOW, false).length > 0);
+  check("reviewer 孤儿口不受收窄：In Review+blocked+认领陈旧仍命中",
+    laneReviewer([tk({ state: "In Review", labels: ["writing-loop", "reviewer", "blocked"], assignee: "reviewer (run bb)", updatedMs: NOW - 2 * HOUR })], NOW, false).length > 0);
+  // 主进件对齐 SKILL §0 逐字：Job A = In Review + owner:reviewer；A-3 = In Review + punch-up。
+  // owner=showrunner 的设计/裁定票在 In Review 等的是 showrunner 大纲门，reviewer 命中它只会
+  // 全 boot 后判「不属审读门 lane」（yujing-jiushi YJJS-97 实测）。owner 缺失 ⇒ 保守命中。
+  check("reviewer 主进件：In Review+owner:showrunner（设计票等大纲门）不命中",
+    laneReviewer([tk({ state: "In Review", owner: "showrunner", labels: ["writing-loop", "Bug", "continuity", "showrunner", "story-designer"] })], NOW, false).length === 0);
+  check("reviewer 主进件：In Review+owner:reviewer 命中",
+    laneReviewer([tk({ state: "In Review", owner: "reviewer", labels: ["writing-loop", "Feature", "episode", "reviewer", "episode-writer"] })], NOW, false).length > 0);
+  check("reviewer 主进件：In Review+owner 缺失 ⇒ 保守命中",
+    laneReviewer([tk({ state: "In Review", owner: null, labels: ["writing-loop", "Feature", "episode", "reviewer", "episode-writer"] })], NOW, false).length > 0);
 }
 
 function testEvaluator(): void {
   const me = ["writing-loop", "Feature", "milestone-eval", "showrunner"];
   check("evaluator 正例：∃ Todo+milestone-eval", laneEvaluator([tk({ labels: me })], NOW).length > 0);
-  check("evaluator 保守超集：blocked 的 eval 票也命中（unblock 归 showrunner，agent 侧再精滤）",
-    laneEvaluator([tk({ labels: [...me, "blocked"] })], NOW).length > 0);
+  check("evaluator 主进件排除 blocked：Todo+milestone-eval+blocked 不命中（WLSYS-6267a4c；与 Job 0 拾取过滤一致）",
+    laneEvaluator([tk({ labels: [...me, "blocked"] })], NOW).length === 0);
+  check("evaluator 孤儿口不受 blocked 收窄：In Progress+blocked+认领陈旧仍命中",
+    laneEvaluator([tk({ state: "In Progress", labels: [...me, "blocked"], assignee: "x", updatedMs: NOW - 2 * HOUR })], NOW).length > 0);
   check("evaluator 孤儿正例：In Progress+milestone-eval 认领陈旧",
     laneEvaluator([tk({ state: "In Progress", labels: me, assignee: "x", updatedMs: NOW - 2 * HOUR })], NOW).length > 0);
   check("evaluator 孤儿反例：认领新鲜不命中",
@@ -442,9 +468,35 @@ function testStateAndGitSeams(): void {
   evalLaneGate("reviewer", w.io({ gitDiff: spy(false) }));
   check("reviewer：基点键序对齐 gateNote——lastAuditSha 优先于旧 lastAuditedEpisodesSha",
     diffSpy.length === 1 && diffSpy[0][0] === "ccc333", JSON.stringify(diffSpy));
+  // WLSYS-f5482b7a 回归①：reviewer agent 实际写入的键是 lastAuditedSha（yujing-jiushi
+  // state/reviewer-state.json 实测形：{version, lastAuditedSha, lastAuditedAt, auditedEpisodes,
+  // note}）。修复前调度器只读 lastAuditSha/lastAuditedEpisodesSha ⇒ prev 恒 null ⇒ 走首跑分支
+  // ⇒ 有正文的项目恒开门（528 fire 中 254 次白 boot）。
+  writeFileSync(join(w.projData, "state", "reviewer-state.json"), JSON.stringify({
+    version: 1, lastAuditedSha: "e4a7f8a", lastAuditedAt: "2026-08-15T05:14:31Z", auditedEpisodes: [1, 2, 3],
+  }));
+  diffSpy.length = 0;
+  const gAgentKey = evalLaneGate("reviewer", w.io({ gitDiff: spy(false), gitSha: () => "scaffold-sha" }));
+  check("reviewer：agent 实写键 lastAuditedSha 被当作 diff 基点（不落首跑分支）",
+    diffSpy.length === 1 && diffSpy[0][0] === "e4a7f8a", JSON.stringify(diffSpy));
+  check("reviewer：lastAuditedSha 基点后零 diff ⇒ gated（修复前恒 open）", !gAgentKey.open, gAgentKey.reasons.join("；"));
+  writeFileSync(join(w.projData, "state", "reviewer-state.json"),
+    JSON.stringify({ lastAuditedSha: "new111", lastAuditSha: "old222" }));
+  diffSpy.length = 0;
+  evalLaneGate("reviewer", w.io({ gitDiff: spy(false) }));
+  check("reviewer：键序 lastAuditedSha（现行实写）> lastAuditSha（旧）",
+    diffSpy.length === 1 && diffSpy[0][0] === "new111", JSON.stringify(diffSpy));
   rmSync(join(w.projData, "state", "reviewer-state.json"));
   check("reviewer：state 缺失 + episodes/∪story assets 确证零 commit ⇒ 可证明无活，gated",
     !evalLaneGate("reviewer", w.io({ gitSha: () => "" })).open);
+  // WLSYS-f5482b7a 回归②：首跑分支须与 doctor 分支同款 hasEpisodeScripts 守卫——立项 scaffold
+  // 的 episodes/.gitkeep 让 pathspec SHA 非空，但确无 ep-NNN.md ⇒ 可证明无 Job C 活。
+  check("reviewer：state 缺失 + 只有 scaffold（无 ep-*.md）⇒ 即使 pathspec 有 commit 也 gated",
+    !evalLaneGate("reviewer", w.io({ gitSha: () => "scaffold-sha", episodeScripts: () => false })).open);
+  check("reviewer：state 缺失 + 有正文 + 有 commit ⇒ 保守 open",
+    evalLaneGate("reviewer", w.io({ gitSha: () => "abc", episodeScripts: () => true })).open);
+  check("reviewer：state 缺失 + episodes 目录不可判 ⇒ 保守 open",
+    evalLaneGate("reviewer", w.io({ gitSha: () => "abc", episodeScripts: () => null })).open);
   check("reviewer：state 缺失 + 有 commit ⇒ 保守 open",
     evalLaneGate("reviewer", w.io({ gitSha: () => "abc" })).open);
 
@@ -663,6 +715,18 @@ function testSweepLocksAndShowrunnerBaseline(): void {
   writeFileSync(join(w.boardDir, "WL-3.md"),
     "---\nid: WL-3\nstate: Done\nlabels: [writing-loop, keystone]\n---\nbody\n");
   check("keystonePending：非 In Review 不升档", !keystonePending(w.boardDir));
+  // WLSYS-95eb134a：§21a-fail.2 升级重写票（票面机读行 `Mode: direct-write`，story-designer 顶配亲写，
+  // 无 keystone 标签）In Review 时同样升档——否则 reviewer 默认档 < 顶配 floor，§21a-gate 不认领，
+  // 票停靠、§5 前向冻结让全板无在途创作（yujing-jiushi YJJS-101 实测：26 次 fire 无一能认领）。
+  writeFileSync(join(w.boardDir, "WL-3.md"),
+    "---\nid: WL-3\nstate: In Review\nowner: reviewer\nlabels: [writing-loop, Feature, episode, continuity, reviewer, story-designer]\n---\nEpisode: 20\nDesign: story/outline.v1.json#episode-020\nMode: direct-write\n");
+  check("keystonePending：In Review + 票面 `Mode: direct-write`（无 keystone 标签）也升档", keystonePending(w.boardDir));
+  writeFileSync(join(w.boardDir, "WL-3.md"),
+    "---\nid: WL-3\nstate: Todo\nowner: reviewer\nlabels: [writing-loop, Feature, episode, reviewer, story-designer]\n---\nEpisode: 20\nMode: direct-write\n");
+  check("keystonePending：Todo 的 direct-write 票不升档", !keystonePending(w.boardDir));
+  writeFileSync(join(w.boardDir, "WL-3.md"),
+    "---\nid: WL-3\nstate: In Review\nowner: reviewer\nlabels: [writing-loop, Feature, episode, reviewer, episode-writer]\n---\nEpisode: 20\nMode: standard\n");
+  check("keystonePending：In Review 但 Mode 非 direct-write 且无 keystone ⇒ 不升档", !keystonePending(w.boardDir));
   rmSync(w.ws, { recursive: true, force: true });
 }
 

@@ -25,13 +25,17 @@ fail、双签复核 punch-up、清 `needs-reviewer` 求助、轻量主动抽查�
 
 **lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析
 frontmatter**，§18 稳定字段，不读 conventions/lessons/craft-rules）：
-- `∃` `state:"In Review"` + `owner:reviewer` 的票（Job A）；
-- `∃` `state:"In Review"` + `labels∋punch-up` 的票（owner=showrunner，但双签复核评论是
-  你的，A-3——不并入本条则 A-3 永不可达）；
-- **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它）；
+- `∃` `state:"In Review"` + `owner:reviewer` + `labels ∌ blocked` 的票（Job A；§9 停靠的
+  In Review 票不在拾取序内，命中它只会再 no-op 一次，故主进件排除 `blocked`——解封时
+  移除标签即恢复为真）；
+- `∃` `state:"In Review"` + `labels∋punch-up` + `labels ∌ blocked` 的票（owner=showrunner，
+  但双签复核评论是你的，A-3——不并入本条则 A-3 永不可达）；
+- **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它——本口**不**排除 blocked，
+  它正是「blocked 票确需本角色」的唯一形态）；
 - Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/ story/assets.v1.json` 任一非空
-  （上次审计 sha 读 `reviewer-state.json`；assets-only 修订也开门——旧「episodes/ HEAD
-  比对」判据对其假阴性，fire #177 实测；探针里唯一非-frontmatter 依赖）；
+  （上次审计 sha 读 `reviewer-state.json` 的 `lastAuditedSha`——调度器门控读同一键，
+  键名是双方契约；assets-only 修订也开门——旧「episodes/ HEAD 比对」判据对其假阴性，
+  fire #177 实测；探针里唯一非-frontmatter 依赖）；
 - **②** 孤儿回收：`∃` `In Review` + 本 tier + assignee 陈旧（>60min，§7）；
 - **③** 报告结算：到期 weekly/monthly 或未分发 `*.review.md`（§22）。
 谓词为空 ⇒ 一行 no-op 退出；命中任一 ⇒ 全 boot；`dry-run` 下照跑（只读）。
@@ -152,9 +156,10 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 判断；清不了的在报告 needs-attention 节置顶。
 
 ### Job C — 主动抽查（autonomous；passive 下不自发，只做 Job A/B）
-**change-gate 节流**：state 目录 `reviewer-state.json`（上次审 sha + 时间戳 +
-`auditedEpisodes` 滚动窗口），原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不
-追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`story/assets.v1.json` 零 diff ⇒ 一行 no-op
+**change-gate 节流**：state 目录 `reviewer-state.json`（**权威键名**：`lastAuditedSha` =
+上次审计的 repo HEAD 全长 sha、`lastAuditedAt` = ISO 时间戳、`auditedEpisodes` 滚动窗口；
+调度器 lane 门控读 `lastAuditedSha` 决定要不要起 fire——写别的键名 = 门恒开、每 tick 白 boot），
+原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`story/assets.v1.json` 零 diff ⇒ 一行 no-op
 （不空扫；判据同 §0 探针——资产图抽检是本 Job 的一半，assets-only 修订必须开门）。有新 Done commit ⇒
 抽 1-2 集邻集（read-only，只 file 不改）：**邻集一致性**（承接帧/尾钩兑现/R5 位阶）+
 **资产图抽检**（正文 vs 本集 current facts/timeline 逐项比对，防敷衍 delta——§15 义务 2 的事后

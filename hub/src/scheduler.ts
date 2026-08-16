@@ -349,13 +349,16 @@ export function parseProviders(cfg: WlConfig): Record<string, ProviderEntry> {
 }
 
 // ---------------------------------------------------------------------------
-// keystone 升档谓词：板 frontmatter 纯 glob（不读票体判断，仅解析 §18 稳定字段）。
+// keystone 升档谓词：板 glob（§18 稳定 frontmatter 字段 + 机读行 `Mode:`）。
 // 0.6.0 起与车道门控共用同一个 frontmatter 解析核（parseLaneTicket/readBoardTickets）——
 // 0.5.0 的 head-regex 解析被原语义扩展（额外容错引号/block 式 labels，方向只会多升档，安全）。
+// WLSYS-95eb134a：In Review 的 `Mode: direct-write` 票（§21a-fail.2 升级重写，story-designer
+// 顶配亲写，无 keystone 标签）同样升档——§21a-gate「验收档位与认领顺序」要求审读档 ≥ 创作档，
+// 默认档 reviewer 对顶配稿只能跳过；不升档 ⇒ 票停靠 + §5 前向冻结让全板无在途创作。
 // ---------------------------------------------------------------------------
 export function keystonePending(boardTicketsDir: string): boolean {
   return readBoardTickets(boardTicketsDir).tickets
-    .some((t) => t.state === "In Review" && t.labels.includes("keystone"));
+    .some((t) => t.state === "In Review" && (t.labels.includes("keystone") || t.directWrite));
 }
 
 export function resolveTier(sched: Sched, agent: string, boardDir: string): { model: string; effort: string; escalated: boolean } {
@@ -426,6 +429,7 @@ export type LaneTicket = {
   episode: number | null;      // `Episode: N` 机读行
   blockedBy: string[];         // `Blocked-by: <ID>` 机读行（可多条）
   notifiedMs: number | null;   // 最新一条可解析的 `Notified: <ISO>` 评论行
+  directWrite: boolean;        // 票面机读行 `Mode: direct-write`（§21a-fail.2 升级重写 / keystone 首稿，顶配亲写）
   malformed: boolean;          // 关键字段（frontmatter 定界/state/labels 值）解析不出 ⇒ 保守放行
 };
 
@@ -441,7 +445,7 @@ export function parseLaneTicket(raw: string, fileName: string, mtimeMs: number):
   const t: LaneTicket = {
     id: fileName.replace(/\.md$/, ""), state: "", labels: [], owner: null, assignee: null,
     updatedRaw: "", updatedMs: null, mtimeMs, episode: null, blockedBy: [],
-    notifiedMs: null, malformed: false,
+    notifiedMs: null, directWrite: false, malformed: false,
   };
   const lines = raw.replace(/^\uFEFF/, "").split(/\r?\n/);
   if (lines.length === 0 || lines[0].trim() !== "---") { t.malformed = true; return t; }
@@ -507,6 +511,7 @@ export function parseLaneTicket(raw: string, fileName: string, mtimeMs: number):
   const body = lines.slice(end + 1).join("\n");
   const ep = /^Episode:[ \t]*(\d+)/m.exec(body);
   if (ep) t.episode = Number(ep[1]);
+  t.directWrite = /^Mode:[ \t]*direct-write\b/m.test(body);
   for (const m of body.matchAll(/^Blocked-by:[ \t]*(\S+)/gm)) t.blockedBy.push(m[1]);
   for (const m of body.matchAll(/^Notified:[ \t]*(.+?)[ \t]*$/gm)) {
     const ms = Date.parse(m[1]);
@@ -654,15 +659,18 @@ export function shaEq(a: string, b: string): boolean {
 
 // —— 各 agent lane 谓词（SKILL §0 如实移植；返回命中枝清单，空数组 = 谓词为空）——
 
-// episode-writer（SKILL §0）：∃ Todo+tier（**任意 Type**——修订 Bug/Improvement 无
-// episode 子标签，谓词绝不按子类型收窄，否则 Urgent 修订会被 cheap-exit 掉；**不排除
-// blocked**——SKILL 谓词原文未排除，与 evaluator 同口径「更保守一档」，假命中代价 =
-// 一次白 boot）∪ Ⅱ孤儿。Ⅰ对本角色为空集（§4 无 needs-episode-writer）；Ⅲ由 reportsEscape
-// 统一并入；§5 顺序前置不进谓词（被前置挡住也让它假命中，由 agent 侧 §5 门 no-op；
-// Backlog 暂存子票天然不可见，正确 cheap 退出）。
+// episode-writer（SKILL §0）：∃ Todo+tier+¬blocked（**任意 Type**——修订 Bug/Improvement 无
+// episode 子标签，谓词绝不按子类型收窄，否则 Urgent 修订会被 cheap-exit 掉；**排除 blocked**
+// ——WLSYS-6267a4c 裁定：§9 blocked 票不在任何拾取序内，命中它只能产出又一次 no-op，而人工
+// 停靠可站 24h+，「一次白 boot」实为每 tick 白 boot；blocked 票确需本角色的唯一形态是
+// needs-\* 求助，由独立逃逸口Ⅰ覆盖；解封 = §18 labels update op，主进件项随即恢复为真，
+// 无假退出窗口）∪ Ⅱ孤儿（不加 ¬blocked——键于 assignee 陈旧，是卫生动作不是拾取）。
+// Ⅰ对本角色为空集（§4 无 needs-episode-writer）；Ⅲ由 reportsEscape 统一并入；§5 顺序
+// 前置不进谓词（被前置挡住也让它假命中，由 agent 侧 §5 门 no-op；Backlog 暂存子票天然
+// 不可见，正确 cheap 退出）。
 export function laneEpisodeWriter(tickets: LaneTicket[], nowMs: number): string[] {
   const hits: string[] = [];
-  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("episode-writer"));
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("episode-writer") && !t.labels.includes("blocked"));
   if (todo) hits.push(fmtHit("∃ Todo+episode-writer", todo));
   const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("episode-writer") && orphaned(t, nowMs));
   if (orphan) hits.push(fmtHit("孤儿 In Progress（§7 认领陈旧）", orphan));
@@ -680,15 +688,15 @@ export function laneSourceAnalyst(tickets: LaneTicket[], nowMs: number): string[
   return hits;
 }
 
-// story-designer（SKILL §0）：∃ Todo+tier（arc-design/keystone 集/direct-write 升级/
-// punch-up 全在本切片；**不排除 blocked**——SKILL 谓词原文未排除，与 evaluator 同口径）
-// ∪ Ⅰ needs-designer 求助（节拍修正提案裁决——非终态即有活）∪
-// Ⅱ孤儿。不按生产阶段收窄（SKILL 明令：量产段仍需接 keystone/下一 arc）。
+// story-designer（SKILL §0）：∃ Todo+tier+¬blocked（arc-design/keystone 集/direct-write 升级/
+// punch-up 全在本切片；**排除 blocked**——WLSYS-6267a4c 裁定，理由同 laneEpisodeWriter）
+// ∪ Ⅰ needs-designer 求助（节拍修正提案裁决——非终态即有活；带 blocked 也命中）∪
+// Ⅱ孤儿（不加 ¬blocked）。不按生产阶段收窄（SKILL 明令：量产段仍需接 keystone/下一 arc）。
 export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number, marketReady = true): string[] {
   if (!marketReady) return [];
   const hits: string[] = [];
   const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("story-designer")
-    && !t.labels.includes("source-analysis"));
+    && !t.labels.includes("source-analysis") && !t.labels.includes("blocked"));
   if (todo) hits.push(fmtHit("∃ Todo+story-designer", todo));
   const needs = tickets.find((t) => !TERMINAL_STATES.has(t.state) && t.labels.includes("needs-designer"));
   if (needs) hits.push(fmtHit("needs-designer 求助（§9）", needs));
@@ -698,15 +706,24 @@ export function laneStoryDesigner(tickets: LaneTicket[], nowMs: number, marketRe
   return hits;
 }
 
-// reviewer（SKILL §0）：∃ In Review（**任意**——owner:reviewer 主队列与 punch-up 双签、
-// 档位待升的 keystone 票等全部形态的保守超集；agent 侧再精滤）∪ Ⅰ needs-reviewer ∪
-// Ⅱ孤儿（In Review 认领陈旧，§7）∪ Job C change-gate（`git diff <上次审计 sha>..HEAD --
-// episodes/ story/assets.v1.json` 非空；不可判 ⇒ 保守命中）。结构化资产-only 修订也必须
-// 唤醒 reviewer，避免正文与事实图脱钩。
+// reviewer（SKILL §0 逐字）：∃ In Review+¬blocked ∧（owner:reviewer（Job A 主队列，含档位
+// 待升的 keystone 票）∨ labels∋punch-up（A-3 双签，owner=showrunner）∨ owner 缺失（不可判，
+// 保守命中））——owner=showrunner 的设计/裁定票在 In Review 等的是 showrunner 大纲门，
+// reviewer 命中它只会全 boot 后判「不属审读门 lane」；**排除 blocked**——WLSYS-6267a4c
+// 裁定，理由同 laneEpisodeWriter：§9 停靠的 In Review 票不在 Job A 拾取序内）∪
+// Ⅰ needs-reviewer（带 blocked 也命中）∪ Ⅱ孤儿（In Review 认领陈旧，§7；不加 ¬blocked、
+// 不看 owner）∪ Job C change-gate（`git diff <上次审计 sha>..HEAD -- episodes/
+// story/assets.v1.json` 非空；不可判 ⇒ 保守命中）。结构化资产-only 修订也必须唤醒
+// reviewer，避免正文与事实图脱钩。
+const t0Label = (t: LaneTicket): string =>
+  t.owner === "reviewer" ? "∃ In Review+owner:reviewer（Job A）"
+    : t.labels.includes("punch-up") ? "∃ In Review+punch-up（A-3 双签）"
+      : "∃ In Review（owner 缺失——保守命中）";
 export function laneReviewer(tickets: LaneTicket[], nowMs: number, changedSinceAudit: boolean | null): string[] {
   const hits: string[] = [];
-  const ir = tickets.find((t) => t.state === "In Review");
-  if (ir) hits.push(fmtHit("∃ In Review", ir));
+  const ir = tickets.find((t) => t.state === "In Review" && !t.labels.includes("blocked")
+    && (t.owner === null || t.owner === "reviewer" || t.labels.includes("punch-up")));
+  if (ir) hits.push(fmtHit(t0Label(ir), ir));
   const needs = tickets.find((t) => !TERMINAL_STATES.has(t.state) && t.labels.includes("needs-reviewer"));
   if (needs) hits.push(fmtHit("needs-reviewer 求助（§9）", needs));
   const orphan = tickets.find((t) => t.state === "In Review" && t.assignee !== null && claimStale(t, nowMs));
@@ -716,12 +733,13 @@ export function laneReviewer(tickets: LaneTicket[], nowMs: number, changedSinceA
   return hits;
 }
 
-// evaluator（SKILL §0）：∃ Todo+milestone-eval（不排除 blocked——比 Job 0 拾取过滤更保守
-// 一档；unblock 属 showrunner 车道）∪ Ⅱ孤儿。Ⅰ不存在 needs-evaluator（§4 闭集）。
+// evaluator（SKILL §0）：∃ Todo+milestone-eval+¬blocked（与 Job 0 拾取过滤一致——
+// WLSYS-6267a4c 裁定，理由同 laneEpisodeWriter；unblock 属 showrunner 车道）∪ Ⅱ孤儿
+// （不加 ¬blocked）。Ⅰ不存在 needs-evaluator（§4 闭集）。
 // evaluator 是 Blocked-by 阻断闸的执行机构（§21）——探针命中即尽快 spawn。
 export function laneEvaluator(tickets: LaneTicket[], nowMs: number): string[] {
   const hits: string[] = [];
-  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("milestone-eval"));
+  const todo = tickets.find((t) => t.state === "Todo" && t.labels.includes("milestone-eval") && !t.labels.includes("blocked"));
   if (todo) hits.push(fmtHit("∃ Todo+milestone-eval", todo));
   const orphan = tickets.find((t) => t.state === "In Progress" && t.labels.includes("milestone-eval") && orphaned(t, nowMs));
   if (orphan) hits.push(fmtHit("孤儿 In Progress（§7 认领陈旧）", orphan));
@@ -1063,15 +1081,24 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
     case "reviewer": {
       // Job C change-gate 现行判据（reviewer-state gateNote 现场裁定，fire #177 实测）：
       // 有 prev sha ⇒ `git diff --quiet <prev>..HEAD -- episodes/ story/assets.v1.json`。
-      // base 键序对齐 gateNote：先 lastAuditSha（现行基点），后 lastAuditedEpisodesSha
-      // （旧 schema fallback）。首跑（state 缺失）且 episodes/∪story assets 确证零 commit ⇒
-      // 可证明无 Job C 活（不是含糊）；其余任何不可判恒保守命中。
+      // base 键序：先 lastAuditedSha（reviewer SKILL §Job C 规定、agent 实写的权威键），再
+      // lastAuditSha / lastAuditedEpisodesSha（旧 schema fallback）。WLSYS-f5482b7a：修复前只读
+      // 后两个从未被写过的键 ⇒ prev 恒 null ⇒ 有正文的项目每 tick 都落首跑分支恒开门。
+      // 首跑（state 缺失）：确无任何 ep-NNN.md（scaffold 的 episodes/.gitkeep 会让 pathspec SHA
+      // 非空——同 doctor 分支的 hasEpisodeScripts 守卫）⇒ 可证明无 Job C 活；有正文且
+      // episodes/∪story assets 确证零 commit 亦然；其余任何不可判恒保守命中。
       const diff = io.gitDiff ?? gitDiffChanged;
-      const prev = stateStr(readStateJson(statePath("reviewer-state.json")), "lastAuditSha", "lastAuditedEpisodesSha");
+      const prev = stateStr(readStateJson(statePath("reviewer-state.json")),
+        "lastAuditedSha", "lastAuditSha", "lastAuditedEpisodesSha");
       let changed: boolean | null;
       if (prev === null) {
-        const cur = git(io.repoPath, "episodes/", "story/assets.v1.json");
-        changed = cur === null ? null : cur !== "";
+        const scripts = (io.episodeScripts ?? hasEpisodeScripts)(io.repoPath);
+        if (scripts === false) {
+          changed = false;
+        } else {
+          const cur = git(io.repoPath, "episodes/", "story/assets.v1.json");
+          changed = cur === null ? null : cur !== "";
+        }
       } else {
         changed = diff(io.repoPath, prev, ["episodes/", "story/assets.v1.json"]);
       }

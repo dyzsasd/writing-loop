@@ -24,8 +24,10 @@ description: >-
 ### Step 0 —— 廉价车道探针（no-op fast-path；动机/单向安全铁律/判定语义见 §0 Step 0）
 
 **lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 frontmatter——§18 稳定字段），命中当且仅当：
-- `∃ state:Todo` + tier=`episode-writer` 的**任意类型**票（Feature/Bug/Improvement 均算——
-  修订 Bug/Improvement **无** `episode` 子标签，谓词绝不按子类型收窄，否则 Urgent 修订会被 cheap-exit 掉）；或
+- `∃ state:Todo` + tier=`episode-writer` + `labels ∌ blocked` 的**任意类型**票（Feature/Bug/
+  Improvement 均算——修订 Bug/Improvement **无** `episode` 子标签，谓词绝不按子类型收窄，否则
+  Urgent 修订会被 cheap-exit 掉；排除 `blocked` 是因为 §9 blocked 票不在任何拾取序内，命中它
+  只会再 no-op 一次——收窄的是工作流信号，不是 Type；解封移除标签即恢复为真）；或
 - 逃逸口②孤儿：`∃ In Progress` + 本 tier + `assignee` 陈旧（>60min，§7）；或
 - 逃逸口③报告结算：到期 weekly/monthly 汇总或 `reports/` 有未分发 `*.review.md`（§22）。
 

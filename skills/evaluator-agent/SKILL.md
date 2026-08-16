@@ -28,7 +28,7 @@ conventions「拓扑一览」；协作只经工单 state + label + comment + 机
 ### Step 0 —— 廉价车道探针（lane 谓词本体；动机/判定语义/单向安全铁律见 §0 Step 0）
 
 **本 agent lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` 仅解析 frontmatter 稳定字段 §18 求值，**不读** conventions/lessons/rubric）：
-- **主进件**：`∃ state:Todo + labels 含 milestone-eval` 的票（= 下面 Job 0 既有拾取过滤前移到 Step-0）。
+- **主进件**：`∃ state:Todo + labels 含 milestone-eval + 排除 blocked` 的票（= 下面 Job 0 既有拾取过滤逐字前移到 Step-0；blocked 票不在拾取序内，命中只会再 no-op 一次，解封移除标签即恢复为真）。
 - 逃逸口（必须并入谓词，缺一即漏退真活）：**①** needs-\* 求助——**本角色不适用**：needs-\* 是闭集（§4：仅 needs-showrunner / needs-reviewer / needs-designer 三个合法），**不存在 needs-evaluator**，本角色无 needs-\* 入口，不查此分支；**②** 孤儿——`∃ In Progress` milestone-eval + assignee 陈旧 >60min（§7）；**③** 到期 weekly/monthly 结算或 `reports/` 有未分发 `*.review.md`（§22）。（④ doc-watch 仅 showrunner，本 agent 不适用。）
 
 谓词全空 ⇒ 打印一行 no-op 退出，不落标准 boot；任一命中 ⇒ 正常全 boot。

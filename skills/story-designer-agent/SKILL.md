@@ -27,9 +27,10 @@ label + comment + 机读行（§0）；block 而不猜。
 
 **本 lane 谓词**（只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md` **仅解析
 frontmatter** 求值，§18 稳定字段，不读 conventions/lessons/其他 references）：
-`∃ state:Todo ∧ labels∋story-designer 的票`（涵盖 arc-design / keystone 集 /
-`Mode:direct-write` 升级 / punch-up）∪ **①** `∃ needs-designer` 求助票（节拍修正提案
-裁决）∪ **②** 孤儿回收（`In Progress` + 本 tier + assignee 陈旧，§7）∪ **③** 到期报告
+`∃ state:Todo ∧ labels∋story-designer ∧ labels∌blocked 的票`（涵盖 arc-design / keystone 集 /
+`Mode:direct-write` 升级 / punch-up；排除 `blocked`——§9 blocked 票不在拾取序内，命中只会再
+no-op 一次，解封移除标签即恢复为真）∪ **①** `∃ needs-designer` 求助票（节拍修正提案
+裁决；带 `blocked` 也算——本口不排除）∪ **②** 孤儿回收（`In Progress` + 本 tier + assignee 陈旧，§7）∪ **③** 到期报告
 结算 / 未分发 `*.review.md`（§22）。
 谓词为空 ⇒ 打印一行 no-op 退出；命中 ⇒ 正常全 boot——量产段本 lane 仍需接后续 keystone /
 下一 arc，**不按生产阶段自作聪明硬退**（§0 铁律：保守超集，宁假命中绝不假退出）。
