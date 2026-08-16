@@ -34,6 +34,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   "sync-opencode":         ["sync-opencode"],          // providers 注册表 → opencode.json（create-or-merge）
   fires:                   ["fires"],                 // fires.jsonl 遥测尾巴 + 按 agent 聚合成功率
   "install-claude-plugin": ["install-claude-plugin"], // 注册本地 npm-source marketplace 给 Claude Code
+  bundle:                  ["bundle"],                // workspace 打包/导入/查看——跨机器 MOVE，不是同步
 };
 
 const version = (): string => {
@@ -107,6 +108,14 @@ const usage = (): void => {
                               （create-or-merge；providers 为空则 no-op；绝不碰全局配置）
   fires [--project K] [--last N] [--json]
                               fires.jsonl 遥测尾巴（默认末 20 行）+ 按 agent 聚合成功率
+  bundle export --out FILE.tar.gz [--include-logs]
+                              打包整个 workspace（剧本 repo 完整历史、运行态板、资产库、原著、
+                              workspace 身份）；调度器运行中或 repo 有未提交改动时拒绝
+  bundle import FILE.tar.gz --dir NEW_ROOT [--label L]
+                              落进空目录：逐文件校验 SHA-256、clone 剧本 repo、写 registry、
+                              项目全部置为暂停态——之后 doctor → project enable → run
+  bundle inspect FILE.tar.gz [--json]
+                              只读打印清单，不解包
   install-claude-plugin [--version V] [--dry-run]
                               写本地 npm-source marketplace，让 Claude Code 从 npm 装
                               writing-loop 插件（版本默认钉住本 CLI 自身）

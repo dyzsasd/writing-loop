@@ -164,8 +164,13 @@ try {
     && help.out.includes("production status [--project K] [--json]")
     && help.out.includes("production enqueue --plan --project K --input FILE")
     && help.out.includes("--confirm PLAN_ID")
-    && help.out.includes("production handoff --project K --input FILE"),
-  "编译 cli.js help → 立项、原著登记、story gates、workspace registry 与 production 命令可发现");
+    && help.out.includes("production handoff --project K --input FILE")
+    && help.out.includes("bundle export --out FILE.tar.gz")
+    && help.out.includes("bundle import FILE.tar.gz --dir NEW_ROOT"),
+  "编译 cli.js help → 立项、原著登记、story gates、workspace registry、production 与 bundle 命令可发现");
+  const bundleHelp = run(process.execPath, [join(distDir, "cli.js"), "bundle", "--help"]);
+  ok(bundleHelp.code === 0 && bundleHelp.out.includes("MOVE 语义") && bundleHelp.out.includes("project enable"),
+    "编译 cli.js bundle --help → 迁移顺序（导出→传输→导入→doctor→enable→run）可读");
   const runHelp = run(process.execPath, [join(distDir, "cli.js"), "run", "--help"]);
   ok(runHelp.code === 0 && runHelp.out.includes("--cli claude|codex|opencode"), "编译 cli.js run --help → 调度器用法可读");
   const studioHelp = run(process.execPath, [join(distDir, "cli.js"), "studio", "--help"]);
