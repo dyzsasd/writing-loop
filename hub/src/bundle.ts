@@ -183,19 +183,23 @@ export function bundleExport(argv: string[]): number {
         enabledAtExport: project.enabled !== false });
     }
 
-    // 3) 原著文件：source-intake 引用的、位于 workspace 根下的文件
+    // 3) 操作者放在 workspace 根下的原著原件（source-intake manifest 的 source.fileName）。
+    //    这是可选附带：agent 读的是 <key>/source-intake.v1/original/source.txt 那份受控副本，
+    //    它已随 data/ 一起打包；根下的原件只是操作者自己的输入，找得到就一并带走，找不到不算错。
     const sourceFiles = new Set<string>();
     for (const [key] of projectEntries(ws.config)) {
       const manifestPath = join(projectDataDir(root, key), "source-intake.v1", "manifest.v1.json");
       if (!existsSync(manifestPath)) continue;
       try {
-        const m = JSON.parse(readFileSync(manifestPath, "utf8")) as { source?: { path?: string; originalPath?: string } };
-        for (const p of [m.source?.path, m.source?.originalPath]) {
-          if (typeof p !== "string") continue;
-          const abs = resolve(root, p);
-          if (abs.startsWith(root + "/") && existsSync(abs) && statSync(abs).isFile()) sourceFiles.add(relative(root, abs));
-        }
-      } catch { /* manifest 形状不符就不带原著——导入端会明确报缺 */ }
+        const m = JSON.parse(readFileSync(manifestPath, "utf8")) as { source?: { fileName?: string; sha256?: string } };
+        const name = m.source?.fileName;
+        if (typeof name !== "string" || name.includes("/") || name.includes("..")) continue;
+        const abs = join(root, name);
+        if (!existsSync(abs) || !statSync(abs).isFile()) continue;
+        // 只带指纹与登记一致的那份，防止把同名但已改动的文件当原著搬走
+        if (typeof m.source?.sha256 === "string" && sha256File(abs) !== m.source.sha256) continue;
+        sourceFiles.add(name);
+      } catch { /* manifest 形状不符 ⇒ 不带原件；受控副本仍在 data/ 内 */ }
     }
     for (const rel of [...sourceFiles].sort()) put(join("sources", rel), join(root, rel));
 
@@ -334,9 +338,15 @@ export function bundleImport(argv: string[]): number {
 // inspect
 // ---------------------------------------------------------------------------
 export function bundleInspect(argv: string[]): number {
-  const file = argv.find((a) => !a.startsWith("--"));
+  let file: string | null = null; let asJson = false;
+  for (const a of argv) {
+    if (a === "--json") asJson = true;
+    else if (a === "--help" || a === "-h") { usage(); return 0; }
+    else if (a.startsWith("--")) return die(`未知参数 '${a}'`);
+    else if (!file) file = a;
+    else return die(`多余参数 '${a}'`);
+  }
   if (!file) return die("需要 bundle 文件路径");
-  const asJson = argv.includes("--json");
   const r = spawnSync("tar", ["-xzOf", resolve(file), `${BUNDLE_DIR}/manifest.json`], { encoding: "utf8" });
   if (r.status !== 0) return die(`读不出 manifest: ${r.stderr}`);
   const m = JSON.parse(r.stdout) as BundleManifest;

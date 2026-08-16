@@ -35,7 +35,8 @@ writeFileSync(join(data, "demo", "fires.jsonl"), '{"agent":"reviewer","exitCode"
 writeFileSync(join(data, "demo", "run-state.json"), JSON.stringify({ status: "stopped", inFlight: [] }));
 writeFileSync(join(data, "demo", "wl-run.lock.stale-pid-1"), "1");
 writeFileSync(join(data, "demo", "logs", "old.log"), "log line");
-writeFileSync(join(data, "demo", "source-intake.v1", "manifest.v1.json"), JSON.stringify({ source: { path: "novel.txt" } }));
+const novelSha = createHash("sha256").update("原著全文……").digest("hex");
+writeFileSync(join(data, "demo", "source-intake.v1", "manifest.v1.json"), JSON.stringify({ source: { fileName: "novel.txt", sha256: novelSha } }));
 writeFileSync(join(data, "demo", "source-intake.v1", "chunks", "chunk-0001.txt"), "第一章");
 writeFileSync(join(data, "assets", "sha256", "ab", "abcd"), Buffer.from([1, 2, 3, 4]));
 writeFileSync(join(data, "system", "proposals", "WLSYS-1.json"), "{}");
@@ -65,7 +66,10 @@ try {
     && !names.some((n) => n.includes("wl-run.lock")) && !names.some((n) => n.includes("studio.log"))
     && !names.some((n) => n.includes("onboarding-transactions")) && !names.some((n) => n.includes("config.json.bak")),
   "机器本地文件（日志、run-state、锁、studio.log、事务现场、config 备份）不出境");
-  ok(m.sourceFiles?.length === 1 && m.sourceFiles[0] === "novel.txt", "manifest.sourceFiles 登记原著相对路径");
+  ok(m.sourceFiles?.length === 1 && m.sourceFiles[0] === "novel.txt", "manifest.sourceFiles 登记与登记指纹一致的原著原件");
+  const inspectPlain = run(src, ["inspect", out]);
+  ok(inspectPlain.status === 0 && inspectPlain.stdout.includes("ws_" + "a".repeat(32)) && inspectPlain.stdout.includes("原著文件: novel.txt"),
+  "inspect 人类可读输出含 workspace ID 与原著文件");
 
   // ---- 导入到空目录 ----
   const dst = join(HOME, "restored");
