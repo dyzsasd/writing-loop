@@ -39,6 +39,7 @@
 //   （缺省用内建 wildcard-deny 基线 OPENCODE_PERMISSION_DEFAULT；不做 deep-merge）。
 // 零依赖：node:* 内建 API only。自测：hub/test/scheduler*.ts（npm test）。
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { resolveUsageAdapter, type FireUsage } from "./fire-usage.ts";
 import { createHash, randomBytes } from "node:crypto";
 import {
   appendFileSync, closeSync, constants as fsConstants, fstatSync, fsyncSync, futimesSync,
@@ -60,23 +61,24 @@ import {
 // 操作者 T1/T3 裁定（2026-07-19，11.6h/219 fires 实测 52% no-op 之后）：
 // - 间隔全面放宽——no-op 判定移入调度器门控层（laneGating）后，勤 fire 不再是发现活的
 //   唯一手段，慢节律省下空转的 boot 上下文税；
-// - 写作用小模型、设计/建票用大模型：episode-writer 保持 sonnet/high 且提频（180s，
-//   写作是吞吐主路径）；reviewer 默认档回落 opus/high——keystone 升档机制
-//   （keystoneReviewer，默认 opus/max 不变）承担顶配场景。
+// - 写作用较小模型、设计/建票用顶配：episode-writer 提频（180s，写作是吞吐主路径）；
+//   reviewer 默认档比设计角色低一档——keystone 升档机制（keystoneReviewer）承担顶配场景。
+// 2026-08-16 操作者裁定：整体上调一档——原 sonnet 档位改用 opus，原 opus 档位改用 fable。
+//   两级相对关系不变（写作档 < 设计/审读档），codex 车道的映射键同步上移。
 // cap/stagger 与 0.4.0/0.5.0 逐格不变。
 // ---------------------------------------------------------------------------
 export const AGENT_SPECS: ReadonlyArray<readonly [string, string, string, number, number, number]> = [
   //  agent            model     effort   interval  cap   stagger
-  ["showrunner",     "opus",   "max",     600,  3600,  0],
-  ["source-analyst", "sonnet", "high",     60,  1800,  5],
-  ["story-designer", "opus",   "max",     300,  3600, 10],
-  ["episode-writer", "sonnet", "high",    180,  2400, 20],
-  ["reviewer",       "opus",   "high",    300,  2400, 30],
-  ["evaluator",      "opus",   "xhigh",   600,  2400, 40],
-  ["sweep",          "sonnet", "high",   1800,  1200, 50],
-  ["script-doctor",  "opus",   "xhigh",  7200,  2400, 60],
-  ["market-watch",   "sonnet", "high",    300,  1200, 70],
-  ["reflect",        "opus",   "xhigh", 14400,  2400, 80],
+  ["showrunner",     "fable",  "max",     600,  3600,  0],
+  ["source-analyst", "opus",   "high",     60,  1800,  5],
+  ["story-designer", "fable",  "max",     300,  3600, 10],
+  ["episode-writer", "opus",   "high",    180,  2400, 20],
+  ["reviewer",       "fable",  "high",    300,  2400, 30],
+  ["evaluator",      "fable",  "xhigh",   600,  2400, 40],
+  ["sweep",          "opus",   "high",   1800,  1200, 50],
+  ["script-doctor",  "fable",  "xhigh",  7200,  2400, 60],
+  ["market-watch",   "opus",   "high",    300,  1200, 70],
+  ["reflect",        "fable",  "xhigh", 14400,  2400, 80],
 ];
 export const AGENT_ORDER: readonly string[] = AGENT_SPECS.map((s) => s[0]);
 
@@ -85,14 +87,17 @@ export const AGENT_ORDER: readonly string[] = AGENT_SPECS.map((s) => s[0]);
 export const REPO_WRITERS: ReadonlySet<string> = new Set(["showrunner", "source-analyst", "story-designer", "episode-writer", "evaluator"]);
 export const BOARD_ONLY_MAX = 2;    // 板上角色彼此的并发上限
 const GRACE_DEFAULT = 30;           // Ctrl-C / --for 到点后等 in-flight 收尾的宽限秒数
-export const KEYSTONE_DEFAULT = { model: "opus", effort: "max" } as const;
+export const KEYSTONE_DEFAULT = { model: "fable", effort: "max" } as const;
 const HEARTBEAT_S = 30;             // 锁心跳 touch 周期
 const TICK_MS = 200;                // 主循环轮询周期（0.4.0 的 TICK_S=0.2）
 
 // cli:"codex" 时把配置里的 Claude 档位名映射为 Codex 名（conventions 拓扑一览映射表）；
 // 不在表内的值原样透传（操作者已直接写 Codex 名）。
 export const CODEX_MODEL_MAP: Readonly<Record<string, string>> = {
-  opus: "gpt-5.6-sol",
+  fable: "gpt-5.6-sol",
+  opus: "gpt-5.6-terra",
+  // 旧档位名保留：既有项目 config 里手写 scheduler.agents.<n>.model 的覆盖值仍需可解析，
+  // 否则升档当天所有带覆盖的项目会把 "sonnet" 原样传给 codex --model 而失败。
   sonnet: "gpt-5.6-terra",
 };
 export const CODEX_EFFORT_MAP: Readonly<Record<string, string>> = {
@@ -1240,6 +1245,12 @@ export function buildInlinePrompt(agent: string, key: string, repo: string, data
 
 // ⇒ {argv, inlinePrompt}。inlinePrompt 非 null 时即 argv 里内联的整段 prompt（dry-run 据此
 // 截断展示）；slash 模式与 command 覆盖恒为 null。
+// 计量旗标：加在各车道 argv 上，使 fire 输出结构化 usage。命令覆盖（agents.<n>.command）
+// 走测试接缝，不注入——那条路径的 argv 由操作者完全掌控。
+function usageArgs(cli: string): string[] {
+  return resolveUsageAdapter(cli)?.extraArgs ?? [];
+}
+
 export function fireArgv(
   sched: Sched, agent: string, model: string, effort: string, repo: string,
   dataRootPath: string, key: string, root: string | null,
@@ -1274,6 +1285,7 @@ export function fireArgv(
     if (model && model.includes("/")) argv.push("-m", model);
     const entry = providers[opencodeProviderPrefix(model) ?? ""];
     if (effort && entry?.effortMode !== "strip") argv.push("--variant", effort);
+    argv.push(...usageArgs(sched.cli));
     argv.push(prompt);
     return { argv, inlinePrompt: prompt };
   }
@@ -1283,6 +1295,7 @@ export function fireArgv(
     const argv = ["codex", "exec", "-C", repo,
       "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "--model", m];
     if (e) argv.push("-c", `model_reasoning_effort="${e}"`);
+    argv.push(...usageArgs(sched.cli));
     argv.push(prompt);
     return { argv, inlinePrompt: inline ? prompt : null };
   }
@@ -1293,6 +1306,7 @@ export function fireArgv(
   if (effort) argv.push("--effort", effort);
   argv.push("--dangerously-skip-permissions", "--add-dir", dataRootPath);
   if (sched.trimSettingsJson) argv.push("--settings", sched.trimSettingsJson);
+  argv.push(...usageArgs(sched.cli));
   return { argv, inlinePrompt: inline ? prompt : null };
 }
 
@@ -1990,11 +2004,37 @@ export class Scheduler {
     return true;
   }
 
+  // fire 日志 → usage。日志文件是 fd 直写的原始输出（不经 Node 缓冲），此处读回解析。
+  // claude 车道解析成功后把 result 正文写回日志：结构化输出让日志变成转义 JSON，而这些日志
+  // 是操作者排障时唯一读的东西。解析失败一律保留原文件并记 usage:null——宁可没有数字，
+  // 不可有错数字，也不可弄丢日志。
+  private collectUsage(fire: Fire): FireUsage | null {
+    const adapter = resolveUsageAdapter(this.sched.cli);
+    if (!adapter || this.sched.agents[fire.agent]?.command) return null;
+    let raw: string;
+    try { raw = readFileSync(fire.logPath, "utf8"); } catch { return null; }
+    if (raw.length > 4 * 1024 * 1024) return null; // 超大缓冲不解析，避免 fire 收账阶段卡住
+    let usage: FireUsage | null = null;
+    try { usage = adapter.parse(raw); } catch { usage = null; }
+    if (adapter.resultText) {
+      let restored: string | null = null;
+      try { restored = adapter.resultText(raw); } catch { restored = null; }
+      if (restored !== null && restored.trim() !== "") {
+        try { writeFileSync(fire.logPath, restored.endsWith("\n") ? restored : restored + "\n"); }
+        catch { /* 写回失败 ⇒ 保留 JSON 原文，usage 仍有效 */ }
+      }
+    }
+    return usage;
+  }
+
   // ---- 收 fire ----
   private finish(fire: Fire, rc: number | null): number {
     this.inflight.splice(this.inflight.indexOf(fire), 1);
     const ended = utcIso();
     const dur = Math.round((mono() - fire.startedMono) * 1000) / 1000;
+    // 计量在 detectNoop 之前：claude 车道的日志此刻是一坨终端 JSON，先解析出 usage，再把
+    // 其中的正文写回日志文件。顺序反了的话 no-op 探测读到的是 JSON 而非 agent 正文。
+    const usage = this.collectUsage(fire);
     const noop = detectNoop(fire.logPath);
     // 车道门控账本维护：干净退出（exit 0 且未超时）才推进墙钟基点/提交 showrunner 基线；
     // 崩溃/超时 ⇒ 基线清空 ⇒ 下次门控求值恒「已变」（单向安全规则③）。
@@ -2007,6 +2047,7 @@ export class Scheduler {
       exitCode: rc, timedOut: fire.timedOut, noop, keystoneEscalated: fire.escalated,
       descendantDrain: fire.descendantDrain || undefined,
       provider: providerOf(this.sched.cli, fire.model),
+      usage: usage ?? undefined,
     });
     this.writeRunState(this.draining || this.stopRequested ? "stopping" : "running");
     const flags: string[] = [];

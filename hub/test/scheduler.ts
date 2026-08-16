@@ -232,10 +232,10 @@ function testKeystoneEscalation(): void {
   const r = runWl(ws, "--project", "t1", "--once", "--agents", "reviewer");
   let rows = ledger(ws);
   let msgs = markers(ws).filter((m) => m.kind === "msg");
-  check("keystone 升档：命令收到 opus/max", msgs.some((m) => m.text.includes("model=opus effort=max")),
+  check("keystone 升档：命令收到顶配档位/max", msgs.some((m) => m.text.includes("model=fable effort=max")),
     `msgs=${JSON.stringify(msgs.map((m) => m.text))} rc=${r.code}`);
-  check("keystone 升档：ledger keystoneEscalated=true 且 model=opus",
-    rows.length > 0 && rows[rows.length - 1].keystoneEscalated && rows[rows.length - 1].model === "opus");
+  check("keystone 升档：ledger keystoneEscalated=true 且 model 为顶配档位",
+    rows.length > 0 && rows[rows.length - 1].keystoneEscalated && rows[rows.length - 1].model === "fable");
   // 反例：keystone 票不在 In Review ⇒ 不升档
   seedKeystoneTicket(ws, "Done");
   unlinkSync(join(ws, "markers.txt"));

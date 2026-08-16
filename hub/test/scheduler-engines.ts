@@ -1,7 +1,9 @@
 // scheduler 引擎车道自测（Claude 0.4.0 奇偶校验 + 当前 Codex 映射 + 本轮新车道）：
 //   1. 0.4.0 字节奇偶校验：cli=claude/codex 默认配置（slash promptMode）下渲染的 argv
 //      形状稳定（斜杠 prompt、flag 顺序、codex 的 opus/max→gpt-5.6-sol/max 与
-//      sonnet/high→gpt-5.6-terra/high 映射）
+//      sonnet/high→gpt-5.6-terra/high 映射）。0.4.0 前缀 token 序不变，尾部按车道追加
+//      计量旗标（claude --output-format json / codex --json / opencode --format json）——
+//      fires.jsonl 的 token 与成本列由它产生，缺旗标即整条车道恒记「未计量」。
 //   2. opencode 车道：argv 形状、Claude 档位名不传 -m、provider/model 形才传 -m、
 //      effort 原样 --variant（不 clamp）、dry-run 截断展示 prompt + 打印权限摘要
 //   3. OPENCODE_PERMISSION 注入 spawn env：合法 JSON、wildcard-deny 基线含三处放行、
@@ -96,23 +98,24 @@ function testArgvParity040(): void {
     JSON.stringify(r.argv) === JSON.stringify([
       "claude", "-p", "/writing-loop:showrunner-agent", "--model", "opus",
       "--effort", "max", "--dangerously-skip-permissions", "--add-dir", "/abs/ws/.writing-loop",
+      "--output-format", "json",
     ]) && r.inlinePrompt === null,
     `argv=${JSON.stringify(r.argv)}`);
   sched.cli = "codex";
-  r = fireArgv(sched, "showrunner", "opus", "max", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
-  check("codex 映射：opus/max→gpt-5.6-sol/max",
+  r = fireArgv(sched, "showrunner", "fable", "max", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
+  check("codex 映射：fable/max→gpt-5.6-sol/max",
     JSON.stringify(r.argv) === JSON.stringify([
       "codex", "exec", "-C", "/abs/repo", "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check", "--model", "gpt-5.6-sol", "-c", 'model_reasoning_effort="max"',
-      "/writing-loop:showrunner-agent",
+      "--json", "/writing-loop:showrunner-agent",
     ]) && r.inlinePrompt === null,
     `argv=${JSON.stringify(r.argv)}`);
-  r = fireArgv(sched, "episode-writer", "sonnet", "high", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
-  check("codex 映射：sonnet/high→gpt-5.6-terra/high",
+  r = fireArgv(sched, "episode-writer", "opus", "high", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
+  check("codex 映射：opus/high→gpt-5.6-terra/high",
     JSON.stringify(r.argv) === JSON.stringify([
       "codex", "exec", "-C", "/abs/repo", "--dangerously-bypass-approvals-and-sandbox",
       "--skip-git-repo-check", "--model", "gpt-5.6-terra", "-c", 'model_reasoning_effort="high"',
-      "/writing-loop:episode-writer-agent",
+      "--json", "/writing-loop:episode-writer-agent",
     ]) && r.inlinePrompt === null,
     `argv=${JSON.stringify(r.argv)}`);
 }
@@ -243,7 +246,7 @@ function testInlinePrompt(): void {
   const sr = dryCmds(r.stdout)["showrunner"] ?? "";
   check("inline：claude promptMode=inline 用内联 prompt（-p + 截断展示 + flag 不变）",
     sr.startsWith("claude -p '【writing-loop 调度器上下文】") && sr.includes("chars]")
-    && sr.includes("--model opus") && sr.includes("--dangerously-skip-permissions")
+    && sr.includes("--model fable") && sr.includes("--dangerously-skip-permissions")
     && !sr.includes("/writing-loop:showrunner-agent"),
     `cmd=${sr.slice(0, 200)}`);
   check("inline：dry-run 头行如实反映 promptMode=inline", r.stdout.includes("promptMode=inline"));
@@ -274,16 +277,16 @@ function testCliFlagOverride(): void {
 function testSpecs060Defaults(): void {
   const want: Record<string, [string, string, number, number, number]> = {
     //                model     effort  interval  cap  stagger
-    "showrunner":     ["opus",   "max",     600, 3600,  0],
-    "source-analyst": ["sonnet", "high",     60, 1800,  5],
-    "story-designer": ["opus",   "max",     300, 3600, 10],
-    "episode-writer": ["sonnet", "high",    180, 2400, 20],
-    "reviewer":       ["opus",   "high",    300, 2400, 30], // 默认档回落——顶配归 keystone 升档
-    "evaluator":      ["opus",   "xhigh",   600, 2400, 40],
-    "sweep":          ["sonnet", "high",   1800, 1200, 50],
-    "script-doctor":  ["opus",   "xhigh",  7200, 2400, 60],
-    "market-watch":   ["sonnet", "high",    300, 1200, 70],
-    "reflect":        ["opus",   "xhigh", 14400, 2400, 80],
+    "showrunner":     ["fable",  "max",     600, 3600,  0],
+    "source-analyst": ["opus",   "high",     60, 1800,  5],
+    "story-designer": ["fable",  "max",     300, 3600, 10],
+    "episode-writer": ["opus",   "high",    180, 2400, 20],
+    "reviewer":       ["fable",  "high",    300, 2400, 30], // 默认档回落——顶配归 keystone 升档
+    "evaluator":      ["fable",  "xhigh",   600, 2400, 40],
+    "sweep":          ["opus",   "high",   1800, 1200, 50],
+    "script-doctor":  ["fable",  "xhigh",  7200, 2400, 60],
+    "market-watch":   ["opus",   "high",    300, 1200, 70],
+    "reflect":        ["fable",  "xhigh", 14400, 2400, 80],
   };
   const got: typeof want = {};
   for (const [a, m, e, i, c, s] of AGENT_SPECS) got[a] = [m, e, i, c, s];
@@ -291,8 +294,8 @@ function testSpecs060Defaults(): void {
     JSON.stringify(got) === JSON.stringify(want), `got=${JSON.stringify(got)}`);
   const project = { repoPath: "t1" };
   const sched = buildSched({ projects: { t1: project } }, "t1", project);
-  check("SPECS 0.6.0：keystoneReviewer 默认 opus/max 不变（升档机制承担顶配）",
-    sched.keystoneReviewer.model === "opus" && sched.keystoneReviewer.effort === "max");
+  check("SPECS：keystoneReviewer 默认与设计档同为顶配（升档机制承担顶配场景）",
+    sched.keystoneReviewer.model === "fable" && sched.keystoneReviewer.effort === "max");
   check("SPECS 0.6.0：trimFirePlugins 默认 true 且未解析前不注入（trimSettingsJson=null）",
     sched.trimFirePlugins === true && sched.trimSettingsJson === null && sched.trimNote === null);
 }
@@ -354,9 +357,10 @@ function testTrimFirePlugins(): void {
 
   // fireArgv：注入串追加在尾部（前缀 token 序 0.4.0 奇偶不变——case 1 已锁前缀）
   const r = fireArgv(sched, "showrunner", "opus", "max", "/abs/repo", "/abs/ws/.writing-loop", "t1", null);
-  check("trim：claude argv 尾部追加 --settings <json>",
-    r.argv.slice(-2).join(" ") === `--settings ${built.json}`
-    && r.argv.slice(0, -2).join(" ").endsWith("--add-dir /abs/ws/.writing-loop"),
+  check("trim：claude argv 在 --add-dir 段后追加 --settings <json>，计量旗标殿后",
+    r.argv.slice(-4, -2).join(" ") === `--settings ${built.json}`
+    && r.argv.slice(-2).join(" ") === "--output-format json"
+    && r.argv.slice(0, -4).join(" ").endsWith("--add-dir /abs/ws/.writing-loop"),
     `argv=${JSON.stringify(r.argv)}`);
 
   // E2E（机器无关的确定形）：config 关闭 ⇒ dry-run 打 trim 行且命令无 --settings
