@@ -2,7 +2,7 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, scenesMaxForFormat, sentenceCapForFormat,
+import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat,
   type ScriptLintContext } from "../src/script-lint.ts";
 
 let fails = 0;
@@ -116,7 +116,10 @@ ok(codes(FM() + BODY_OK.replace("人物：顾知行、沈炼", "人物：顾知�
 // profile 推导
 ok(scenesMaxForFormat("reelshort-en") === 3 && scenesMaxForFormat("cn-live") === 4 && sentenceCapForFormat("reelshort-en") === 2 && sentenceCapForFormat("cn-live") === null, "profile 推导：出海 3 场/2 句，真人 4 场/无句上限");
 
-// CLI 面：script lint --help 退出 0
+// --ticket 路径解析与 cwd 无关（YJJS-118 实测：首版按 cwd 解析，只在 board/tickets/ 下可用）
+ok(resolveTicketFile("/ws", "demo", "YJJS-118.md") === join("/ws", ".writing-loop", "demo", "board", "tickets", "YJJS-118.md")
+  && resolveTicketFile("/ws", "demo", "/abs/x.md") === "/abs/x.md", "--ticket 文件按 <workspace>/.writing-loop/<key>/board/tickets/ 解析，绝对路径原样");
+
 const help = spawnSync(process.execPath, [join(hubRoot, "src", "cli.ts"), "script", "lint", "--help"], { encoding: "utf8" });
 ok(help.status === 0 && help.stdout.includes("script lint --project"), "CLI：writing-loop script lint --help 可用");
 

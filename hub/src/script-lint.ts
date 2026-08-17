@@ -5,7 +5,8 @@
 // 这里全部是纯函数、零 LLM、零 I/O：episode-writer §15.3 自检门与 reviewer §21a-gate 第 0 项都读同一
 // 结果，写手在转 In Review 前必须 0 error。叙事实质（连续性/信息位阶/保管链）不在这里判——那是审读门
 // 带引文断言的事。
-import { WsError } from "./workspace.ts";
+import { isAbsolute, join } from "node:path";
+import { projectDataDir, WsError } from "./workspace.ts";
 
 export type ScriptLintSeverity = "error" | "warning";
 export type ScriptLintFinding = { code: string; severity: ScriptLintSeverity; line: number | null; message: string };
@@ -266,4 +267,10 @@ export function parsePresenceFact(value: string, episode: number): Map<number, s
 export function assertLintContext(ctx: ScriptLintContext): void {
   if (!Number.isInteger(ctx.episode) || ctx.episode < 1) throw new WsError("script lint: episode 须为正整数");
   if (!Number.isInteger(ctx.scenesMax) || ctx.scenesMax < 1) throw new WsError("script lint: scenesMax 须为正整数");
+}
+
+// ticket.summary.file 是相对 board/tickets/ 的文件名——按项目运行态目录解析，与 cwd 无关
+// （首版按 cwd 解析，只有在 board/tickets/ 下跑 --ticket 才成功——YJJS-118 交付评论实测）。
+export function resolveTicketFile(root: string, key: string, file: string): string {
+  return isAbsolute(file) ? file : join(projectDataDir(root, key), "board", "tickets", file);
 }

@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { readStoryDesign } from "./story-design.ts";
 import { readStoryAssetCatalog } from "./story-assets.ts";
-import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, scenesMaxForFormat, sentenceCapForFormat,
+import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat,
   summarizeFindings, type ScriptLintContext } from "./script-lint.ts";
 import { readProjectResource } from "./project-detail.ts";
 import { findWorkspaceRoot, loadConfig, projectEntries, resolveRepoPath, WsError } from "./workspace.ts";
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   if (ticketId) {
     const ticket = readProjectResource(ws, key, "ticket", ticketId).ticket;
     if (!ticket) throw new WsError(`没有创作任务 '${ticketId}'`);
-    const body = readFileSync(ticket.summary.file, "utf8");
+    const body = readFileSync(resolveTicketFile(root, key, ticket.summary.file), "utf8");
     directWrite = /^Mode:[ \t]*direct-write\b/m.test(body);
   }
   let presence: Map<number, string[]> | null = null;
