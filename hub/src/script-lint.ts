@@ -274,3 +274,39 @@ export function assertLintContext(ctx: ScriptLintContext): void {
 export function resolveTicketFile(root: string, key: string, file: string): string {
   return isAbsolute(file) ? file : join(projectDataDir(root, key), "board", "tickets", file);
 }
+
+// —— 存量豁免（waiver/baseline）——门中途启用时，门落地前已交付且项目正式裁定「不追溯改写」的
+// 存量正文不该永久假红（WLSYS-4dbfc385：ep-002「淳安县衙」）。每项目一份显式、可稽核的
+// `<repoPath>/.writing-loop-lint-baseline.json`：{ "version": 1, "entries": [ { "episode": 2,
+// "code": "L3-scene-registry", "match": "淳安县衙", "ticketId": "YJJS-154", "reason": "…", "recordedAt": ISO } ] }。
+// 精确命中（同集 + 同 code + message 含 match）的 finding 降级为 warning 并标 `WAIVED by <ticketId>`；
+// 只豁免登记的那一条，不豁免同 code 的其他命中；写入者 = showrunner/操作者（裁定级动作）。
+export type ScriptLintWaiver = { episode: number; code: string; match: string; ticketId: string; reason: string; recordedAt: string };
+export const LINT_BASELINE_RELATIVE_PATH = ".writing-loop-lint-baseline.json";
+
+export function parseLintBaseline(value: unknown): ScriptLintWaiver[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new WsError("lint baseline 必须是对象");
+  const root = value as Record<string, unknown>;
+  if (root.version !== 1) throw new WsError("lint baseline version 必须是 1");
+  if (!Array.isArray(root.entries)) throw new WsError("lint baseline entries 必须是数组");
+  return root.entries.map((row, index) => {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) throw new WsError(`lint baseline entries[${index}] 必须是对象`);
+    const entry = row as Record<string, unknown>;
+    for (const key of Object.keys(entry)) if (!["episode", "code", "match", "ticketId", "reason", "recordedAt"].includes(key)) throw new WsError(`lint baseline entries[${index}] 含未知字段 '${key}'`);
+    if (!Number.isInteger(entry.episode) || (entry.episode as number) < 1) throw new WsError(`lint baseline entries[${index}].episode 须为正整数`);
+    for (const key of ["code", "match", "ticketId", "reason", "recordedAt"]) {
+      if (typeof entry[key] !== "string" || !(entry[key] as string).trim()) throw new WsError(`lint baseline entries[${index}].${key} 须为非空字符串`);
+    }
+    if (Number.isNaN(Date.parse(entry.recordedAt as string))) throw new WsError(`lint baseline entries[${index}].recordedAt 须为 ISO 时间`);
+    return { episode: entry.episode as number, code: entry.code as string, match: entry.match as string,
+      ticketId: entry.ticketId as string, reason: entry.reason as string, recordedAt: entry.recordedAt as string };
+  });
+}
+
+export function applyLintBaseline(findings: ScriptLintFinding[], episode: number, waivers: ScriptLintWaiver[]): ScriptLintFinding[] {
+  return findings.map((finding) => {
+    if (finding.severity !== "error") return finding;
+    const waiver = waivers.find((row) => row.episode === episode && row.code === finding.code && finding.message.includes(row.match));
+    return waiver ? { ...finding, severity: "warning", message: `${finding.message} —— WAIVED by ${waiver.ticketId}（${waiver.reason}）` } : finding;
+  });
+}

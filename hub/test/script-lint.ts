@@ -2,8 +2,8 @@
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat,
-  type ScriptLintContext } from "../src/script-lint.ts";
+import { applyLintBaseline, lintEpisodeScript, parseEpisodeScript, parseLintBaseline, parsePresenceFact, resolveTicketFile,
+  scenesMaxForFormat, sentenceCapForFormat, type ScriptLintContext } from "../src/script-lint.ts";
 
 let fails = 0;
 const ok = (c: boolean, m: string): void => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fails++; };
@@ -119,6 +119,17 @@ ok(scenesMaxForFormat("reelshort-en") === 3 && scenesMaxForFormat("cn-live") ===
 // --ticket 路径解析与 cwd 无关（YJJS-118 实测：首版按 cwd 解析，只在 board/tickets/ 下可用）
 ok(resolveTicketFile("/ws", "demo", "YJJS-118.md") === join("/ws", ".writing-loop", "demo", "board", "tickets", "YJJS-118.md")
   && resolveTicketFile("/ws", "demo", "/abs/x.md") === "/abs/x.md", "--ticket 文件按 <workspace>/.writing-loop/<key>/board/tickets/ 解析，绝对路径原样");
+
+// 存量豁免（WLSYS-4dbfc385）：门落地前已交付且裁定不追溯改写的正文，登记 baseline 后精确命中降为 WAIVED warning
+const waivers = parseLintBaseline({ version: 1, entries: [{ episode: 23, code: "L3-scene-registry", match: "官署封发一角", ticketId: "YJJS-154", reason: "裁定不追溯", recordedAt: "2026-08-17T00:00:00Z" }] });
+const legacy = run(FM() + BODY_OK.replace("23-2 官署公堂·封发一角", "23-2 官署封发一角"));
+const waived = applyLintBaseline(legacy, 23, waivers);
+ok(legacy.some((f) => f.code === "L3-scene-registry" && f.severity === "error") && waived.every((f) => f.code !== "L3-scene-registry" || (f.severity === "warning" && f.message.includes("WAIVED by YJJS-154"))),
+  "baseline 精确命中 ⇒ 降级 warning 并标 WAIVED by 票号");
+ok(applyLintBaseline(legacy, 24, waivers).some((f) => f.code === "L3-scene-registry" && f.severity === "error"), "baseline 只豁免登记的那一集，不跨集");
+ok(applyLintBaseline(run(FM() + BODY_OK.replace("23-2 官署公堂·封发一角", "23-2 别处")), 23, waivers).some((f) => f.code === "L3-scene-registry" && f.severity === "error"), "同 code 但 match 不同的命中不豁免");
+let threw = false; try { parseLintBaseline({ version: 1, entries: [{ episode: 2, code: "X" }] }); } catch { threw = true; }
+ok(threw, "baseline 缺字段报错，不静默");
 
 const help = spawnSync(process.execPath, [join(hubRoot, "src", "cli.ts"), "script", "lint", "--help"], { encoding: "utf8" });
 ok(help.status === 0 && help.stdout.includes("script lint --project"), "CLI：writing-loop script lint --help 可用");

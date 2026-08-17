@@ -6,8 +6,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { readStoryDesign } from "./story-design.ts";
 import { readStoryAssetCatalog } from "./story-assets.ts";
-import { lintEpisodeScript, parseEpisodeScript, parsePresenceFact, resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat,
-  summarizeFindings, type ScriptLintContext } from "./script-lint.ts";
+import { applyLintBaseline, LINT_BASELINE_RELATIVE_PATH, lintEpisodeScript, parseEpisodeScript, parseLintBaseline, parsePresenceFact,
+  resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat, summarizeFindings, type ScriptLintContext } from "./script-lint.ts";
 import { readProjectResource } from "./project-detail.ts";
 import { findWorkspaceRoot, loadConfig, projectEntries, resolveRepoPath, WsError } from "./workspace.ts";
 
@@ -22,6 +22,7 @@ const usage = (): void => console.log(`用法:
   writing-loop script lint --project KEY --episode N [--file PATH] [--ticket ID] [--json]
       对 episodes/ep-NNN.md 跑确定性格式 lint（场景头/场数/调度单/情绪前缀/集号自指/frontmatter/
       注册表闭合/台词句数……）。--ticket 时按票面 Mode: 行校验 frontmatter mode。
+      存量豁免：<repoPath>/.writing-loop-lint-baseline.json（showrunner/操作者登记，精确命中降为 WAIVED warning）。
       退出码：0 无 error；1 有 error；2 用法或 IO 错误。`);
 
 async function main(): Promise<void> {
@@ -75,7 +76,12 @@ async function main(): Promise<void> {
     directWrite,
     presence,
   };
-  const findings = lintEpisodeScript(parseEpisodeScript(text), ctx);
+  let findings = lintEpisodeScript(parseEpisodeScript(text), ctx);
+  const baselinePath = join(repo, LINT_BASELINE_RELATIVE_PATH);
+  if (existsSync(baselinePath)) {
+    const waivers = parseLintBaseline(JSON.parse(readFileSync(baselinePath, "utf8")));
+    findings = applyLintBaseline(findings, episode, waivers);
+  }
   const summary = summarizeFindings(findings);
   if (has("--json")) {
     await output(JSON.stringify({ project: key, episode, file, ok: summary.errors === 0, summary, findings }, null, 2));
