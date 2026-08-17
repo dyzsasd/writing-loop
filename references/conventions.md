@@ -1122,6 +1122,16 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
    转态评论求值；回归断言：ep-1 轮次 = 1（WL-6 不计、WL-17 计）。**
 2. **升级**：结构性 miss（写错拍位/违反禁写/结构化事实冲突）**或** 2 轮用尽 ⇒
    file `Mode: direct-write` 重写票给 story-designer（reviewer 所 file，直进 Todo）。
+   **fail 分类先于路由（2026-08-17 操作者裁定，据 arc-02/03 13 集实测）**：
+   (a) **lint 可判的格式类**（`writing-loop script lint` 报 error：场数/场景头/调度单/情绪前缀/集号
+   自指/frontmatter/注册表闭合/台词句数）⇒ 恒走 1（notes 回炉），评论贴 lint 原文；写手 §15.3
+   本应 0 error 交付，红着交付本身记一次流程缺陷；
+   (b) **连续性/结构化事实类**（保管链、信息位阶「谁此刻知道什么」、同场在场人数/人物行自相矛盾、
+   承接上集末帧、需要设计层取舍才能自洽的拍位）⇒ **首次 fail 即走 2 升级**（它们就是「结构化事实
+   冲突」，不再等 2 轮——ep-022 三轮 $50+ 的教训）；卡自身矛盾（大纲门 A03 类）⇒ 先 file 设计层
+   Bug 给 story-designer 修卡，正文票 `Blocked-by` 它，不算写手轮次；
+   (c) 其余叙事质量类（节奏/台词/钩强度）⇒ 走 1，至多 2 轮。
+   分类写进 Cancel 评论的 `review failed:` 行（如 `review failed: (b) 信息位阶 …`），机器可数。
 3. **人工停靠**：任何 `Mode: direct-write` 票再 fail ⇒ `Bail-shape: fix-exhausted`
    ⇒ 停靠（§9）。keystone 首稿（本就是 designer 写的）fail ⇒ 允许**一次**同层
    `Mode: direct-write` 重试，再 fail 即停靠。判据永远是票上的 Mode 行与
@@ -1143,7 +1153,8 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
 - `state/market-assessment.md`（带日期证据，evaluator 按日期引用）：保留当前 +
   尾随 8 周，更旧条目滚存 `state/market-archive.md`（留索引；归档不删，已出报告
   的引用链不断）。执行者 = **market-watch**（显式刷新时顺手滚存）。
-- **Context 预算**：`story/assets.v1.json` 可随项目增长，但任何单票 Context Pack 默认 ≤64 KiB；
+- **Context 预算**：`story/assets.v1.json` 可随项目增长，但任何单票 Context Pack 默认 ≤64 KiB
+  （项目可经 `projects.<key>.contextPack.maxBytes / perAgent` 调整，config-schema）；
   大文件不等于全量加载。历史 facts/events 通过 episode validity 与选择器寻址，不另建归档 Markdown。
   north-star 的 `当前进度` 节同受尺约束：**≤15KB**，
   超线由 showrunner 按 Decisions log 同款滚存归档留索引（§20）。

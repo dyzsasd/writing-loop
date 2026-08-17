@@ -112,6 +112,13 @@ rules-version: craft-rules@1 script-format@1
 
 ## 6. 格式反面 lint（审读门快查）
 
+机器半边 = `writing-loop script lint --project K --episode N [--ticket ID]`（写手 §15.3 交付前必须
+0 error；reviewer 门第 0 项复跑）：frontmatter 全字段与 `mode` 行、集标记/集号自指、场景头四要素与
+注册景名前缀、场数 ≤ profile 上限、景 ∈ 细纲 sceneIds、「人物：」调度单 ⊇ 有台词者、具名角色 ∈ 细纲
+characterIds、情绪前缀 100% 且无创作指令词、台词句数上限（出海 profile 2）、foreshadow-ops 资产 ID
+存在、卡面 presence ↔ 调度单。下面 1–8 里人工才能判的部分（文学化开头、心理描写残留、一行多镜头、
+AI 味）仍归审读门。
+
 1. 文学化开头（环境描写/抒情铺垫开场——新人第一死因；第 1 场必须是冲突或悬念画面）。
 2. 心理描写残留（改编常见病：小说式内心活动未译成 OS/表演/对手戏）。
 3. 一行多镜头（动作行含两个以上主语-动作对，应拆行）。

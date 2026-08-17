@@ -27,6 +27,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   project:                 ["project"],               // 项目清单与安全启停
   source:                  ["source"],                // 原著登记、不可变分块与拆书票
   story:                   ["story"],                 // 结构化故事伴随文件的确定性质量门
+  script:                  ["script"],                // 单集正文的确定性预提交 lint（script-format 机器半边）
   system:                  ["system"],                // workspace 级框架改进收件箱（不进项目板）
   production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
   workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
@@ -90,6 +91,9 @@ const usage = (): void => {
   system proposal file --input FILE [--json]
   system proposal migrate-ticket --project K --ticket ID ...
                               管理 workspace 级 Writing Loop 改进建议；永不进入剧集项目看板
+  script lint --project K --episode N [--file PATH] [--ticket ID] [--json]
+                              单集正文预提交 lint：场景头/场数/调度单/情绪前缀/集号自指/frontmatter/
+                              注册表闭合/台词句数；0 error 才可转 In Review（退出码 0/1/2）
   production status [--project K] [--json]
                               查看不可变镜头 revision、远程任务、QC 与成本事实；包含暂停项目
   production enqueue --plan --project K --input FILE [--json]

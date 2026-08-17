@@ -9,6 +9,8 @@ import {
   readStoryAssetCatalog, validateStoryAssetCatalog, STORY_ASSETS_RELATIVE_PATH,
   type StoryAssetCatalog, type StoryAssetCatalogRead,
 } from "./story-assets.ts";
+import { lintStoryCards } from "./story-cards.ts";
+import { scenesMaxForFormat } from "./script-lint.ts";
 import {
   readVisualProduction, validateVisualProduction, VISUAL_PRODUCTION_RELATIVE_PATH,
   type VisualProductionManifest,
@@ -375,6 +377,16 @@ export function buildStoryStudioReadModel(root: string, key: string, config: WlC
           gates.push(gate("A02", "叙事揭示时间线覆盖全部分集", "full",
             covered.size === read.policy.totalEpisodes ? "pass" : "fail",
             `${covered.size}/${read.policy.totalEpisodes} 集有结构化 timeline event`));
+          // A03：分集节拍单内部一致（场数口径/具名角色/核心事实齐备/同 key 双 current）——大纲门机器半边；
+          // warning 级（引用面未进 relations、缺 presence）进 warnings 不进门。
+          const projectFormat = typeof (entry[1] as Record<string, unknown>).format === "string" ? (entry[1] as Record<string, unknown>).format as string : null;
+          const cardFindings = lintStoryCards(catalog.manifest, read.manifest, { scenesMax: scenesMaxForFormat(projectFormat) });
+          const cardErrors = cardFindings.filter((row) => row.severity === "error");
+          gates.push(gate("A03", "分集节拍单内部一致（场数/具名角色/核心事实/单一 current）", "beats",
+            cardErrors.length === 0 ? "pass" : "fail",
+            cardErrors.length === 0 ? `${cardFindings.length === 0 ? "无" : cardFindings.length + " 条提示，0 条"}错误`
+              : cardErrors.slice(0, 6).map((row) => `${row.assetId} ${row.code}: ${row.message}`).join("；") + (cardErrors.length > 6 ? `；…共 ${cardErrors.length} 条` : "")));
+          for (const row of cardFindings) if (row.severity === "warning") warnings.push(`${row.assetId} ${row.code}: ${row.message}`);
         } catch (error) {
           gates.push(gate("A01", "资产图与故事结构精确绑定", "skeleton", "fail",
             error instanceof Error ? error.message : String(error)));

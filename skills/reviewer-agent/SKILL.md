@@ -86,6 +86,11 @@ Critical/High 按自己发现同等阻断，Medium/Low 非阻断；相左 = 信�
 #### A-1. 单集创作票 —— §21a-gate 审读门八项走查
 铁律（§3）：每条断言附正文引文；机读块/自检清单/delta 声明只作**定位**，判定输入永远是
 正文原文或结构化 asset fact。逐项：
+0. **确定性 lint 复跑（第 0 项，机器）**：`writing-loop script lint --project <project> --episode <N>
+   --ticket <被验票 ID> --json`。任一 error ⇒ **直接 fail**（不再做 1–8 的人工走查，评论贴 lint 原文，
+   按 §21a-fail「lint 可判的格式类」路由回炉——写手 §15.3 本应 0 error 交付）；warning 不构成 fail，
+   但 L11-beat-card-hash（细纲已变）要在第 1 项版本绑定里裁定是否需重 stamp。lint 命令本身失败
+   （exit 2）⇒ 不算 fail，人工照走 1–8 并在评论注明。
 1. **机读块实符**（script-format §4 复核；指纹缺失 ⇒ MISSING）+ **版本绑定
    （§21a-gate.1）**：`beat-card-hash` == 票上 `Design-hash` 机读行（结构门批准的
    `story/outline.v1.json` 版本）；

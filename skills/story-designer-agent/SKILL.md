@@ -135,6 +135,19 @@ Context、验收标准、交接评论和 Studio 文案只使用“全季结构�
 - JSON 不写对白，不复制原著正文；`sourcePlanId` 和每项 `sourceRefs` 必须精确绑定已验的
   source-intake/chunk 摘要。两个 JSON 同一 commit；任何旧 Markdown 镜像都会令 S00 fail。
 
+**分集节拍单的机器可判面（大纲门 A03，`writing-loop story validate` 必绿）**：每张 EPnnn 卡的
+current 事实必须齐 premise / continuity-in / beats / hook / spec / production-flags / info-tier /
+forbidden / foreshadow-ops；spec「场数 N」、production-flags「共 N 场」与「拍序 A→B→C」三者互证且
+N ≤ profile 上限；production-flags「具名角色 N：C01、C03」与 outline episodes[].characterIds
+逐 ID 相等；同一 key 不得两条 current（冲突用 disputed）。**arc-03 起两条新义务**（写手成败的
+两个最高频根因）：① 卡加 `presence` 事实——逐场在场人物清单，形如
+`23-1: 顾知行、沈炼; 23-2: 顾知行、书吏*1; 23-3: 顾知行`（场序按 production-flags 拍序，具名者写
+注册名，不具名功能角色带 *N），写手调度单由 `script lint` 与之逐场对照；② beats / forbidden /
+info-tier / foreshadow-ops 里点名的每个资产（保管链 O0x、伏笔 F0x、世界规则 N0x/W0x、人物 C0x）
+都写进卡的 `relations`（kind 按 story-assets-schema）——否则它们只能按 optional 排序进 Context Pack、
+预算紧时被裁（YJJS-97 的 O03 就是这样漏给写手的），validate 会以 C5 warning 逐卡列出缺口。
+本集必须交代的取舍（如「某人此拍在不在场」）在设计层拍板写进 beats/presence，不留给写手猜。
+
 **spawn 单集子票**（每集一张，§6 模板；§21a-design.3）：`state:"Backlog"` 暂存、绝不
 file 到 Todo（大纲门放行）；机读行 `Design: story/outline.v1.json#episode-NNN` + `Episode: N` + **`Design-hash:
 <sha256-12>`**（spawn 时刻结构 JSON 内容哈希，门与子票必须见同一字节；

@@ -117,9 +117,16 @@ script-format §5）。④ north-star **只读「创作红线
 盲试上限 2 次；同一票 block-cycle ≤3（§9）。
 
 ### Step 5 — 自检门（§15.3）
-结果显式写入工单评论（自述作定位不作证据，§3）。机器项：frontmatter 完整实符 + 字数带 +
-场景/具名角色 ∈ story design 注册表（script-format §4 校验清单）、格式反面 lint
-（script-format §6）、合规 lint（R10a）。三分类自证（EXTRA 收窄，§3）+ 金句候选（R8.2）。
+**先跑确定性 lint（硬门，零 LLM）**：`writing-loop script lint --project <project> --episode <N>
+--ticket <本票 ID>`——校 frontmatter 全字段/`mode` 行、集标记与集号自指、场景头四要素与注册景名前缀、
+场数 ≤ profile 上限、景 ∈ 细纲 sceneIds、每场「人物：」调度单 ⊇ 有台词者、具名角色 ∈ 细纲
+characterIds、情绪前缀 100% 且不含创作指令词、台词句数上限、foreshadow-ops 资产 ID 存在、
+（卡面有 presence 时）调度单 ↔ 逐场在场人物。**exit 0 且 0 error 才可进 Step 6**；把末行
+`ep-NNN: 0 error / K warning · SCRIPT_LINT_OK` 与 warning 清单原样贴进交付评论（reviewer
+门第 0 项复跑同一命令对表；lint 红着交付 = §21a-gate 第 0 项 fail，直接回炉不走人工八项）。
+warning（beat-card-hash 与当前 outline 不同、words 出带、末行非【画面定格】、不具名角色未带 *N）
+不拦交付，但要在评论里逐条说明或修掉。
+其余机器项：合规 lint（R10a）、三分类自证（EXTRA 收窄，§3）+ 金句候选（R8.2）。
 任一机器项红 ⇒ 修正再自检；修不动 ⇒ 按 §9 block，不带病交付。
 
 ### Step 6 — 交付（§15 交付义务，缺一 = 审读门 MISSING fail）
