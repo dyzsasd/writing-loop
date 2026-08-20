@@ -77,7 +77,13 @@ Sections: §0 §0a §2 §4 §5 §6 §7 §8 §9 §10 §11 §12 §12a §14 §15 §
   `Todo`。孤儿判定不要求 token 等于自己（§7）。
 
 ### Step 1 — 拾取（§5）
-查 `Todo` + `story-designer` tier，排除 `blocked`，按 §5 rank、同 rank FIFO。带
+查 `Todo` + `story-designer` tier，排除 `blocked`，按 §5 rank、同 rank FIFO。
+**前沿解锁票恒插队（2026-08-20 操作者裁定——§5a「触前沿修订最先放行」的拾取端镜像）**：
+候选中若有「其完成能解锁当前写作前沿正文」的票——前沿集的 `Mode: direct-write` 重写票、
+或被前沿正文票 `Blocked-by` 指向的设计 Bug——**无视 rank/FIFO 恒最先拾取**。判据机械：
+票带 `Episode: ≤前沿+1`，或板上存在开放 episode 票 `Blocked-by` 本票。理由：写手车道被
+§5 前向冻结钉在前沿上，这类票每晚拾取一轮 = 写手整轮 no-op（ep-043 实测：重写票按 FIFO
+排队 4.5h，写手期间空转 5 fire）。带
 `Episode: N` 的创作/重写票同样跑 §5 顺序前置三检（①前集已成；②前向冻结：开放 =
 Todo/In Progress/In Review，Backlog 不冻结；③arc 首集；`Mode: direct-write` 显式豁免
 检查①）。不满足 ⇒ 跳过取下一候选，不 block 不评论。
