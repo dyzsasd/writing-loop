@@ -32,10 +32,12 @@ frontmatter**，§18 稳定字段，不读 conventions/lessons/craft-rules）：
   但双签复核评论是你的，A-3——不并入本条则 A-3 永不可达）；
 - **①** `∃` `needs-reviewer` 票（带 `blocked`，常规拾取序会排除它——本口**不**排除 blocked，
   它正是「blocked 票确需本角色」的唯一形态）；
-- Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/ story/assets.v1.json` 任一非空
-  （上次审计 sha 读 `reviewer-state.json` 的 `lastAuditedSha`——调度器门控读同一键，
-  键名是双方契约；assets-only 修订也开门——旧「episodes/ HEAD 比对」判据对其假阴性，
-  fire #177 实测；探针里唯一非-frontmatter 依赖）；
+- Job C change-gate：`git diff <上次审计 sha>..HEAD -- episodes/` 非空 ⇒ 立即开；纯
+  `story/assets.v1.json` 改动 ⇒ **dwell 攒批**——距 `lastAuditedAt` <2h 不开门，攒够一批
+  一次审（2026-08-20 操作者裁定：设计密集期每笔资产图提交单独唤醒一次全 boot，69h 实测
+  110 fire/$473；抽查本是采样，攒批不减覆盖）。上次审计 sha 读 `reviewer-state.json` 的
+  `lastAuditedSha`——调度器门控读同一键，键名是双方契约；任何不可判仍保守开门；
+  探针里唯一非-frontmatter 依赖；
 - **②** 孤儿回收：`∃` `In Review` + 本 tier + assignee 陈旧（>60min，§7）；
 - **③** 报告结算：到期 weekly/monthly 或未分发 `*.review.md`（§22）。
 谓词为空 ⇒ 一行 no-op 退出；命中任一 ⇒ 全 boot；`dry-run` 下照跑（只读）。
@@ -164,7 +166,13 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 **change-gate 节流**：state 目录 `reviewer-state.json`（**权威键名**：`lastAuditedSha` =
 上次审计的 repo HEAD 全长 sha、`lastAuditedAt` = ISO 时间戳、`auditedEpisodes` 滚动窗口；
 调度器 lane 门控读 `lastAuditedSha` 决定要不要起 fire——写别的键名 = 门恒开、每 tick 白 boot），
-原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不追加）。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`story/assets.v1.json` 零 diff ⇒ 一行 no-op
+原子写（§18 同目录临时文件 + rename）、有界（就地覆盖不追加）。
+**推进时机（2026-08-20 操作者裁定——修「等验收期间反复开门」）**：本 fire 完成了它 boot
+所为的全部审计面（Job A 判决已写 ∧ Job C 抽查已做或确无 Job C 活）⇒ **收尾时立即写
+`lastAuditedSha` = 当前 repo HEAD + `lastAuditedAt` = now**——不等任何票被验收、不等
+In Review 清零。审计完成与验收状态解耦：你交出的判决在等 showrunner 处置时，episodes/∪
+assets 并没有新内容需要你再看；不推进 sha = 同一批内容每 fire 重审一遍（修复前实测的
+主要空转源）。唯一例外：本 fire 中途 bail（audit 未完成）⇒ 不推进，保持保守开门。Job A/B 均空且自上次审计 sha 对 `episodes/`∪`story/assets.v1.json` 零 diff ⇒ 一行 no-op
 （不空扫；判据同 §0 探针——资产图抽检是本 Job 的一半，assets-only 修订必须开门）。有新 Done commit ⇒
 抽 1-2 集邻集（read-only，只 file 不改）：**邻集一致性**（承接帧/尾钩兑现/R5 位阶）+
 **资产图抽检**（正文 vs 本集 current facts/timeline 逐项比对，防敷衍 delta——§15 义务 2 的事后
@@ -172,6 +180,10 @@ agent 续；`decision-needed`/`scope-design` ⇒ 不属你，转 `needs-showrunn
 `Bug`（`continuity`/`foreshadow` 等 + `tier:episode-writer`，`Episode:N`），
 `state:"Backlog"`（§5a，showrunner 放行）。干净抽查是健康结果，不编造边际票；抽过的集写
 进 `auditedEpisodes`，全覆盖后回落 no-op 直到板/HEAD 再动。
+**轻通道抽检（§21a-light）**：本次抽查窗口内若有走轻通道直接 Done 的机械修补票
+（`mech-fix` 标签），至少抽 1 张：核其票面贴的 `story validate` 输出为真（重跑一次 CLI，
+零 token）+ diff 与 AC 相符。不符 ⇒ file Bug 且该票面评论记「轻通道抽检不符，此类票
+转回常规通道」；相符只在报告记一行，不加评论。
 
 ## 2. Guardrails
 

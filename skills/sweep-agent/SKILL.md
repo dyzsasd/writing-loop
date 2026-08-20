@@ -27,9 +27,12 @@ owner-scoped agent 各看自己的切片；**掉出所有切片**的票（缺 ow
 **lane 谓词**（纯板 glob：只读 config 定位本项目 §11 + glob 本项目板 `tickets/*.md`
 **仅解析 frontmatter**，用 §18 稳定字段：`state`/`labels`/`owner`/`assignee`/`updated`
 + `Episode:` 机读行；**不读 conventions/lessons**）——命中下列任一即为真（保守超集）：
-- **cadence gate**：距上次 sweep fire ≥ 卫生周期（无 config 字段，默认 30min 级，即
-  900–1800s；本探针与全文 cadence 同此口径）——janitor 兜底扫板。
+- **cadence gate**：距上次 sweep fire ≥ 卫生周期（默认 **120min**——2026-08-20 操作者裁定
+  自 30min 降频：错标/孤儿/陈旧锁/keystone-stall 各有即时事件枝，纯节拍扫板不需要密跑；
+  操作者显式调短 scheduler interval 时随动）——janitor 兜底扫板。
 - **错标 / 孤儿**（逃逸口②）：`∃` 非终态票缺 owner/tier 标签，或 `∃ In Progress` + assignee 陈旧 >60min（§7）。
+  在制中的新鲜认领与在途 fire 的正常持锁**都不是卫生事件**（调度器门控同判：锁只在
+  mtime 陈旧 >15min 时开门）。
 - **keystone-stall（§1 固定 Job，见 Job 6.5）**：`∃` 带 `keystone` 标签的 `In Review`
   票，`updated` 陈旧 > 阈值 T（默认 30min）**且** assignee 为空或陈旧——判据**只用
   frontmatter 年龄**，机械可判。

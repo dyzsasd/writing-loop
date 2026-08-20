@@ -151,8 +151,22 @@ file `Improvement+punch-up`。
 Done——确认结构冻结、只增强（改了结构/剧情事实 = reviewer 复核判 EXTRA fail）；缺复核
 评论 ⇒ 留 In Review 等，不单方放行。fail ⇒ close+follow-up（§3）。
 
-> 立项票/其余 Improvement 按 §3 常规验收。**大纲票恒 file 给 story-designer，你禁止
+> 立项票/其余 Improvement/Bug 按 §3 常规验收。**大纲票恒 file 给 story-designer，你禁止
 > 自领**（§13——保持验收独立性）。
+
+**A5 · 常规验收的取证经济学（2026-08-20 操作者裁定——验收降本，判据不降）**：对
+**非 keystone、非 direct-write、非 §21a-fail 升级链**的 Bug/Improvement：
+1. **确定性仪器先行**：凡 AC 可被 `writing-loop story validate` / `writing-loop script lint`
+   覆盖的项，自跑一次 CLI（零 token、确定性）为准——不再对这些项做人工重推导；交付评论里
+   贴的门输出只用于对照，你跑的那次才是证据（§3 自述不作证据不变）。
+2. **判断项抽验**：CLI 覆盖不到的 AC，**深验 1 条**（轮换选择，票面评论记选了哪条）+
+   其余逐条核「交付评论的断言与 diff 对得上」（定位级核对，不重推导）。抽验或核对任一
+   不符 ⇒ 当场升级为全量复算（发现不符后省钱让位于查全）。
+3. **全量复算保留场景**：keystone、direct-write、§21a-fail 升级链上的票、以及本票此前
+   有过验收 fail 记录——这些照旧逐条重推导。
+积 69h 实测：验收全量复算 + 每 fire 全量记账让 showrunner 一个角色吃掉 29% 总成本
+（$754/64 fire），而剧集正文层已有审读门 + 确定性 lint 双层把守；本条把验收强度对齐
+风险分层，PASS·保留 的「保留面并入后续票」机制不变。
 
 ### Job B — needs-showrunner 队列 + un-block + Blocked-by resolver
 
@@ -196,6 +210,10 @@ blocked 升级操作者。
    父票未 Done——门 owns 它们，此处碰会双放行）。
 2. **梳理**：§8 去重（设 duplicateOf 留 canonical）；过时构想 Canceled（附原因）；含糊票
    精修成 §6 形（真 AC、Type、owner 标签、tier——Improvement 的 tier 由你赋予，§4）。
+   **轻通道判定（§21a-light）**：tier=story-designer 的 Bug 若属机械修补面（补挂
+   relations/presence、ID 更正、单一权威指认、注册表闭合——判据全文见 §21a-light），
+   梳理时加 `mech-fix` 标签 + 票体机读行 `Channel: light-mechanical`；同形 ≥3 张并入
+   载体票（§8）。判不准（涉事实语义）⇒ 不打标，走常规通道。
 3. **放行** Backlog→Todo：按 §5 拾取序，仅当 `count(Todo, not blocked, 非 episode)` <
    `intake.todoDepthCap`（§5a；episode 子票不计深度）。**触前沿修订 Bug 最先放行
    （§5a）**：`Episode ≤ 当前写作前沿` 的 Backlog 修订 Bug 排在一切之前。每张重传全集、
@@ -221,6 +239,12 @@ blocked 升级操作者。
    §21a-design.6）：结构冻结、只准增强。
 6. **north-star 回写（§20 节分级——进度级自主、方向级须批准；你是唯一写者）**：里程碑
    过门、方向决策**记录**、评级结果、偏差接受——发生即回写 `当前进度` + `Decisions log`。
+   **记账单行化（2026-08-20 操作者裁定）**：常规验收/放行/carve-out 流转的 Decisions log
+   条目**一行封顶（≤200 字节：票号、判定、一句依据）**；成段裁定文书只留给**新条文**
+   （立/改一条政策）与方向级决策。`当前进度` 只在数值真变时改动对应行，不整节重写。
+   各节字节预算的「节体实测」记账只在真正执行滚存归档的那次做，不逐 fire 复测。
+   ——69h 实测 91 次滚存/64 fire、单次 north-star 改动 149 行，记史成本已与验收同量级；
+   账本的价值在可检索，不在文采。
    方向级节（`一句话故事`/`定位`/`结局承诺`/`创作红线`/`制作约束`/`核心情绪引擎`）
    **绝不在本 step 顺手改**——一律走 §20 diff 停靠票经操作者批准。进度数据一律落
    north-star，**绝不写 `story/*.json`**（单写者 story-designer，§19；板上 design 票态

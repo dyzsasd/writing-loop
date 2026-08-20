@@ -340,7 +340,10 @@ repo 落 commit）可与写者并发、彼此至多 2 路。故调度器驱动�
                                           //   Claude 档位名（opus/sonnet…）绝不透传 opencode（省略 -m 落其默认）
         "effort": "high",                 //   effort：codex 换算 reasoning effort（GPT-5.6 保留 max）；
                                           //   opencode 原样传 --variant（不换算）
-        "intervalSeconds": 180,           // 上一 fire 结束 → 下一 fire 开始的间隔（非固定频率）
+        "intervalSeconds": 180,           // 上一 fire 结束 → 下一 fire 开始的间隔（非固定频率）。
+                                          //   sweep 特例：显式改小它会同步收紧兜底节拍
+                                          //   （cadence = min(显式 interval, 120min)；默认档不参与，
+                                          //   兜底节拍即 120min——2026-08-20 裁定）
         "capSeconds": 2400,               // 每 fire 墙钟上限；超时 TERM→KILL 并记 timedOut
         "enabled": true,                  // false ⇒ 调度器不驱动该 agent（探针语义不受影响）
         "staggerSeconds": 20              // 首 fire 错峰延迟（对齐 SPECS；--once 下忽略）

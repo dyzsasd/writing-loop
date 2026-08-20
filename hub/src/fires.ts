@@ -1,6 +1,7 @@
 // `writing-loop fires` —— fires.jsonl 遥测尾巴：末 N 行（默认 20）表格 +
 // 按 agent 聚合的成功率（聚合跑全量行——尾巴只是展示窗口）。文件缺失给友好空态。
 // 时间戳可信性见 conventions §18「时钟纪律」：本账本由 wl-run 进程自己的 UTC 时钟记账。
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addUsageRow, cacheHitRate, emptyUsageCell, type FireUsage, type UsageCell } from "./fire-usage.ts";
@@ -16,6 +17,95 @@ function usage(): void {
 }
 
 type AgentAgg = { fires: number; ok: number; noop: number; timedOut: number; descendantDrains: number; authGap: number; usage: UsageCell };
+
+// ── 近 24h 成本仪表（2026-08-20 操作者裁定：$/集 与 治理:内容 占比要在遥测口径里常驻可见，
+// 阈值超限打 WARN——69h 实测 $2,639 里内容产出仅 ~22%（episode-writer 5.5%）在事后分析才被
+// 发现，仪表的意义就是让这类漂移当天可见）──────────────────────────────────────────────
+export const CONTENT_AGENTS: ReadonlySet<string> = new Set(["episode-writer", "story-designer", "source-analyst"]);
+export const GOVERNANCE_WARN_SHARE = 0.7;   // 治理成本占比（治理/(治理+内容)）超过即 WARN
+export const NOOP_WARN_USD = 10;            // 24h 窗口 no-op fire 累计成本超过即 WARN
+export type WindowStats = {
+  fires: number; metered: number; costUsd: number;
+  noopFires: number; noopCostUsd: number;
+  timedOut: number; badExits: number;       // badExits = 非零退出且非超时（超时单列）
+  contentCostUsd: number; governanceCostUsd: number;
+  governanceShare: number | null;           // 两侧计量成本皆 0 ⇒ null（无占比可言）
+  byAgent: Record<string, { fires: number; costUsd: number }>;
+};
+
+// 纯函数：rows 里 startedAt 落在 (nowMs-windowMs, nowMs+5min] 的行进入窗口；无 startedAt/
+// 解析不出的行不计入（旧账本行）。成本只累计带 costUsd 的计量行——不以 0 充数（与全量
+// 聚合同一纪律）；fires/noop/超时/非零退出照常计数。
+export function windowStats(rows: FireRow[], nowMs: number, windowMs = 24 * 3600_000): WindowStats {
+  const out: WindowStats = { fires: 0, metered: 0, costUsd: 0, noopFires: 0, noopCostUsd: 0,
+    timedOut: 0, badExits: 0, contentCostUsd: 0, governanceCostUsd: 0, governanceShare: null, byAgent: {} };
+  const cutoff = nowMs - windowMs;
+  for (const r of rows) {
+    const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+    if (Number.isNaN(t) || t <= cutoff || t > nowMs + 5 * 60_000) continue;
+    out.fires++;
+    const a = r.agent ?? "?";
+    out.byAgent[a] ??= { fires: 0, costUsd: 0 };
+    out.byAgent[a].fires++;
+    if (r.noop) out.noopFires++;
+    if (r.timedOut) out.timedOut++;
+    else if (typeof r.exitCode === "number" && r.exitCode !== 0) out.badExits++;
+    const u = usageOf(r);
+    const c = u && typeof u.costUsd === "number" ? u.costUsd : null;
+    if (c === null) continue;
+    out.metered++; out.costUsd += c; out.byAgent[a].costUsd += c;
+    if (r.noop) out.noopCostUsd += c;
+    if (CONTENT_AGENTS.has(a)) out.contentCostUsd += c; else out.governanceCostUsd += c;
+  }
+  const denom = out.contentCostUsd + out.governanceCostUsd;
+  out.governanceShare = denom > 0 ? out.governanceCostUsd / denom : null;
+  return out;
+}
+
+// 窗口内新增正文集数（git log --diff-filter=A -- episodes）；非 git 仓库/git 失败 ⇒ null
+// （仪表显示「不可判」，绝不以 0 充数——0 是「确证没写新集」的强断言）。
+export function episodesAddedSince(repoPath: string, sinceIso: string): number | null {
+  try {
+    const r = spawnSync("git",
+      ["log", `--since=${sinceIso}`, "--diff-filter=A", "--name-only", "--pretty=format:", "--", "episodes"],
+      { cwd: repoPath, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] });
+    if (r.error || r.status !== 0 || typeof r.stdout !== "string") return null;
+    const eps = new Set<string>();
+    for (const ln of r.stdout.split("\n")) {
+      const m = /^episodes\/(ep-\d{3,}\.md)$/.exec(ln.trim());
+      if (m) eps.add(m[1]);
+    }
+    return eps.size;
+  } catch { return null; }
+}
+
+// 仪表渲染（纯函数，输出行数组——测试直接断言文案；epsAdded=null 表示不可判）。
+export function renderWindowReport(w: WindowStats, epsAdded: number | null): string[] {
+  if (w.fires === 0) return [];
+  const pct = (x: number): string => `${Math.round(x * 100)}%`;
+  const lines: string[] = [];
+  const perEp = epsAdded === null ? "新集不可判（repo 非 git 或 git 失败）"
+    : epsAdded === 0 ? "新集 0"
+    : `新集 ${epsAdded}（$${(w.costUsd / epsAdded).toFixed(0)}/集）`;
+  lines.push(`近 24h：${w.fires} fire（计量 ${w.metered}）· 成本 $${w.costUsd.toFixed(2)} · ${perEp}`);
+  const denom = w.contentCostUsd + w.governanceCostUsd;
+  if (denom > 0) {
+    lines.push(`  内容产出（episode-writer/story-designer/source-analyst）$${w.contentCostUsd.toFixed(2)}`
+      + `（${pct(w.contentCostUsd / denom)}）· 治理（其余角色）$${w.governanceCostUsd.toFixed(2)}`
+      + `（${pct(w.governanceCostUsd / denom)}）· no-op $${w.noopCostUsd.toFixed(2)}`);
+  }
+  if (w.governanceShare !== null && w.governanceShare > GOVERNANCE_WARN_SHARE) {
+    lines.push(`  WARN 治理成本占比 ${pct(w.governanceShare)} > ${pct(GOVERNANCE_WARN_SHARE)}`
+      + `——验收/审计/卫生开销压过内容产出，检查 showrunner/reviewer/sweep 车道`);
+  }
+  if (w.noopCostUsd > NOOP_WARN_USD) {
+    lines.push(`  WARN no-op fire 24h 累计 $${w.noopCostUsd.toFixed(2)} > $${NOOP_WARN_USD}——车道谓词在放空炮，对照 --dry-run 查各 gate`);
+  }
+  if (w.timedOut > 0 || w.badExits > 0) {
+    lines.push(`  WARN 超时 ${w.timedOut} 次 · 非零退出 ${w.badExits} 次（近 24h）`);
+  }
+  return lines;
+}
 
 const usageOf = (row: FireRow): FireUsage | null => {
   const raw = (row as unknown as { usage?: unknown }).usage;
@@ -60,11 +150,11 @@ export function firesMain(argv = process.argv.slice(2)): number {
     else { console.error(`writing-loop fires: 未知参数 '${a}'`); usage(); return 2; }
   }
 
-  let key: string, root: string;
+  let key: string, root: string, repoPath: string;
   try {
     const ws = requireWorkspace();
     const r = resolveProject(ws, projectFlag);
-    key = r.key; root = ws.root;
+    key = r.key; root = ws.root; repoPath = r.repoPath;
   } catch (e) {
     console.error(`writing-loop fires: ${e instanceof WsError ? e.message : String(e)}`);
     return 1;
@@ -76,10 +166,15 @@ export function firesMain(argv = process.argv.slice(2)): number {
   const agg = aggregate(rows);
   const overall = emptyUsageCell();
   for (const r of rows) addUsageRow(overall, usageOf(r));
+  const nowMs = Date.now();
+  const win = windowStats(rows, nowMs);
+  const epsAdded = win.fires > 0 ? episodesAddedSince(repoPath, new Date(nowMs - 24 * 3600_000).toISOString()) : null;
 
   if (asJson) {
     console.log(JSON.stringify({ project: key, ledger, total: rows.length, rows: tail, byAgent: agg,
-      usage: { overall, cacheHitRate: cacheHitRate(overall) } }, null, 2));
+      usage: { overall, cacheHitRate: cacheHitRate(overall) },
+      window24h: { ...win, episodesAdded: epsAdded,
+        costPerEpisodeUsd: epsAdded ? win.costUsd / epsAdded : null } }, null, 2));
     return 0;
   }
 
@@ -115,6 +210,8 @@ export function firesMain(argv = process.argv.slice(2)): number {
   } else if (rows.length) {
     console.log(`\n计量：0/${rows.length} fire 带 usage —— 这些 fire 早于计量接入，或车道未提供结构化输出。`);
   }
+  const report = renderWindowReport(win, epsAdded);
+  if (report.length) { console.log(""); for (const ln of report) console.log(ln); }
   return 0;
 }
 

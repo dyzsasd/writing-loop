@@ -187,7 +187,7 @@ add-script 立项 →（改编：source-analyst 筛选→showrunner source gate�
 | Todo | 已梳理、可拾取。**仅经 showrunner 放行**（§5a；五项直进 Todo 豁免见 §5a，此处不复举） | showrunner；verifier；story-designer（大纲门后由 showrunner 放行） |
 | In Progress | 已被认领在制（§7） | 实现者 |
 | In Review | 完成待验收 | 实现者 |
-| Done | owner 验收通过 | owner（§4） |
+| Done | owner 验收通过 | owner（§4）；§21a-light 轻通道：实现者凭确定性门全绿证据置 Done |
 | Canceled | 不做/过时/被取代（verify-fail 的原票） | 任何 agent，附原因评论 |
 | Duplicate | 与他票重复；设 duplicateOf | 梳理者 |
 
@@ -425,7 +425,9 @@ WL-53）。
 
 file 任何票前先查同项目开放票（标题关键词 + `Episode:` 字段 + 子类型）。同集同症状
 ⇒ 评论补充到既有票，不开新票。跨 arc 的同类审计发现（如两个 arc 都钩型单一）
-是两张票（修复对象不同）。
+是两张票（修复对象不同）。**同形机械修补 ≥3 张 ⇒ 并入载体票**（showrunner 梳理时并，
+先例 YJJS-325：一票承载同 shape 的全部实例清单，逐实例 AC，单次交付/验收）——
+零散同形票逐张走全流程是纯流程税（2026-08-20 操作者裁定，自裁定一百〇六常态化）。
 
 ## §9. Blocked 协议与人工停靠
 
@@ -951,6 +953,9 @@ showrunner 职责：
   自己的回写 commit 吞进基线），该 foreign 版本按上面 watch 命中分支处理；一致才写。
 - **回写**：进度级内容发生即回写。过时的北极星比没有更危险。
 - **滚存**：Decisions log >20KB ⇒ 滚存归档留索引；`当前进度` 节 >15KB 同款处理（patch WL-66）。
+- **条目纪律（2026-08-20 操作者裁定）**：常规验收/放行/流转记录**一行封顶（≤200 字节）**；
+  成段文书只留给新条文与方向级决策。字节预算「节体实测」只在执行滚存的那次做。
+  记史成本 69h 实测已与验收同量级——账本价值在可检索，不在文采。
 其他 agent 只读。所有创作产物与 north-star 冲突时：north-star 赢，冲突本身
 file Bug（continuity）。
 
@@ -1137,6 +1142,26 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
    `Mode: direct-write` 重试，再 fail 即停靠。判据永远是票上的 Mode 行与
    supersede 链，不是任何人的记忆。
 每次 fail 的 Cancel 评论必须记录失败稿 commit sha（§15 fail-revert）。
+
+### §21a-light. 设计层机械修补轻通道（2026-08-20 操作者裁定）
+
+**问题面**：审计门收紧后产生大量设计层机械修补票（补挂 relations/presence、ID 更正、
+单一权威指认、注册表闭合、时段/开合登记——**不改故事事实语义**的修补），每张走
+设计→评审→验收全流程约 $25–30；38 张池子既烧 $1,000+ 也把写作前沿冻了两天。
+
+**通道**：
+1. **判定与打标**：showrunner 梳理（§5a Job B2）时判定机械面，加 `mech-fix` 标签 +
+   票体机读行 `Channel: light-mechanical`；判不准（涉语义）不打标。同形 ≥3 张并载体票（§8）。
+2. **交付即验收**：story-designer 修复后跑 `writing-loop story validate`（适用 stage），
+   **全绿输出贴票面 ⇒ 直接置 Done**（§3 Done 行的轻通道例外；validate 输出是验收凭据）。
+   动手中发现涉语义取舍 ⇒ 停、剥 `mech-fix`、转常规通道，绝不在轻通道裁语义。
+3. **抽检**：reviewer Job C 例行抽查时对窗口内轻通道 Done 至少抽 1 张（重跑 validate +
+   diff 对 AC）；不符 ⇒ file Bug + 该类票收回常规通道。轻通道是信任额度，不是豁免。
+
+**审计义务池化纪律（裁定一百〇六 carve-out 常态化）**：审计/门收紧产生的**全局性**义务
+（逐卡逐集补挂类）不逐票阻塞生产——挂 arc 边界批次票统一消化；仅当缺陷位于**当前写作
+前沿本集/邻集的载入面**时才允许以 R-C/R-D 类政策阻塞前沿。门收紧的存量清欠是一次性
+成本，绝不许它常态化为「每次提标准就冻结前沿」。
 
 ## §22. 报告与操作者点评
 

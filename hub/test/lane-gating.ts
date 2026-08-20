@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  boardSnapshotHash, buildSched, evalLaneGate, keystonePending,
+  boardSnapshotHash, buildSched, evalLaneGate, keystonePending, reviewerJobCChanged,
   laneEpisodeWriter, laneEvaluator, laneMarketWatch, laneReflect, laneReviewer,
   laneScriptDoctor, laneShowrunner, laneSourceAnalyst, laneStoryDesigner, laneSweep,
   lastMonthlyBoundaryMs, lastWeeklyBoundaryMs, parseLaneTicket,
@@ -258,15 +258,25 @@ function testSweep(): void {
   const fresh = NOW - 5 * MIN;
   // 标齐 owner+tier 的整洁票（错标即时枝的反面基底）
   const clean: Partial<LaneTicket> = { owner: "reviewer", labels: ["writing-loop", "Feature", "episode", "episode-writer"] };
-  check("sweep 正例：∃ In Progress", laneSweep([tk({ state: "In Progress", ...clean })], NOW, false, fresh).length > 0);
-  check("sweep 正例：∃ .lock（板/剧情资产/repo）", laneSweep([], NOW, true, fresh).length > 0);
+  // 2026-08-20 操作者裁定回归：In Progress 枝只认 §7 认领陈旧（对齐 SKILL §0「assignee 陈旧
+  // >60min」）——修复前任意在制票即命中，任何活跃工作期都让 sweep 每 interval 白 boot 一次。
+  check("sweep 反例：In Progress 新鲜认领（在制中）不命中（修复前恒命中）",
+    laneSweep([tk({ state: "In Progress", assignee: "sd-1", updatedMs: NOW - 5 * MIN, ...clean })], NOW, false, fresh).length === 0);
+  check("sweep 正例：∃ In Progress 认领陈旧 >60min（§7 孤儿回收面）",
+    laneSweep([tk({ state: "In Progress", assignee: "sd-1", updatedMs: NOW - 61 * MIN, ...clean })], NOW, false, fresh).length > 0);
+  check("sweep 正例：∃ In Progress 搁浅形（assignee 空）",
+    laneSweep([tk({ state: "In Progress", assignee: null, updatedMs: NOW - 5 * MIN, ...clean })], NOW, false, fresh).length > 0);
+  check("sweep 正例：∃ 陈旧 .lock（板/剧情资产/repo）", laneSweep([], NOW, true, fresh).length > 0);
   check("sweep 保守：锁扫描不可判 ⇒ 命中", laneSweep([], NOW, null, fresh).length > 0);
   const ks = ["writing-loop", "Feature", "episode", "keystone", "reviewer", "story-designer"];
   check("sweep 正例：keystone-stall（In Review 停滞 >30min，§1 护栏）",
     laneSweep([tk({ state: "In Review", owner: "reviewer", labels: ks, updatedMs: NOW - 31 * MIN })], NOW, false, fresh).length > 0);
   check("sweep 反例：keystone In Review 未满 30min 不算 stall",
     laneSweep([tk({ state: "In Review", owner: "reviewer", labels: ks, updatedMs: NOW - 10 * MIN })], NOW, false, fresh).length === 0);
-  check("sweep 正例：兜底节拍——距上次 sweep fire >30min", laneSweep([], NOW, false, NOW - 31 * MIN).length > 0);
+  // 2026-08-20 操作者裁定：兜底节拍 30min→120min（事件枝各有专门条件，纯节拍扫板降频）。
+  check("sweep 反例：距上次 sweep fire 90min（<120min）节拍不命中（修复前 31min 即命中）",
+    laneSweep([], NOW, false, NOW - 90 * MIN).length === 0);
+  check("sweep 正例：兜底节拍——距上次 sweep fire >120min", laneSweep([], NOW, false, NOW - 121 * MIN).length > 0);
   check("sweep 保守：上次 fire 无从考证 ⇒ 命中", laneSweep([], NOW, false, null).length > 0);
   check("sweep 反例：板整洁/无锁/无 stall/节拍未到 ⇒ 空", laneSweep([tk({ state: "Todo", ...clean })], NOW, false, fresh).length === 0);
   // Fix 轮 1 minor：错标即时枝（SKILL §0 逃逸口②前半）直接机械实现，不再靠 cadence 兜底
@@ -458,8 +468,9 @@ function testStateAndGitSeams(): void {
     return ret;
   };
   check("reviewer：episodes/∪story assets 零 diff ⇒ gated", !evalLaneGate("reviewer", w.io({ gitDiff: spy(false) })).open);
-  check("reviewer：diff 判据收到旧 schema fallback 基点 + 双 pathspec",
-    diffSpy.length === 1 && diffSpy[0].join(" ") === "aaa111 episodes/ story/assets.v1.json", JSON.stringify(diffSpy));
+  check("reviewer：diff 判据收到旧 schema fallback 基点 + 两次分域 pathspec（episodes/ 与 assets 分判——dwell 需区分）",
+    diffSpy.length === 2 && diffSpy[0].join(" ") === "aaa111 episodes/"
+    && diffSpy[1].join(" ") === "aaa111 story/assets.v1.json", JSON.stringify(diffSpy));
   check("reviewer：有 diff（assets-only 修订同样可见）⇒ open", evalLaneGate("reviewer", w.io({ gitDiff: spy(true) })).open);
   check("reviewer：diff 不可判（git 失败/base 无效）⇒ 保守 open", evalLaneGate("reviewer", w.io({ gitDiff: spy(null) })).open);
   writeFileSync(join(w.projData, "state", "reviewer-state.json"),
@@ -467,7 +478,7 @@ function testStateAndGitSeams(): void {
   diffSpy.length = 0;
   evalLaneGate("reviewer", w.io({ gitDiff: spy(false) }));
   check("reviewer：基点键序对齐 gateNote——lastAuditSha 优先于旧 lastAuditedEpisodesSha",
-    diffSpy.length === 1 && diffSpy[0][0] === "ccc333", JSON.stringify(diffSpy));
+    diffSpy.length === 2 && diffSpy.every((c) => c[0] === "ccc333"), JSON.stringify(diffSpy));
   // WLSYS-f5482b7a 回归①：reviewer agent 实际写入的键是 lastAuditedSha（yujing-jiushi
   // state/reviewer-state.json 实测形：{version, lastAuditedSha, lastAuditedAt, auditedEpisodes,
   // note}）。修复前调度器只读 lastAuditSha/lastAuditedEpisodesSha ⇒ prev 恒 null ⇒ 走首跑分支
@@ -478,14 +489,40 @@ function testStateAndGitSeams(): void {
   diffSpy.length = 0;
   const gAgentKey = evalLaneGate("reviewer", w.io({ gitDiff: spy(false), gitSha: () => "scaffold-sha" }));
   check("reviewer：agent 实写键 lastAuditedSha 被当作 diff 基点（不落首跑分支）",
-    diffSpy.length === 1 && diffSpy[0][0] === "e4a7f8a", JSON.stringify(diffSpy));
+    diffSpy.length === 2 && diffSpy.every((c) => c[0] === "e4a7f8a"), JSON.stringify(diffSpy));
   check("reviewer：lastAuditedSha 基点后零 diff ⇒ gated（修复前恒 open）", !gAgentKey.open, gAgentKey.reasons.join("；"));
   writeFileSync(join(w.projData, "state", "reviewer-state.json"),
     JSON.stringify({ lastAuditedSha: "new111", lastAuditSha: "old222" }));
   diffSpy.length = 0;
   evalLaneGate("reviewer", w.io({ gitDiff: spy(false) }));
   check("reviewer：键序 lastAuditedSha（现行实写）> lastAuditSha（旧）",
-    diffSpy.length === 1 && diffSpy[0][0] === "new111", JSON.stringify(diffSpy));
+    diffSpy.length === 2 && diffSpy.every((c) => c[0] === "new111"), JSON.stringify(diffSpy));
+
+  // 2026-08-20 操作者裁定回归：assets-only 改动攒批（Job C dwell 2h）。设计密集期每笔资产图
+  // 提交都单独唤醒 reviewer（69h 实测 110 fire）；修复后纯 assets 改动在上次审计 <2h 内不开门，
+  // episodes/ 改动与任何不可判仍立即开（单向安全）。
+  const splitSpy = (ep: boolean | null, assets: boolean | null) =>
+    (_r: string, _b: string, paths: readonly string[]): boolean | null =>
+      paths.join(" ") === "episodes/" ? ep : assets;
+  writeFileSync(join(w.projData, "state", "reviewer-state.json"),
+    JSON.stringify({ lastAuditedSha: "base77", lastAuditedAt: new Date(NOW - 30 * MIN).toISOString() }));
+  check("reviewer：assets-only 改动 + 30min 前刚审过 ⇒ gated（dwell 攒批；修复前恒 open）",
+    !evalLaneGate("reviewer", w.io({ gitDiff: splitSpy(false, true) })).open);
+  check("reviewer：episodes/ 有改动 ⇒ 无视 dwell 立即 open",
+    evalLaneGate("reviewer", w.io({ gitDiff: splitSpy(true, false) })).open);
+  writeFileSync(join(w.projData, "state", "reviewer-state.json"),
+    JSON.stringify({ lastAuditedSha: "base77", lastAuditedAt: new Date(NOW - 3 * HOUR).toISOString() }));
+  check("reviewer：assets-only 改动 + 上次审计已 3h ⇒ open（攒够一批）",
+    evalLaneGate("reviewer", w.io({ gitDiff: splitSpy(false, true) })).open);
+  writeFileSync(join(w.projData, "state", "reviewer-state.json"), JSON.stringify({ lastAuditedSha: "base77" }));
+  check("reviewer：assets-only 改动 + lastAuditedAt 缺失 ⇒ 保守 open",
+    evalLaneGate("reviewer", w.io({ gitDiff: splitSpy(false, true) })).open);
+  // 纯函数矩阵（含 laneGate 不便构造的角落）
+  check("reviewerJobCChanged：episodes 不可判 ⇒ null（保守）", reviewerJobCChanged(null, false, NOW - 1, NOW) === null);
+  check("reviewerJobCChanged：assets 不可判 ⇒ null（保守）", reviewerJobCChanged(false, null, NOW - 1, NOW) === null);
+  check("reviewerJobCChanged：两域皆无改动 ⇒ false", reviewerJobCChanged(false, false, null, NOW) === false);
+  check("reviewerJobCChanged：assets-only + lastAuditedAt 未来戳 ⇒ 保守 open",
+    reviewerJobCChanged(false, true, NOW + 10 * MIN, NOW) === true);
   rmSync(join(w.projData, "state", "reviewer-state.json"));
   check("reviewer：state 缺失 + episodes/∪story assets 确证零 commit ⇒ 可证明无活，gated",
     !evalLaneGate("reviewer", w.io({ gitSha: () => "" })).open);
@@ -650,19 +687,24 @@ function testJobCStructuredAssetsOnlyCommit(): void {
   rmSync(w.ws, { recursive: true, force: true });
 }
 
-// Fix 轮 1 minor：sweep cadence 阈值 = min(config interval, 30min)——操作者调短节律时门控
-// 随动；调长不放宽（上界 30min 恒在）。
+// sweep cadence 阈值 = min(显式 config interval, 120min)——操作者显式调短节律时门控随动；
+// 调长不放宽（上界 120min 恒在）。2026-08-20 操作者裁定 30min→120min；调用方（evalGate）只在
+// interval 非默认值时传入 sweepIntervalMs，默认档不参与 min（否则默认 1800s 会把节拍压回 30min）。
 function testSweepCadenceKnob(): void {
   const w = gateWorld();
   mkdirSync(w.boardDir, { recursive: true });
-  check("sweep cadence：interval=10min、12min 前干净 fire ⇒ open（旧固定 30min 会压掉）",
+  check("sweep cadence：显式 interval=10min、12min 前干净 fire ⇒ open（固定 120min 会压掉）",
     evalLaneGate("sweep", w.io({ sweepIntervalMs: 10 * MIN, lastCleanEndMs: NOW - 12 * MIN })).open);
-  check("sweep cadence：interval=10min、5min 前刚跑过 ⇒ gated",
+  check("sweep cadence：显式 interval=10min、5min 前刚跑过 ⇒ gated",
     !evalLaneGate("sweep", w.io({ sweepIntervalMs: 10 * MIN, lastCleanEndMs: NOW - 5 * MIN })).open);
-  check("sweep cadence：interval=2h 也不放宽上界——31min 前干净 fire 即 open",
-    evalLaneGate("sweep", w.io({ sweepIntervalMs: 2 * HOUR, lastCleanEndMs: NOW - 31 * MIN })).open);
-  check("sweep cadence：interval 缺省（未接线）回落 30min 档，20min 前干净 fire ⇒ gated",
-    !evalLaneGate("sweep", w.io({ lastCleanEndMs: NOW - 20 * MIN })).open);
+  check("sweep cadence：显式 interval=3h 也不放宽上界——121min 前干净 fire 即 open",
+    evalLaneGate("sweep", w.io({ sweepIntervalMs: 3 * HOUR, lastCleanEndMs: NOW - 121 * MIN })).open);
+  check("sweep cadence：显式 interval=3h、90min 前干净 fire ⇒ gated（上界内）",
+    !evalLaneGate("sweep", w.io({ sweepIntervalMs: 3 * HOUR, lastCleanEndMs: NOW - 90 * MIN })).open);
+  check("sweep cadence：interval 缺省回落 120min 档，90min 前干净 fire ⇒ gated（修复前 31min 即 open）",
+    !evalLaneGate("sweep", w.io({ lastCleanEndMs: NOW - 90 * MIN })).open);
+  check("sweep cadence：interval 缺省、121min 前干净 fire ⇒ open",
+    evalLaneGate("sweep", w.io({ lastCleanEndMs: NOW - 121 * MIN })).open);
   rmSync(w.ws, { recursive: true, force: true });
 }
 
@@ -673,19 +715,27 @@ function testSweepLocksAndShowrunnerBaseline(): void {
 
   // sweep：三类锁逐条 + 全清后 gated
   const freshIo = (o: IoOver = {}): Parameters<typeof evalLaneGate>[1] => w.io({ lastCleanEndMs: NOW - 5 * MIN, ...o });
+  // 2026-08-20 操作者裁定：锁扫描只报**陈旧**锁（mtime 早于 NOW-15min）——在途 fire 的正常
+  // 持锁不是卫生事件；修复前任何锁即开门，多 agent 并飞时段 sweep 每 interval 白 boot。
+  const stale = (path: string): void => utimesSync(path, new Date(NOW - 20 * MIN), new Date(NOW - 20 * MIN));
   check("sweep：无锁/无 In Progress/节拍未到 ⇒ gated", !evalLaneGate("sweep", freshIo()).open);
   writeFileSync(join(w.boardDir, "WL-1.md.lock"), "holder pid=1 at 2026-07-15T11:00:00Z\n");
-  check("sweep：板票锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
+  check("sweep：新鲜板票锁（在途持锁）⇒ gated（修复前恒 open）", !evalLaneGate("sweep", freshIo()).open);
+  stale(join(w.boardDir, "WL-1.md.lock"));
+  check("sweep：陈旧板票锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
   rmSync(join(w.boardDir, "WL-1.md.lock"));
   mkdirSync(join(w.repo, ".git"), { recursive: true });
   writeFileSync(join(w.repo, ".git", "story-assets.lock"), "x");
-  check("sweep：结构化剧情资产锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
+  stale(join(w.repo, ".git", "story-assets.lock"));
+  check("sweep：陈旧结构化剧情资产锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
   rmSync(join(w.repo, ".git", "story-assets.lock"));
   writeFileSync(join(w.repo, ".git", "repo.lock"), "x");
-  check("sweep：repo 写锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
+  check("sweep：新鲜 repo 写锁 ⇒ gated", !evalLaneGate("sweep", freshIo()).open);
+  stale(join(w.repo, ".git", "repo.lock"));
+  check("sweep：陈旧 repo 写锁 ⇒ open", evalLaneGate("sweep", freshIo()).open);
   rmSync(join(w.repo, ".git", "repo.lock"));
-  check("sweepLockScan：全清 ⇒ false", sweepLockScan(w.boardDir, w.repo) === false);
-  check("sweep：节拍兜底 ⇒ open", evalLaneGate("sweep", freshIo({ lastCleanEndMs: NOW - 31 * MIN })).open);
+  check("sweepLockScan：全清 ⇒ false", sweepLockScan(w.boardDir, w.repo, NOW - 15 * MIN) === false);
+  check("sweep：节拍兜底 ⇒ open", evalLaneGate("sweep", freshIo({ lastCleanEndMs: NOW - 121 * MIN })).open);
 
   // showrunner：基线流转（evalLaneGate 返回的哈希即基线载体）
   writeFileSync(join(w.boardDir, "WL-SOURCE.md"),

@@ -94,8 +94,15 @@ Todo/In Progress/In Review，Backlog 不冻结；③arc 首集；`Mode: direct-w
 fire 补），评论首行 `Bail-shape: <info-needed|decision-needed|scope-design>`，清
 assignee 回 Todo。不猜。`source-analysis` 属 Source Analyst，legacy 误标票不得拾取；
 判模式：`arc-design`/`outline` ⇒ design（Step 4）；
+`mech-fix` 标签或票体 `Channel: light-mechanical` ⇒ mech-fix 轻通道（Step 4b）；
 `Mode: direct-write` 或 `keystone`+`episode` ⇒ direct-write（Step 5）；`punch-up` ⇒
 punch-up（Step 6）；无法判 ⇒ block `decision-needed`。
+
+**单 fire 交付限幅（2026-08-20 操作者裁定——arc-05 期 5 次 3600s cap 击杀的对策，方向是
+拆小而不是加时）**：一个 fire 的交付范围 ≤1 张 Bug 票，或 ≤3 张 EP 卡的新建/重制；梳理时
+预判超限 ⇒ 先拆票（余量 file Backlog 挂 `relatedTo`）再动手。**每完成一个自洽单元立即
+commit**（半成品绝不过夜）；fire 进行约 45min 仍未收口 ⇒ 收尾当前单元、commit、把剩余
+清单写进票面评论留下 fire 续——被 cap 杀掉的在途工作是纯损失，分批不是。
 
 ### Step 4 — DESIGN 模式（设计并委派，流程 = §21a-design）
 1. **直接更新唯一结构事实源** `story/outline.v1.json`（schema 见
@@ -170,6 +177,19 @@ R4.5 卡点 / R8 名场面 / 续季钩）与 `story/assets.v1.json`（季级伏�
 `north-star.md` 只读——showrunner 唯一写者（§20），需增补 ⇒ `needs-showrunner`。
 交门前运行 full gate；自主 commit（repo 写锁内
 §15.6）→ 父票 In Review。outline 票不 spawn arc 子票。
+
+### Step 4b — MECH-FIX 轻通道（§21a-light；2026-08-20 操作者裁定）
+适用：showrunner 梳理时打了 `mech-fix` 的机械修补票（补挂 relations/presence、ID 更正、
+单一权威指认、注册表闭合——不改故事事实语义）。流程：
+1. 按 AC 修 `story/assets.v1.json`（/`outline.v1.json`），动手中发现涉**事实语义取舍**
+   ⇒ 立即停，评论说明 + 移除 `mech-fix`，转常规通道（In Review 交 showrunner）——轻通道
+   永不裁语义。
+2. 跑 `writing-loop story validate --project <project> --stage <适用 stage>`，全绿输出
+   贴票面评论（fail ⇒ 修到绿，绝不带 fail 交付）。
+3. 自主 commit（§15.6 写锁内）→ **直接置 Done**（§21a-light 的 owner 验收例外；票面的
+   validate 输出即验收凭据）。reviewer 会按 §21a-light 抽检；抽检不符会把此类票收回常规
+   通道——轻通道是信任额度，不是豁免。
+同 fire 内多张同形 mech-fix 已并载体票的（§8），按载体票一次交付；限幅按「1 张载体票」计。
 
 ### Step 5 — DIRECT-WRITE 模式（升级重写票 / keystone 首稿；流程 = §21a-episode）
 与 episode-writer 同流，但你是顶配：

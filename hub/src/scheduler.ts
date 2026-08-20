@@ -81,6 +81,8 @@ export const AGENT_SPECS: ReadonlyArray<readonly [string, string, string, number
   ["reflect",        "fable",  "xhigh", 14400,  2400, 80],
 ];
 export const AGENT_ORDER: readonly string[] = AGENT_SPECS.map((s) => s[0]);
+// sweep 的默认 interval（evalGate 判「操作者是否显式改过」用——见 GateIo.sweepIntervalMs）。
+const SWEEP_DEFAULT_INTERVAL_S = AGENT_SPECS.find((s) => s[0] === "sweep")![3];
 
 // 写者/板上分类 —— 依据 conventions §15.6 逐字列举的 repo commit 主体；
 // reviewer 的 §15.4 revert 是写进跟进票 AC 由 writer 层执行的，reviewer 本体不 commit。
@@ -411,7 +413,11 @@ export const TERMINAL_STATES: ReadonlySet<string> = new Set(["Done", "Canceled",
 export const TICKET_STATES: ReadonlySet<string> = SHARED_TICKET_STATES;
 const CLAIM_STALE_MS = 60 * 60_000;       // §7 认领陈旧阈值（60min）
 const KEYSTONE_STALL_MS = 30 * 60_000;    // §1 keystone-stall 护栏阈值（默认 30min）
-const SWEEP_CADENCE_MS = 30 * 60_000;     // sweep 兜底节拍（SKILL §0 cadence gate，30min 级）
+const SWEEP_CADENCE_MS = 120 * 60_000;    // sweep 兜底节拍（SKILL §0 cadence gate；2026-08-20 操作者裁定
+                                          // 30min→120min：事件枝（陈旧锁/孤儿/错标/keystone-stall）各有专门
+                                          // 条件即时开门，纯节拍扫板降频到 2h 级；操作者显式调短 interval 仍随动）
+const LOCK_STALE_MS = 15 * 60_000;        // sweep 锁扫描的陈旧阈值：锁 mtime 新于此 = 在途 fire 正常持锁
+                                          // （wl-run 心跳 30s、板票/repo 锁秒级持有），不算卫生事件
 const PARK_REMIND_MS = 24 * 60 * 60_000;  // §9 停靠 24h 重提醒
 const RETRO_WINDOW_MS = 24 * 60 * 60_000;      // reflect 日频窗口
 const CLOCK_SKEW_MS = 2 * 60_000;         // 容忍的正向时钟偏差；再往后即未来戳 = stale-可疑（§18）
@@ -786,14 +792,17 @@ export function laneShowrunner(
   return hits;
 }
 
-// sweep（SKILL §0 + 操作者裁定五枝）：∃ In Progress（孤儿回收候选面）∨ ∃ 任何 .lock
-// （板票锁/结构化剧情资产锁/repo 写锁——Job 3 陈旧锁清理）∨ 错标即时枝（SKILL §0 逃逸口②前半，
-// frontmatter 机械可判：非终态票缺全部十个 tier 标签或 owner 字段缺失——Fix 轮 1 前靠
-// cadence 枝兜底，interval<30min 配置下会延迟清理）∨ keystone-stall（In Review+keystone 且
-// updated 陈旧 >30min——比 SKILL 判据少 assignee 合取，更保守）∨ 兜底节拍（距上次 sweep
-// 干净 fire 超卫生周期 cadenceMs = min(config interval, 30min)——SKILL「默认 30min 级」，
-// 操作者调短节律时门控随动，绝不压掉 skill cadence 本会跑的 fire；纯节拍义务由此枝兜住）。
-// Ⅰ needs-sweep 不存在（§4 闭集）；上次 fire 无从考证 ⇒ 保守命中。
+// sweep（SKILL §0 + 操作者裁定五枝）：∃ In Progress **认领陈旧**（§7 孤儿回收面——SKILL §0
+// 原文就是「assignee 陈旧 >60min」；2026-08-20 之前实现是任意 In Progress 即命中，比 SKILL 宽，
+// 结果任何票在制期间每个 interval 都白 boot 一次（69h 实测 122 fire/$247 主因），操作者裁定
+// 收口对齐 SKILL）∨ ∃ **陈旧** .lock（板票锁/结构化剧情资产锁/repo 写锁——Job 3 清理对象是
+// 陈旧锁；在途 fire 正常持锁不是卫生事件，锁龄判据见 sweepLockScan/LOCK_STALE_MS）∨ 错标
+// 即时枝（SKILL §0 逃逸口②前半，frontmatter 机械可判：非终态票缺全部十个 tier 标签或 owner
+// 字段缺失）∨ keystone-stall（In Review+keystone 且 updated 陈旧 >30min——比 SKILL 判据少
+// assignee 合取，更保守）∨ 兜底节拍（距上次 sweep 干净 fire 超卫生周期 cadenceMs =
+// min(config interval, 120min)——操作者显式调短节律时门控随动，绝不压掉其 cadence 本会跑
+// 的 fire；纯节拍义务由此枝兜住）。Ⅰ needs-sweep 不存在（§4 闭集）；上次 fire 无从考证 ⇒
+// 保守命中。
 export function laneSweep(
   tickets: LaneTicket[], nowMs: number, anyLock: boolean | null,
   lastSweepEndMs: number | null, cadenceMs = SWEEP_CADENCE_MS,
@@ -802,11 +811,10 @@ export function laneSweep(
   const activeSource = tickets.find((t) => (t.state === "Todo" || t.state === "In Progress")
     && t.labels.includes("source-analysis"));
   const freshSource = activeSource?.state === "In Progress" && !orphaned(activeSource, nowMs);
-  const ip = tickets.find((t) => t.state === "In Progress"
-    && (t !== activeSource || orphaned(t, nowMs)));
-  if (ip) hits.push(fmtHit("∃ In Progress", ip));
+  const ip = tickets.find((t) => t.state === "In Progress" && orphaned(t, nowMs));
+  if (ip) hits.push(fmtHit("∃ In Progress 认领陈旧（§7 孤儿回收面）", ip));
   if (anyLock === null) hits.push("锁扫描不可判——保守命中");
-  else if (anyLock && !freshSource) hits.push("∃ .lock 文件（板/剧情资产/repo）");
+  else if (anyLock && !freshSource) hits.push("∃ 陈旧 .lock 文件（板/剧情资产/repo）");
   const mislabeled = tickets.find((t) => !TERMINAL_STATES.has(t.state)
     && (t.owner === null || !t.labels.some((l) => AGENT_ORDER.includes(l))));
   if (mislabeled) hits.push(fmtHit("错标：非终态票缺 owner/tier 标签（SKILL §0 逃逸口②）", mislabeled));
@@ -945,22 +953,32 @@ export function newestMtimeUnder(path: string, budget = 512): number | null {
 
 // sweep 锁扫描：板票锁 board/tickets/*.lock + 结构化剧情资产锁
 // <repo>/.git/story-assets.lock + repo 写锁 <repo>/.git/repo.lock（§18/§15.5/§15.6）。wl-run.lock 在项目数据目录顶层、不在扫描
-// 面——那是调度器自己的锁。读取失败 ⇒ null（保守）；目录 ENOENT = 无锁可证明。
-export function sweepLockScan(ticketsDir: string, repoPath: string): boolean | null {
+// 面——那是调度器自己的锁。**只报陈旧锁**（mtime 早于 staleBeforeMs；2026-08-20 操作者裁定：
+// 在途 fire 的正常持锁不是卫生事件，Job 3 的清理对象本来就只有陈旧锁——此前任何锁都开门，
+// 三 agent 并飞时段 sweep 每 interval 白 boot）。锁 stat 失败（非 ENOENT）⇒ null（保守）；
+// 目录 ENOENT = 无锁可证明。
+export function sweepLockScan(ticketsDir: string, repoPath: string, staleBeforeMs?: number): boolean | null {
+  const cutoff = staleBeforeMs ?? Date.now() - LOCK_STALE_MS;
   let undetermined = false;
-  for (const dir of [ticketsDir]) {
+  const staleOrUndetermined = (path: string): boolean => {
     try {
-      if (readdirSync(dir).some((fn) => fn.endsWith(".lock"))) return true;
+      const s = statSync(path);
+      if (!s.isFile()) return false;
+      return s.mtimeMs <= cutoff;
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
+      return false;
     }
+  };
+  try {
+    for (const fn of readdirSync(ticketsDir)) {
+      if (fn.endsWith(".lock") && staleOrUndetermined(join(ticketsDir, fn))) return true;
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
   }
   for (const name of ["story-assets.lock", "repo.lock"]) {
-    try {
-      if (statSync(join(repoPath, ".git", name)).isFile()) return true;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "ENOENT") undetermined = true;
-    }
+    if (staleOrUndetermined(join(repoPath, ".git", name))) return true;
   }
   return undetermined ? null : false;
 }
@@ -1003,6 +1021,26 @@ export function gitDiffChanged(repo: string, baseSha: string, pathspecs: readonl
   } catch { return null; }
 }
 
+// reviewer Job C 开门判据（2026-08-20 操作者裁定「assets-only 攒批」）：episodes/ 有改动 ⇒
+// 立即开（正文审计不延迟）；纯 story/assets.v1.json 改动 ⇒ dwell 批处理——距上次审计
+// <ASSETS_AUDIT_DWELL_MS 不开门，攒够一批一次审。动机：设计密集期 story-designer 每次交付
+// 都 commit 资产图，旧判据（合并 diff 非空即开）让 reviewer 对每笔提交单独全 boot（69h 实测
+// 110 fire/$473，其中大量是对已验收交付的重复抽查）；抽查本就是采样性质（SKILL Job C
+// 「抽 1-2 集邻集」），攒批不改变覆盖承诺。单向安全保持：任何不可判（diff null、
+// lastAuditedAt 缺失/未来戳）⇒ 保守开门；收窄只发生在「可证明 assets-only 且上次审计足够新」。
+export const ASSETS_AUDIT_DWELL_MS = 2 * 60 * 60_000;
+export function reviewerJobCChanged(
+  episodesChanged: boolean | null, assetsChanged: boolean | null,
+  lastAuditedAtMs: number | null, nowMs: number,
+): boolean | null {
+  if (episodesChanged === true) return true;
+  if (episodesChanged === null) return null;
+  if (assetsChanged === false) return false;
+  if (assetsChanged === null) return null;
+  if (lastAuditedAtMs === null || lastAuditedAtMs > nowMs + CLOCK_SKEW_MS) return true;
+  return nowMs - lastAuditedAtMs >= ASSETS_AUDIT_DWELL_MS;
+}
+
 const readStateJson = (path: string): Record<string, unknown> | null => {
   try {
     const j = JSON.parse(readFileSync(path, "utf8")) as unknown;
@@ -1031,7 +1069,8 @@ export type GateIo = {
   repoPath: string;
   marketDataPath?: string | null;
   lastCleanEndMs?: number | null;  // 本 agent 上次干净 fire 结束（调度器 UTC 时钟）
-  sweepIntervalMs?: number | null; // sweep 配置节律（cadence 枝取 min(此值, 30min)；缺省按 30min）
+  sweepIntervalMs?: number | null; // sweep 的**显式**配置节律（cadence 枝取 min(此值, 120min)；
+                                   // 缺省/默认值按 120min——调用方只在操作者改过 interval 时传入）
   showrunnerBaseline?: { board: string; northStar: string } | null;
   gitSha?: (repo: string, ...pathspecs: string[]) => string | null;   // 测试接缝
   episodeScripts?: (repo: string) => boolean | null; // 无正文可证实时 doctor 可在 spawn 前关门
@@ -1088,7 +1127,8 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       // 非空——同 doctor 分支的 hasEpisodeScripts 守卫）⇒ 可证明无 Job C 活；有正文且
       // episodes/∪story assets 确证零 commit 亦然；其余任何不可判恒保守命中。
       const diff = io.gitDiff ?? gitDiffChanged;
-      const prev = stateStr(readStateJson(statePath("reviewer-state.json")),
+      const reviewerState = readStateJson(statePath("reviewer-state.json"));
+      const prev = stateStr(reviewerState,
         "lastAuditedSha", "lastAuditSha", "lastAuditedEpisodesSha");
       let changed: boolean | null;
       if (prev === null) {
@@ -1100,7 +1140,13 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
           changed = cur === null ? null : cur !== "";
         }
       } else {
-        changed = diff(io.repoPath, prev, ["episodes/", "story/assets.v1.json"]);
+        // assets-only 改动走 dwell 攒批（reviewerJobCChanged）；episodes/ 改动立即开。
+        const auditedRaw = stateStr(reviewerState, "lastAuditedAt");
+        const auditedMs = auditedRaw === null ? NaN : Date.parse(auditedRaw);
+        changed = reviewerJobCChanged(
+          diff(io.repoPath, prev, ["episodes/"]),
+          diff(io.repoPath, prev, ["story/assets.v1.json"]),
+          Number.isNaN(auditedMs) ? null : auditedMs, nowMs);
       }
       reasons.push(...laneReviewer(snap.tickets, nowMs, changed));
       break;
@@ -1116,9 +1162,10 @@ export function evalLaneGate(agent: string, io: GateIo): GateEval {
       break;
     }
     case "sweep": {
-      // cadence 上界 30min、随 config 调短跟进（min）——操作者把 interval 调短时门控随动。
+      // cadence 兜底 120min；操作者显式配置的 interval（调用方只在非默认时传入）仍随动调短。
       const cadenceMs = Math.min(io.sweepIntervalMs ?? SWEEP_CADENCE_MS, SWEEP_CADENCE_MS);
-      reasons.push(...laneSweep(snap.tickets, nowMs, sweepLockScan(io.boardDir, io.repoPath), lastClean, cadenceMs));
+      reasons.push(...laneSweep(snap.tickets, nowMs,
+        sweepLockScan(io.boardDir, io.repoPath, nowMs - LOCK_STALE_MS), lastClean, cadenceMs));
       break;
     }
     case "market-watch": {
@@ -1945,7 +1992,10 @@ export class Scheduler {
       repoPath: this.repo,
       marketDataPath: this.marketDataPath,
       lastCleanEndMs: this.lastCleanEndMs.get(agent) ?? null,
-      sweepIntervalMs: this.sched.agents["sweep"].intervalSeconds * 1000,
+      // 只有操作者显式改过 sweep interval 才把它传给 cadence 枝（随动调短）；默认值不传，
+      // 否则 min(默认 1800s, SWEEP_CADENCE_MS) 会把 2h 兜底节拍压回 30min（2026-08-20 裁定）。
+      sweepIntervalMs: this.sched.agents["sweep"].intervalSeconds === SWEEP_DEFAULT_INTERVAL_S
+        ? null : this.sched.agents["sweep"].intervalSeconds * 1000,
       showrunnerBaseline: this.showrunnerBaseline,
     });
   }
