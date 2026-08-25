@@ -104,6 +104,11 @@ assignee 回 Todo。不猜。`source-analysis` 属 Source Analyst，legacy 误�
 `Mode: direct-write` 或 `keystone`+`episode` ⇒ direct-write（Step 5）；`punch-up` ⇒
 punch-up（Step 6）；无法判 ⇒ block `decision-needed`。
 
+**立规配额（§21a-light，2026-08-25 操作者裁定）**：交付中你认为需要**新立全局性义务**
+（册/守卫/断言/体例/判别符）时，不得就地立——评论投当前 arc 的 `rule-proposals` 载体票，
+等 showrunner arc 边界裁并（≤5 条/arc）。例外仅两种：①票面 AC 明确要求的；②修复当前
+前沿集载入面缺陷**必需**的最小义务（评论注明「配额外·前沿必需」）。器械增长必须有预算。
+
 **单 fire 交付限幅（2026-08-20 操作者裁定——arc-05 期 5 次 3600s cap 击杀的对策，方向是
 拆小而不是加时）**：一个 fire 的交付范围 ≤1 张 Bug 票，或 ≤3 张 EP 卡的新建/重制；梳理时
 预判超限 ⇒ 先拆票（余量 file Backlog 挂 `relatedTo`）再动手。**每完成一个自洽单元立即

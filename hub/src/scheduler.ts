@@ -1304,6 +1304,68 @@ export function stripFrontmatter(raw: string): string {
 // promptMode:"inline"（及 opencode 恒定形态）的 fire prompt 组装：
 // 读 <插件根>/skills/<agent>-agent/SKILL.md，剥 YAML frontmatter，把正文里的字面
 // ${CLAUDE_PLUGIN_ROOT} 替换为插件根绝对路径，再前置调度器上下文头 + 分隔线。
+// ---------------------------------------------------------------------------
+// 规约节选内联（2026-08-25 操作者裁定「上下文三刀」之一二）
+// 实测：每 agent 每 fire 用工具读 conventions.md 的 45-80%（48-85KB）——这些字节以
+// tool-result 进入对话中段，跨 fire 永远成不了共享前缀，且按 cacheWrite（2× input，
+// 1h TTL 档）计价。把各角色 Sections 所列节在 spawn 时预提取、拼进 -p prompt 的**常量
+// 段**（header+skill+节选，字节恒定），fire 间隔（分钟级）< 1h TTL ⇒ 跨 fire 前缀
+// 直接命中（0.1× 价），agent 侧省一次大读 + 数个来回。变量内容（门控命中枝）恒附在
+// 常量段**之后**，绝不插前——插前即破坏全前缀。
+// ---------------------------------------------------------------------------
+// SKILL.md 末尾 `Sections: §0 §0a …` 行 ⇒ 节 id 列表；无此行（source-analyst 散文式
+// 清单）⇒ 保守默认集（其 SKILL 散文清单 + §0a boot 公共面）。
+export const DEFAULT_SKILL_SECTIONS: readonly string[] =
+  ["0", "0a", "2", "5", "7", "9", "10", "11", "12", "14", "15", "17", "18", "22"];
+export function parseSkillSections(skillText: string): string[] {
+  const m = /^Sections:\s*(.+)$/m.exec(skillText);
+  if (!m) return [...DEFAULT_SKILL_SECTIONS];
+  const ids = m[1].split(/\s+/).map((t) => t.replace(/^§/, "").trim()).filter(Boolean);
+  return ids.length ? ids : [...DEFAULT_SKILL_SECTIONS];
+}
+
+// conventions.md 按 `##/### §<id>` 标题切节（code-fence 感知：``` 块内的标题行不当边界；
+// 非 § 子标题（如 §11 内的「### Workspace 根…」）不断节，随其父 § 节走）。返回
+// Map<id, 含标题的节全文>；"__preamble__" = 首个 § 标题之前的导语（目录/拓扑导引）。
+export function splitConventionsSections(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const lines = text.split("\n");
+  let fence = false;
+  let cur = "__preamble__";
+  let buf: string[] = [];
+  const flush = (): void => { if (buf.length) out.set(cur, (out.get(cur) ?? "") + buf.join("\n") + "\n"); buf = []; };
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) fence = !fence;
+    const m = !fence ? /^#{2,3}\s+§([\w-]+)[.。]/.exec(line) : null;
+    if (m) { flush(); cur = m[1]; }
+    buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+// 每 agent 的规约节选（按 conventions 原文顺序拼接，字节稳定）。memo 以两文件 mtime 为键
+// ——热改 SKILL/conventions 后下一 fire 即生效（沿用现行逐 fire 重读语义），未变则零 IO。
+const digestMemo = new Map<string, { key: string; text: string }>();
+export function buildConventionsDigest(root: string, agent: string): string {
+  const skillPath = join(root, "skills", `${agent}-agent`, "SKILL.md");
+  const convPath = join(root, "references", "conventions.md");
+  let memoKey = "";
+  try { memoKey = `${statSync(skillPath).mtimeMs}:${statSync(convPath).mtimeMs}`; } catch { /* 缺文件走下方 die/空 */ }
+  const hit = digestMemo.get(agent);
+  if (hit && hit.key === memoKey) return hit.text;
+  if (!existsSync(convPath)) return "";   // 无 conventions（异常装机形）⇒ 空节选，agent 仍可自读
+  const wanted = new Set(parseSkillSections(readFileSync(skillPath, "utf8")));
+  const sections = splitConventionsSections(readFileSync(convPath, "utf8"));
+  const parts: string[] = [];
+  for (const [id, body] of sections) {
+    if (id === "__preamble__" || wanted.has(id)) parts.push(body.trimEnd());
+  }
+  const text = parts.join("\n\n");
+  digestMemo.set(agent, { key: memoKey, text });
+  return text;
+}
+
 export function buildInlinePrompt(agent: string, key: string, repo: string, dataRootPath: string, root: string | null): string {
   if (!root) die("promptMode=inline 需要完整插件 checkout —— 解析不到插件根（skills/+references/+scripts/）");
   const skillPath = join(root, "skills", `${agent}-agent`, "SKILL.md");
@@ -1314,7 +1376,24 @@ export function buildInlinePrompt(agent: string, key: string, repo: string, data
     `项目 key: ${key}；剧本 repo: ${repo}；workspace 状态目录: ${dataRootPath}；` +
     `插件根（skill 引用中的 \${CLAUDE_PLUGIN_ROOT} 均指此路径）: ${root}。` +
     `以下是本 fire 要执行的 skill 全文——严格遵循：`;
-  return header + "\n\n" + "─".repeat(40) + "\n\n" + body;
+  const digest = buildConventionsDigest(root, agent).replaceAll("${CLAUDE_PLUGIN_ROOT}", root);
+  const digestBlock = digest
+    ? "\n\n" + "─".repeat(40) + "\n\n" +
+      `【规约节选】以下是 conventions.md 中本角色 \`Sections:\` 所列各节的**全文预提取**` +
+      `（含导语/拓扑一览）。§0a 标准 boot 的「读 conventions」步骤以本块为准——**不再另行 ` +
+      `Read conventions.md**；本块未含而确需的节才读原文件（路径见插件根 references/）。` +
+      `本块与原文件不一致时以原文件为准（提取是逐字的，出现不一致即平台缺陷，请投系统改进收件箱）。\n\n` + digest
+    : "";
+  return header + "\n\n" + "─".repeat(40) + "\n\n" + body + digestBlock;
+}
+
+// 门控命中枝——**变量尾巴**，恒附在常量 prompt 之后（缓存前缀不被破坏）。给 agent 的是
+// 「你为什么被点着」的提示，帮助直奔主题省 boot 来回；按 §0 铁律它只是快照，落判当刻必重验。
+export function gateReasonsTail(reasons: readonly string[] | null | undefined): string {
+  if (!reasons || !reasons.length) return "";
+  return "\n\n" + "─".repeat(40) + "\n\n" +
+    `【调度器门控命中枝】本 fire 因下列谓词命中被点着（提示——boot 快照非事实，§0 落判当刻重验）：\n` +
+    reasons.map((r) => `- ${r}`).join("\n");
 }
 
 // ⇒ {argv, inlinePrompt}。inlinePrompt 非 null 时即 argv 里内联的整段 prompt（dry-run 据此
@@ -1329,6 +1408,7 @@ export function fireArgv(
   sched: Sched, agent: string, model: string, effort: string, repo: string,
   dataRootPath: string, key: string, root: string | null,
   providers: Record<string, ProviderEntry> = {},
+  gateReasons: readonly string[] | null = null,
 ): { argv: string[]; inlinePrompt: string | null } {
   const skill = `/writing-loop:${agent}-agent`;
   const override = sched.agents[agent].command;
@@ -1347,7 +1427,9 @@ export function fireArgv(
   // opencode 无插件/斜杠命令机制 ⇒ 无视 promptMode 恒 inline；claude/codex 按旋钮走，
   // slash（默认）与 0.4.0 逐字节一致。
   const inline = sched.cli === "opencode" || sched.promptMode === "inline";
-  const prompt = inline ? buildInlinePrompt(agent, key, repo, dataRootPath, root) : skill;
+  const prompt = inline
+    ? buildInlinePrompt(agent, key, repo, dataRootPath, root) + gateReasonsTail(gateReasons)
+    : skill;
   if (sched.cli === "opencode") {
     // 模型名规则：Claude 档位名（opus/sonnet…不含 "/"）绝不传给 opencode——省略 -m
     // 落 opencode 自身默认模型；仅 provider/model 形（含 "/"）才传。effort 原样传
@@ -1644,12 +1726,91 @@ export function heartbeatLock(owner: LockOwnership): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// 硬失败熔断器（2026-08-25 操作者裁定，WLSYS-325c25fa 对策）
+// 实况：08-21T14:14Z 账号撞 claude.ai 月度限额，CLI 每次启动即 4s exit 1 零 token；调度器
+// 无熔断按各车道 interval 空转 75h（4,872 次），周一 §22 逃逸口又把空闲车道拉进风暴。
+// 判据与机制：
+// - 硬失败 = 非零退出（或 spawn 失败）∧ 未超时 ∧ 时长 < 30s ∧ 零计量——CLI 没起来就死的
+//   形态（限额/认证/坏二进制）。真实干过活的失败（有 usage / 长时长 / 超时）不算，且会
+//   把熔断器整体复位（账号可用性已被证明）。
+// - 连续 5 次硬失败 ⇒ open：暂停一切 launch，退避 60s 起指数翻倍、封顶 30min；
+//   冷却到点放**一发**探针 fire（half-open），探针硬失败 ⇒ 退避翻倍再关，探针成功 ⇒ 复位。
+//   探针本身零 token（失败形态下），30min 封顶保证限额重置后 ≤30min 内自动恢复。
+// - --once 显式点火不受熔断拦截（操作者手动意志优先）。
+// - 操作者可见：run-state.json 附 circuit 块（status/streak/冷却剩余/最近失败原文），
+//   `writing-loop status` 高亮；开/探/关每次转换打日志行。
+// ---------------------------------------------------------------------------
+export const CIRCUIT_TRIP_STREAK = 5;
+export const CIRCUIT_HARDFAIL_MAX_S = 30;
+export const CIRCUIT_COOLDOWN_BASE_S = 60;
+export const CIRCUIT_COOLDOWN_MAX_S = 1800;
+
+export type CircuitState = {
+  status: "closed" | "open";
+  streak: number;                    // 连续硬失败数（open 后含非探针在飞收尾的硬失败）
+  cooldownSeconds: number;           // 当前退避档
+  cooldownUntilMono: number | null;  // mono() 秒；null = closed
+  probing: boolean;                  // half-open：一发探针已放出、未收账
+  reason: string | null;             // 最近硬失败的日志尾（≤200B，操作者可读）
+  openedAtIso: string | null;
+  probes: number;                    // 本次 open 以来放出的探针数
+};
+export const circuitInit = (): CircuitState => ({
+  status: "closed", streak: 0, cooldownSeconds: CIRCUIT_COOLDOWN_BASE_S,
+  cooldownUntilMono: null, probing: false, reason: null, openedAtIso: null, probes: 0,
+});
+
+export function isHardFail(rc: number | null, timedOut: boolean, durationSeconds: number,
+  hasUsage: boolean, spawnError: boolean): boolean {
+  if (timedOut || hasUsage) return false;
+  if (durationSeconds >= CIRCUIT_HARDFAIL_MAX_S) return false;
+  if (spawnError) return true;
+  return rc !== null && rc !== 0;
+}
+
+export function circuitOnFireEnd(s: CircuitState, hardFail: boolean, probe: boolean,
+  reason: string | null, nowMono: number, nowIso: string): CircuitState {
+  if (!hardFail) return circuitInit();   // 任何真实活动（成功/干过活的失败/超时）⇒ 全复位
+  const streak = s.streak + 1;
+  if (s.status === "open") {
+    if (!probe) return { ...s, streak, reason: reason ?? s.reason };  // 在飞遗留收账不动退避
+    const cd = Math.min(s.cooldownSeconds * 2, CIRCUIT_COOLDOWN_MAX_S);
+    return { ...s, streak, cooldownSeconds: cd, cooldownUntilMono: nowMono + cd,
+      probing: false, reason: reason ?? s.reason };
+  }
+  if (streak >= CIRCUIT_TRIP_STREAK) {
+    return { status: "open", streak, cooldownSeconds: CIRCUIT_COOLDOWN_BASE_S,
+      cooldownUntilMono: nowMono + CIRCUIT_COOLDOWN_BASE_S, probing: false,
+      reason, openedAtIso: nowIso, probes: 0 };
+  }
+  return { ...s, streak, reason };
+}
+
+export function circuitCanLaunch(s: CircuitState, nowMono: number): { allow: boolean; probe: boolean } {
+  if (s.status === "closed") return { allow: true, probe: false };
+  if (s.probing) return { allow: false, probe: false };
+  if (s.cooldownUntilMono !== null && nowMono < s.cooldownUntilMono) return { allow: false, probe: false };
+  return { allow: true, probe: true };
+}
+
+// 硬失败原因：fire 日志的最后一行非空文本（限额/认证信息就在那里），≤200B。
+export function readLogTailLine(logPath: string): string | null {
+  try {
+    const txt = readFileSync(logPath, "utf8");
+    const lines = txt.trim().split("\n").filter((l) => l.trim());
+    if (!lines.length) return null;
+    return lines[lines.length - 1].trim().slice(0, 200);
+  } catch { return null; }
+}
+
+// ---------------------------------------------------------------------------
 // fire 生命周期
 // ---------------------------------------------------------------------------
 class Fire {
   readonly startedMono = mono();
   readonly startedIso = utcIso();
   timedOut = false;
+  circuitProbe = false;              // 熔断 open 期间放出的探针 fire（收账时决定退避翻倍）
   descendantDrain = false;           // leader 已退但同 PGID 工具进程仍活；不得算 clean
   killDeadline: number | null = null;
   exited = false;
@@ -1693,6 +1854,15 @@ export type RunState = {
     capSeconds: number;
     logFile: string;
   }>;
+  circuit?: {                       // 硬失败熔断器（仅 open 或 streak>0 时出现）
+    status: "closed" | "open";
+    streak: number;
+    cooldownSeconds: number;
+    cooldownRemainingSeconds: number;
+    probes: number;
+    reason: string | null;
+    openedAt: string | null;
+  };
 };
 
 // run-state 是观测快照，但仍不能用可预测的 `<pid>.tmp` + O_TRUNC：攻击者可预植
@@ -1861,6 +2031,9 @@ export class Scheduler {
   readonly providers: Record<string, ProviderEntry>;  // workspace 顶层 provider 注册表（pre-spawn 认证 guard 输入）
 
   // —— 车道门控运行时状态（laneGating）——
+  // 硬失败熔断器状态（见 CircuitState 节注释）；仅存在于进程内，重启即复位（保守：
+  // 重启后如故障仍在，5 次硬失败内重新 open）。
+  private circuit: CircuitState = circuitInit();
   // gatedCount：每 agent 被门控跳过的次数，该 agent 下一条 fires.jsonl 记录以
   // gatedSinceLast 结清（[gated] 本身不写账本，防膨胀）。
   private readonly gatedCount = new Map<string, number>();
@@ -1911,6 +2084,18 @@ export class Scheduler {
         capSeconds: f.cap,
         logFile: relative(this.projData, f.logPath),
       })),
+      ...(this.circuit.status === "open" || this.circuit.streak > 0 ? {
+        circuit: {
+          status: this.circuit.status,
+          streak: this.circuit.streak,
+          cooldownSeconds: this.circuit.cooldownSeconds,
+          cooldownRemainingSeconds: this.circuit.cooldownUntilMono === null ? 0
+            : Math.max(0, Math.round(this.circuit.cooldownUntilMono - mono())),
+          probes: this.circuit.probes,
+          reason: this.circuit.reason,
+          openedAt: this.circuit.openedAtIso,
+        },
+      } : {}),
     };
     writeRunStateAtomic(this.runStatePath, state);
   }
@@ -2034,7 +2219,7 @@ export class Scheduler {
       this.firedOnce.add(agent);
       return false;
     }
-    const { argv } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root, this.providers);
+    const { argv } = fireArgv(this.sched, agent, model, effort, this.repo, this.dataRootPath, this.key, this.root, this.providers, gate?.reasons ?? null);
     mkdirSync(this.logsDir, { recursive: true });
     this.logSeq++;
     const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
@@ -2073,6 +2258,11 @@ export class Scheduler {
       fire.rc = code ?? (signal ? -signalNumber(signal) : null);
       fire.exited = true;
     });
+    if (this.circuit.status === "open") {
+      fire.circuitProbe = true;
+      this.circuit = { ...this.circuit, probing: true, probes: this.circuit.probes + 1 };
+      console.log(`[${fire.startedIso}] [circuit] 熔断中放出探针 #${this.circuit.probes}：${agent}`);
+    }
     this.inflight.push(fire);
     this.firedOnce.add(agent);
     this.writeRunState("running");
@@ -2105,6 +2295,23 @@ export class Scheduler {
   }
 
   // ---- 收 fire ----
+  // 熔断器收账：判硬失败 → 更新状态 → 转换时打日志。reason 取失败 fire 的日志尾。
+  private circuitAccount(fire: Fire, rc: number | null, dur: number, hasUsage: boolean): void {
+    const hard = isHardFail(rc, fire.timedOut, dur, hasUsage, false);
+    this.circuitFeed(hard, fire.circuitProbe, hard ? readLogTailLine(fire.logPath) : null);
+  }
+  private circuitFeed(hardFail: boolean, probe: boolean, reason: string | null): void {
+    const prev = this.circuit;
+    this.circuit = circuitOnFireEnd(prev, hardFail, probe, reason, mono(), utcIso());
+    if (prev.status === "closed" && this.circuit.status === "open") {
+      console.log(`[${utcIso()}] [circuit] OPEN：连续 ${this.circuit.streak} 次硬失败（CLI 启动即败——限额/认证/坏二进制形态），暂停全部车道，退避 ${this.circuit.cooldownSeconds}s 起指数回试。最近失败：${this.circuit.reason ?? "?"}`);
+    } else if (prev.status === "open" && this.circuit.status === "closed") {
+      console.log(`[${utcIso()}] [circuit] CLOSED：探针确认恢复（open 期间共 ${prev.probes} 发探针），恢复正常节律`);
+    } else if (prev.status === "open" && this.circuit.status === "open" && probe && hardFail) {
+      console.log(`[${utcIso()}] [circuit] 探针仍硬失败，退避升至 ${this.circuit.cooldownSeconds}s。最近失败：${this.circuit.reason ?? "?"}`);
+    }
+  }
+
   private finish(fire: Fire, rc: number | null): number {
     this.inflight.splice(this.inflight.indexOf(fire), 1);
     const ended = utcIso();
@@ -2118,6 +2325,7 @@ export class Scheduler {
     const clean = isCleanFire({ exitCode: rc, timedOut: fire.timedOut, descendantDrain: fire.descendantDrain });
     if (clean) this.lastCleanEndMs.set(fire.agent, Date.now());
     if (fire.agent === "showrunner") this.showrunnerBaseline = clean ? fire.gateSnapshot : null;
+    this.circuitAccount(fire, rc, dur, usage !== null);
     this.ledgerAppend({
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: ended, durationSeconds: dur,
@@ -2140,6 +2348,7 @@ export class Scheduler {
     this.inflight.splice(this.inflight.indexOf(fire), 1);
     if (fire.agent === "showrunner") this.showrunnerBaseline = null; // 未跑成 ⇒ 保守（下次恒「已变」）
     console.log(`[${utcIso()}] FAIL ${fire.agent}：无法起进程（${fire.spawnError}）`);
+    this.circuitFeed(true, fire.circuitProbe, `spawn: ${fire.spawnError ?? "?"}`);
     const nowIso = utcIso();
     this.ledgerAppend({
       agent: fire.agent, model: fire.model, effort: fire.effort,
@@ -2305,9 +2514,15 @@ export class Scheduler {
             graceDeadline = now + 3600; // TERM 已发；kill_deadline 接管
           }
         } else {
+          // 熔断闸：open 且冷却未到/探针在飞 ⇒ 本 tick 不 launch 任何 agent（due 不推进，
+          // 恢复后立即按原序补火）；--once 显式点火不受拦（操作者手动意志优先）。
+          const circuitGate = this.args.once ? { allow: true, probe: false }
+            : circuitCanLaunch(this.circuit, now);
           const order = [...this.selected].sort((a, b) =>
             (due.get(a)! - due.get(b)!) || (AGENT_ORDER.indexOf(a) - AGENT_ORDER.indexOf(b)));
           for (const agent of order) {
+            if (!circuitGate.allow) break;
+            if (circuitGate.probe && this.circuit.probing) break;  // 探针已放出一发即止
             if (this.inflight.some((f) => f.agent === agent)) continue;
             if (this.args.once && this.firedOnce.has(agent)) continue;
             if (due.get(agent)! > now || !this.slotFree(agent)) continue;

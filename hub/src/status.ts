@@ -2,7 +2,7 @@
 // In Progress 明细、needs-* 停靠票、写作前沿（episodes/ep-*.md 最大集号）、陈旧锁扫描、
 // fires.jsonl 末 5 行。frontmatter 使用 status/UI 共用的容错投影解析器；解析不出的票
 // 计入 "?" 桶而不是中断（板文件是 agent 写的，偶发畸形不该弄死观测工具）。
-import { lstatSync, statSync } from "node:fs";
+import { lstatSync, statSync , readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSymlinkComponent, readDirectoryNames, readRegularTextHead, readRegularTextTail } from "./bounded-fs.ts";
@@ -279,6 +279,17 @@ export function statusMain(argv = process.argv.slice(2)): number {
   );
   const frontier = episodeFrontier(repoPath);
   const locks = scanLocks(root, projData, repoPath);
+  // 熔断器状态（run-state.json 的 circuit 块，2026-08-25 WLSYS-325c25fa 对策）——open 时
+  // status 必须高亮：这是「账号限额/认证/坏二进制」级故障的唯一操作者可见面。
+  type CircuitView = { status?: string; streak?: number; cooldownRemainingSeconds?: number;
+    reason?: string | null; openedAt?: string | null; probes?: number };
+  let circuit: CircuitView | null = null;
+  try {
+    const rs = JSON.parse(readFileSync(join(projData, "run-state.json"), "utf8")) as Record<string, unknown>;
+    if (rs.circuit && typeof rs.circuit === "object" && !Array.isArray(rs.circuit)) {
+      circuit = rs.circuit as CircuitView;
+    }
+  } catch { /* 无 run-state / 坏 JSON ⇒ 无熔断信息可报 */ }
   const firesWindow = readFiresBounded(join(projData, "fires.jsonl"));
   const fires = firesWindow.rows;
   const recent = fires.slice(-5);
@@ -295,6 +306,7 @@ export function statusMain(argv = process.argv.slice(2)): number {
       episodeFrontierFile: frontier.file,
       locks,
       recentFires: recent,
+      circuit,
       totalFires: fires.length,
       firesTruncated: firesWindow.truncated,
       invalidFireRows: firesWindow.invalid,
@@ -304,6 +316,14 @@ export function statusMain(argv = process.argv.slice(2)): number {
 
   const line = (t: Ticket): string => `  ${t.id.padEnd(8)} ${t.title}${t.labels.length ? `  [${t.labels.join(", ")}]` : ""}`;
   console.log(`writing-loop status — 项目 ${key}（repo: ${repoPath}）`);
+  if (circuit?.status === "open") {
+    console.log(`
+*** 熔断中（CIRCUIT OPEN）***：连续 ${circuit.streak ?? "?"} 次 CLI 硬失败（限额/认证/坏二进制形态），`
+      + `已放探针 ${circuit.probes ?? 0} 发，下次回试 ${circuit.cooldownRemainingSeconds ?? "?"}s 后。`
+      + `
+    最近失败：${circuit.reason ?? "?"}
+    自 ${circuit.openedAt ?? "?"} 起。限额类请到 claude.ai/settings/usage 查看/充值。`);
+  }
   if (missingDir) {
     console.log("\n板目录尚未创建（board/tickets/）—— 还没铺板或还没第一张票");
   } else {

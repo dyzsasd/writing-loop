@@ -180,6 +180,13 @@ assets 并没有新内容需要你再看；不推进 sha = 同一批内容每 fi
 `Bug`（`continuity`/`foreshadow` 等 + `tier:episode-writer`，`Episode:N`），
 `state:"Backlog"`（§5a，showrunner 放行）。干净抽查是健康结果，不编造边际票；抽过的集写
 进 `auditedEpisodes`，全覆盖后回落 no-op 直到板/HEAD 再动。
+**段落审读窗口（§21a-review）**：某 arc 全部 episode 票 Done 且 `reviewer-state.json`
+的 `lastArcReviewed` < 该 arc 序号 ⇒ 本窗口执行段落审读（邻集链全扫 + 段级结构核 +
+跨集事实抽查，清单见 §21a-review），完成即写 `lastArcReviewed`。写作期内 Job C 只做
+增量抽查——欠的深度在段落审读一次还清。
+**立规配额（§21a-light）**：抽查发现属**规范义务类**（提案新立册/守卫/断言/体例）⇒
+评论投当前 arc 的 `rule-proposals` 载体票，**不开新票**；只有修复具体故事事实的缺陷
+才 file Bug。
 **轻通道抽检（§21a-light）**：本次抽查窗口内若有走轻通道直接 Done 的机械修补票
 （`mech-fix` 标签），至少抽 1 张：核其票面贴的 `story validate` 输出为真（重跑一次 CLI，
 零 token）+ diff 与 AC 相符。不符 ⇒ file Bug 且该票面评论记「轻通道抽检不符，此类票

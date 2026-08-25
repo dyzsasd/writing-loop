@@ -89,9 +89,12 @@ verdict（pass/fail/inconclusive）、带宽/度量判定（字数带、密度�
 ### §0a. 标准 boot 序列（探针命中后，每个 agent、每次 fire）
 1. 读本文件（`${CLAUDE_PLUGIN_ROOT}/references/conventions.md`）的「拓扑一览」+ 本 SKILL
    `Sections:` 行所列各节（span = 该节标题起至下一同级或更浅标题前；§0/§0a/§2 恒读）。
-   fire 中发现需要未列节**可读**（那是 SKILL 该补列的 Sections 缺漏，lint 执法）——
-   **绝不凭记忆猜条文**。**`Sections:` 行是上限不是起点——读整份 conventions = 违纪，
-   sweep 可稽核**。
+   **内联节选模式（promptMode=inline，2026-08-25 上下文裁定）**：prompt 末尾若带
+   【规约节选】块（调度器按你的 Sections 行预提取的各节全文），本步以该块为准——
+   **不再 Read 本文件**（省一次 50-85KB 大读；节选是逐字的）；块内未含而确需的节
+   才读原文件。fire 中发现需要未列节**可读**（那是 SKILL 该补列的 Sections 缺漏，
+   lint 执法）——**绝不凭记忆猜条文**。**`Sections:` 行是上限不是起点——读整份
+   conventions = 违纪，sweep 可稽核**。
 2. 读 workspace 配置（§11）定位项目条目；无法定位 ⇒ 问操作者，不猜。
 3. 确认 backend（v1 恒为 local 文件板，§18）与数据目录。
 4. 读 lessons（§14）：`lessons/shared.md` + `lessons/<本角色>.md`（迁移期 fallback 见
@@ -1143,6 +1146,25 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
    supersede 链，不是任何人的记忆。
 每次 fail 的 Cancel 评论必须记录失败稿 commit sha（§15 fail-revert）。
 
+### §21a-review. 段落审读与全剧审读（2026-08-25 操作者裁定）
+
+**段落审读（arc 末，reviewer Job C 的一次性深扫窗口）**：一个 arc 的全部 episode 票 Done
+后，reviewer 在下一个 Job C 窗口执行**段落审读**，一次过完：
+1. 邻集连续性链全扫（逐对相邻集：承接帧/尾钩兑现/时间锚/保管链/在场衔接）；
+2. 段级结构核（钩型序列 R1 实符、升级轴 R3.4 逐单元、段内 plant 的伏笔 plant/refresh/payoff
+   对账——段内应闭合者已闭合、跨段者已在资产图排期）；
+3. 跨集事实一致性抽查（正文 vs current facts，密度自定但每集至少 1 处）。
+完成后写 `reviewer-state.json` 的 `lastArcReviewed`（arc 序号，机读收敛键——未写 = 下个
+Job C 窗口重做）。发现缺陷按 §21a-fail/§8/§21a-light 常规路由。段落审读替代该 arc 写作期
+内散点式 Job C 深扫的**收尾职责**——写作期内 Job C 只做增量抽查，欠的深度在此一次还清。
+punch-up（§21a-design.6）在段落审读**之后**进场：结构冻结的前提是段落审读已过。
+
+**全剧审读（季末，evaluator 里程碑门）**：末集 Done 后 showrunner file 季末
+`Feature+milestone-eval`（§6 模板，Context 注明「全剧审读」）。evaluator 检查单（在
+§21 evaluator 职责之上）：段间连续性（每对相邻 arc 的交接面）、north-star `结局承诺`
+逐条兑现核、R2 伏笔台账**全季闭合**（无 plant 无 payoff 的悬空项逐个裁定：补拍/移除/
+显式留续季钩）、主要人物弧完成度、付费卡位（paywall）复核。路由照 §21 A3。
+
 ### §21a-light. 设计层机械修补轻通道（2026-08-20 操作者裁定）
 
 **问题面**：审计门收紧后产生大量设计层机械修补票（补挂 relations/presence、ID 更正、
@@ -1162,6 +1184,20 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
 （逐卡逐集补挂类）不逐票阻塞生产——挂 arc 边界批次票统一消化；仅当缺陷位于**当前写作
 前沿本集/邻集的载入面**时才允许以 R-C/R-D 类政策阻塞前沿。门收紧的存量清欠是一次性
 成本，绝不许它常态化为「每次提标准就冻结前沿」。
+
+**立规配额（2026-08-25 操作者裁定——审计飞轮的阀）**：**规范义务类**发现（提案新立
+册/守卫/断言/体例/判别符等审计器械，而非修某个具体故事事实）**不得直接成票**：
+1. showrunner 在每个 arc 设计票放行时同批 file 一张该 arc 的**义务提案载体票**
+   （`Improvement`+`rule-proposals` 标签，owner=showrunner，Backlog 常驻）；
+2. 任何角色的此类发现以**评论**追加到载体票（§8 dedupe——同形提案合并进既有评论），
+   不开新票、不就地立册；
+3. arc 边界 showrunner 统一裁并：**每 arc 新立义务 ≤5 条**，超配额者合并/驳回/延后
+   （裁定记 Decisions log 一行），获准者才拆执行票；
+4. 例外：修复当前前沿集载入面缺陷**必需**的最小义务可随该 Bug 就地立（评论注明
+   「配额外·前沿必需」，计入下期配额）。
+背景实测：08-20 起 4 天新开 65 张设计层票，抽样 9/15 是审计器械自造义务（给登记册立
+登记册、豁免册自身撑爆字节上限、审计断言自身取假）——器械的增长必须有预算，如同
+context pack 的字节预算。
 
 ## §22. 报告与操作者点评
 

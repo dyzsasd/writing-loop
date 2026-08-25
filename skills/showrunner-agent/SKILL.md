@@ -233,10 +233,15 @@ blocked 升级操作者。
    `Blocked-by: <该跟进票ID>`（§21），跟进票 Done 后由 B3 放行。
 4. **file 下一 arc 设计票**：前置满足（§5 arc 首集条件：上一 arc 全部 episode 票 Done）
    ⇒ file `Feature+arc-design+story-designer`（owner=showrunner，§6 模板，**含
-   `## Context-pack`——你是建票方，§6 必填三件**），落 Backlog
+   `## Context-pack`——你是建票方，§6 必填三件**），落 Backlog；**同批 file 该 arc 的
+   `rule-proposals` 义务提案载体票**（§21a-light 立规配额，Backlog 常驻）
    （B2 放行）。
-5. **arc 完集 ⇒ file `Improvement+punch-up`**（tier=story-designer、owner=showrunner，
-   §21a-design.6）：结构冻结、只准增强。
+5. **arc 完集**（§21a-review）：①确认 reviewer 的段落审读已完成（`lastArcReviewed` ≥
+   本 arc；未完成 ⇒ 等它，段落审读先于结构冻结）；②**裁并本 arc 的 `rule-proposals`
+   载体票**（§21a-light 立规配额：新立义务 ≤5 条/arc，超配额合并/驳回/延后，裁定记
+   Decisions log 一行，获准者拆执行票）；③file `Improvement+punch-up`（tier=
+   story-designer、owner=showrunner，§21a-design.6）：结构冻结、只准增强。
+   另：末季末集 Done ⇒ file 季末全剧审读 eval 票（§21a-review 全剧检查单）。
 6. **north-star 回写（§20 节分级——进度级自主、方向级须批准；你是唯一写者）**：里程碑
    过门、方向决策**记录**、评级结果、偏差接受——发生即回写 `当前进度` + `Decisions log`。
    **记账单行化（2026-08-20 操作者裁定）**：常规验收/放行/carve-out 流转的 Decisions log
