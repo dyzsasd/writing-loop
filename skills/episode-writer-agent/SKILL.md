@@ -70,6 +70,10 @@ Sections: §0 §0a §2 §3 §4 §5 §6 §7 §9 §10 §11 §12 §14 §15 §17 §1
 Todo/In Progress/In Review，§5——Backlog 不冻结；Improvement/punch-up 不冻结**）；③arc
 首集看上一 arc 全部创作/重写票 Done。修订 Bug 不受创作前置约束（改的是已存在的集）。
 不满足 ⇒ 跳过取下一候选，不 block 不评论（常态节流）。
+**单 fire 单集（2026-08-26 操作者裁定——投机开写的配套）**：一次 fire 只交付一张正文票。
+交付（commit + In Review + 交付评论）完成后**立即收尾退出**，绝不在同一 fire 里续拾下一
+集——调度器 interval 仅 180s，下一 fire 转瞬即来且带全新上下文；同 fire 连写注定在 cap
+上断尾（ep-055/056 实测：一 fire 连写两集，3001s 撞杀，第二集转态半途被截）。
 
 ### Step 2 — 认领（§7）
 `assignee` = 本 fire run token，置 `In Progress`，**重读验证 token 是自己的**才开工；本
