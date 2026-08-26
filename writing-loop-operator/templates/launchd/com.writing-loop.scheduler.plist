@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.writing-loop.scheduler</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/writing-loop</string>
+    <string>run</string><string>--project</string><string>PROJECT_KEY</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/USER/dramas</string>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+    <key>WRITING_LOOP_WORKSPACE</key><string>/Users/USER/dramas</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>StandardOutPath</key><string>/tmp/writing-loop-scheduler.log</string>
+  <key>StandardErrorPath</key><string>/tmp/writing-loop-scheduler.log</string>
+</dict></plist>

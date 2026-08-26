@@ -1,0 +1,15 @@
+[Unit]
+Description=writing-loop Studio (loopback only)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/dramas   # ← 改成你的 workspace 路径
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=WRITING_LOOP_WORKSPACE=%h/dramas   # ← 改成你的 workspace 路径
+ExecStart=%h/.npm-global/bin/writing-loop studio --port 18791 --single
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
