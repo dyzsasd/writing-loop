@@ -63,7 +63,10 @@ Sections: §0 §0a §2 §3 §4 §5 §6 §7 §9 §10 §11 §12 §14 §15 §17 §1
 最窄谓词查 `Todo` + `writing-loop` + `episode-writer` tier，排除 `blocked`，按 §5 rank、
 同 rank FIFO（修订 Bug 可插队）。不拾 keystone / 未标 tier / `Backlog` 暂存 /
 `Mode: direct-write`。带 `Episode: N` 的创作/重写票逐项跑 §5 顺序前置三检——①前集已成
-（按**文件**判定，不按具体票）；②前向冻结：无 `Episode ≤ N` 开放 Bug 修订票（**开放 =
+（按**文件**判定，不按具体票；**投机开写条款（§5·2026-08-26）**：前集票仅在 In Review
+（正文已 commit、审读中）不阻塞——但前集或本集任一 keystone、或前集在 §21a-fail 路由
+中 ⇒ 仍须等 Done。投机开写时承接段照常取前集**已 commit 的末帧**，若后续收到承接面
+复核票（§21a-fail.4）按其 AC 修）；②前向冻结：无 `Episode ≤ N` 开放 Bug 修订票（**开放 =
 Todo/In Progress/In Review，§5——Backlog 不冻结；Improvement/punch-up 不冻结**）；③arc
 首集看上一 arc 全部创作/重写票 Done。修订 Bug 不受创作前置约束（改的是已存在的集）。
 不满足 ⇒ 跳过取下一候选，不 block 不评论（常态节流）。

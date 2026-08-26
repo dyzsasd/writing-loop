@@ -16,7 +16,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  boardSnapshotHash, buildSched, evalLaneGate, keystonePending, reviewerJobCChanged,
+  boardSnapshotHash, buildSched, evalLaneGate, keystonePending, launchOrder, reviewerJobCChanged,
+  WRITER_PRIORITY_STARVE_S,
   laneEpisodeWriter, laneEvaluator, laneMarketWatch, laneReflect, laneReviewer,
   laneScriptDoctor, laneShowrunner, laneSourceAnalyst, laneStoryDesigner, laneSweep,
   lastMonthlyBoundaryMs, lastWeeklyBoundaryMs, parseLaneTicket,
@@ -983,5 +984,24 @@ for (const [name, fn] of cases) {
   try { fn(); }
   catch (e) { nfail++; console.log(`FAIL ${name} 异常：${e instanceof Error ? e.stack ?? e.message : String(e)}`); }
 }
+// ---------------------------------------------------------------------------
+// 写手优先排程（2026-08-26 A-lite）：槽位竞争时 episode-writer 恒先；防饿死回退。
+// ---------------------------------------------------------------------------
+{
+  const NOWL = 100_000;
+  const due = new Map([["story-designer", NOWL - 300], ["episode-writer", NOWL - 60], ["showrunner", NOWL - 100]]);
+  const sel = ["showrunner", "story-designer", "episode-writer"];
+  check("写手优先：designer 早到 4min 仍排在 writer 之后（修复前按 due 序 designer 先）",
+    launchOrder(sel, due, NOWL)[0] === "episode-writer", launchOrder(sel, due, NOWL).join(","));
+  const starved = new Map([["story-designer", NOWL - WRITER_PRIORITY_STARVE_S - 10], ["episode-writer", NOWL - 60]]);
+  check("防饿死：designer 已等超 30min ⇒ 加成取消、最老者先",
+    launchOrder(["story-designer", "episode-writer"], starved, NOWL)[0] === "story-designer");
+  check("无竞争基线：只有 writer 时序不受影响",
+    launchOrder(["episode-writer"], new Map([["episode-writer", NOWL]]), NOWL)[0] === "episode-writer");
+  const tie = new Map([["reviewer", NOWL - 500], ["sweep", NOWL - 500]]);
+  check("板上角色互相仍按 due+AGENT_ORDER 平序（不受写手加成影响）",
+    launchOrder(["sweep", "reviewer"], tie, NOWL)[0] === "reviewer");
+}
+
 console.log(`\ntest-lane-gating: ${npass} pass, ${nfail} fail${nfail === 0 ? "\nLANE_GATING_OK" : ""}`);
 process.exit(nfail ? 1 : 0);

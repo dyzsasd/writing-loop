@@ -1793,6 +1793,25 @@ export function circuitCanLaunch(s: CircuitState, nowMono: number): { allow: boo
   return { allow: true, probe: true };
 }
 
+// ---------------------------------------------------------------------------
+// 写手优先排程（2026-08-26 操作者裁定「提速 A-lite」）
+// 实测（ep-050→052 段逐 fire 时间线）：每集墙钟 ~110min 里写作仅 30min，40-70min 是
+// story-designer 的集间工作占住 repo-writer 单飞槽、写手等锁。前沿写作是关键路径——
+// 槽位竞争时 episode-writer 恒先（等效把它的 due 提前 WRITER_PRIORITY_BOOST_S）；
+// 防饿死：任何其他 repo-writer 已等超 WRITER_PRIORITY_STARVE_S ⇒ 本 tick 取消加成，
+// 让最老的先走（设计/验收车道保底每 30min 内能拿到一次槽）。板上角色（reviewer 等）
+// 不占该槽，排序对它们无实际影响。
+// ---------------------------------------------------------------------------
+export const WRITER_PRIORITY_BOOST_S = 1200;
+export const WRITER_PRIORITY_STARVE_S = 1800;
+export function launchOrder(selected: readonly string[], due: ReadonlyMap<string, number>, now: number): string[] {
+  const starving = selected.some((a) => a !== "episode-writer" && REPO_WRITERS.has(a)
+    && now - (due.get(a) ?? now) > WRITER_PRIORITY_STARVE_S);
+  const eff = (a: string): number => (a === "episode-writer" && !starving)
+    ? (due.get(a) ?? 0) - WRITER_PRIORITY_BOOST_S : (due.get(a) ?? 0);
+  return [...selected].sort((a, b) => (eff(a) - eff(b)) || (AGENT_ORDER.indexOf(a) - AGENT_ORDER.indexOf(b)));
+}
+
 // 硬失败原因：fire 日志的最后一行非空文本（限额/认证信息就在那里），≤200B。
 export function readLogTailLine(logPath: string): string | null {
   try {
@@ -2518,8 +2537,7 @@ export class Scheduler {
           // 恢复后立即按原序补火）；--once 显式点火不受拦（操作者手动意志优先）。
           const circuitGate = this.args.once ? { allow: true, probe: false }
             : circuitCanLaunch(this.circuit, now);
-          const order = [...this.selected].sort((a, b) =>
-            (due.get(a)! - due.get(b)!) || (AGENT_ORDER.indexOf(a) - AGENT_ORDER.indexOf(b)));
+          const order = launchOrder(this.selected, due, now);
           for (const agent of order) {
             if (!circuitGate.allow) break;
             if (circuitGate.probe && this.circuit.probing) break;  // 探针已放出一发即止

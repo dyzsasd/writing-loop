@@ -84,7 +84,8 @@ Sections: §0 §0a §2 §4 §5 §6 §7 §8 §9 §10 §11 §12 §12a §14 §15 §
 票带 `Episode: ≤前沿+1`，或板上存在开放 episode 票 `Blocked-by` 本票。理由：写手车道被
 §5 前向冻结钉在前沿上，这类票每晚拾取一轮 = 写手整轮 no-op（ep-043 实测：重写票按 FIFO
 排队 4.5h，写手期间空转 5 fire）。带
-`Episode: N` 的创作/重写票同样跑 §5 顺序前置三检（①前集已成；②前向冻结：开放 =
+`Episode: N` 的创作/重写票同样跑 §5 顺序前置三检（①前集已成——含投机开写条款：非
+keystone 链上前集 In Review 即满足，keystone 前后仍须 Done，见 §5；②前向冻结：开放 =
 Todo/In Progress/In Review，Backlog 不冻结；③arc 首集；`Mode: direct-write` 显式豁免
 检查①）。不满足 ⇒ 跳过取下一候选，不 block 不评论。
 

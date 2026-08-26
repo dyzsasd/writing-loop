@@ -295,7 +295,13 @@ needs-evaluator / needs-reflect 等，任何 skill 不得引用或 file）、`no
 story-designer 都在内）拾取带 `Episode: N` 的**创作/重写**票前必须验证：
 1. **前集已成**：`episodes/ep-(N-1).md` 已存在于剧本 repo main（任意票产出皆可——
    Cancel+supersede 链后按**文件**判定，不按「那张票」判定），且不存在
-   `Episode: N-1` 的开放（Todo/In Progress/In Review）创作/重写票。
+   `Episode: N-1` 的 Todo/In Progress 创作/重写票。
+   **投机开写（2026-08-26 操作者裁定 B）**：前集票**仅处于 In Review**（正文已 commit、
+   审读中）**不再阻塞**——按实测首过率（arc-05 后半 6/7 一次过）提前开写期望净赚
+   ~30-50min/集。两条硬闸除外，命中任一则 In Review 仍阻塞、须等 Done：
+   (a) **前集或本集任一为 keystone**（keystone 的承接精度要求高，不投机）；
+   (b) 前集正处于 §21a-fail 路由中（有 `review failed:` Cancel 链在途）。
+   投机的对冲：前集审读 fail 时 §21a-fail 新增第 4 步自动把后集拉进复核轨道。
 2. **前向冻结**：不存在 `Episode ≤ N` 的开放 **Bug** 修订票，**也不存在
    `Episode ≤ N` 的开放 `Mode: direct-write` 重写票**（**开放 = Todo/In Progress/In
    Review，与检查 1 同一状态集**——`Backlog` 票**不**触发冻结，未放行修订票的危害窗口
@@ -1144,6 +1150,11 @@ assignee**（否则低档 fire 的 run token 会占住票，逼高档 fire 等 6
    ⇒ 停靠（§9）。keystone 首稿（本就是 designer 写的）fail ⇒ 允许**一次**同层
    `Mode: direct-write` 重试，再 fail 即停靠。判据永远是票上的 Mode 行与
    supersede 链，不是任何人的记忆。
+4. **投机后集对冲（2026-08-26 操作者裁定 B 的配套）**：执行任何一级 fail 路由时，
+   若存在 `Episode: N+1` 的**在制/在审**创作票系按 §5 投机开写条款提前开写（其开写时
+   本集尚未 Done）⇒ 同 fire file `Bug+continuity+tier:episode-writer`（`Episode: N+1`，
+   直进 Todo，机读行 `Blocked-by: <本集重写票>`）复核后集的承接段；后集在制票**不**
+   Cancel（正文主体多半仍立得住，复核票只裁承接面）。
 每次 fail 的 Cancel 评论必须记录失败稿 commit sha（§15 fail-revert）。
 
 ### §21a-review. 段落审读与全剧审读（2026-08-25 操作者裁定）
