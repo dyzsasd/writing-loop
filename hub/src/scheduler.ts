@@ -1760,9 +1760,19 @@ export const circuitInit = (): CircuitState => ({
   cooldownUntilMono: null, probing: false, reason: null, openedAtIso: null, probes: 0,
 });
 
+// fire 是否有**真实产出**（costUsd 或 outputTokens > 0）。撞限额/认证的 fire 即便 CLI 吐了
+// 一个全 0 的 usage 结构（costUsd=0、outputTokens=0），producedOutput 仍为 false。
+// 2026-08-27 缺陷复盘：旧判据用「usage 结构是否存在」（usage !== null）判「是否干过活」，
+// 但该日 claude CLI 撞 spend limit 时秒级退出却仍吐空 usage 结构 ⇒ 被误判为「非硬失败」⇒
+// 熔断器 streak 永不累积、75min 空转未 open。改看真产出即堵此盲区（08-21 那次 CLI 无 usage，
+// 旧判据侥幸正确；口径本就该是「有没有产出」而非「有没有 usage 字段」）。
+export function fireProducedOutput(usage: FireUsage | null): boolean {
+  if (!usage) return false;
+  return (usage.costUsd ?? 0) > 0 || (usage.outputTokens ?? 0) > 0;
+}
 export function isHardFail(rc: number | null, timedOut: boolean, durationSeconds: number,
-  hasUsage: boolean, spawnError: boolean): boolean {
-  if (timedOut || hasUsage) return false;
+  producedOutput: boolean, spawnError: boolean): boolean {
+  if (timedOut || producedOutput) return false;
   if (durationSeconds >= CIRCUIT_HARDFAIL_MAX_S) return false;
   if (spawnError) return true;
   return rc !== null && rc !== 0;
@@ -2315,8 +2325,8 @@ export class Scheduler {
 
   // ---- 收 fire ----
   // 熔断器收账：判硬失败 → 更新状态 → 转换时打日志。reason 取失败 fire 的日志尾。
-  private circuitAccount(fire: Fire, rc: number | null, dur: number, hasUsage: boolean): void {
-    const hard = isHardFail(rc, fire.timedOut, dur, hasUsage, false);
+  private circuitAccount(fire: Fire, rc: number | null, dur: number, producedOutput: boolean): void {
+    const hard = isHardFail(rc, fire.timedOut, dur, producedOutput, false);
     this.circuitFeed(hard, fire.circuitProbe, hard ? readLogTailLine(fire.logPath) : null);
   }
   private circuitFeed(hardFail: boolean, probe: boolean, reason: string | null): void {
@@ -2344,7 +2354,7 @@ export class Scheduler {
     const clean = isCleanFire({ exitCode: rc, timedOut: fire.timedOut, descendantDrain: fire.descendantDrain });
     if (clean) this.lastCleanEndMs.set(fire.agent, Date.now());
     if (fire.agent === "showrunner") this.showrunnerBaseline = clean ? fire.gateSnapshot : null;
-    this.circuitAccount(fire, rc, dur, usage !== null);
+    this.circuitAccount(fire, rc, dur, fireProducedOutput(usage));
     this.ledgerAppend({
       agent: fire.agent, model: fire.model, effort: fire.effort,
       startedAt: fire.startedIso, endedAt: ended, durationSeconds: dur,

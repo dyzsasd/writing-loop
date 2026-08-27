@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CIRCUIT_COOLDOWN_BASE_S, CIRCUIT_COOLDOWN_MAX_S, CIRCUIT_TRIP_STREAK,
-  circuitCanLaunch, circuitInit, circuitOnFireEnd, isHardFail,
+  circuitCanLaunch, circuitInit, circuitOnFireEnd, fireProducedOutput, isHardFail,
 } from "../src/scheduler.ts";
 
 let fails = 0;
@@ -21,7 +21,21 @@ const ok = (c: boolean, m: string, extra = ""): void => {
 // ── isHardFail 判据矩阵 ─────────────────────────────────────────────────────
 ok(isHardFail(1, false, 4, false, false), "4s exit 1 零计量 ⇒ 硬失败（风暴实况形）");
 ok(isHardFail(1, false, 0, false, true), "spawn 失败 ⇒ 硬失败（坏二进制形）");
-ok(!isHardFail(1, false, 4, true, false), "有计量的失败 ⇒ 非硬失败（真干过活）");
+ok(!isHardFail(1, false, 4, true, false), "有真产出的失败 ⇒ 非硬失败（真干过活）");
+// 2026-08-27 盲区回归：撞 spend limit 的 fire 秒级 exit1 但 CLI 吐了全 0 的 usage 结构。
+// 旧判据 hasUsage=(usage!==null)=true ⇒ 误判非硬失败 ⇒ 熔断器永不 open（75min 空转实况）。
+// 修复后 producedOutput 看真产出（cost/token>0），空 usage ⇒ false ⇒ 正确判硬失败。
+ok(fireProducedOutput(null) === false, "无 usage ⇒ 无产出");
+ok(fireProducedOutput({ source: "provider", inputTokens: 0, outputTokens: 0, cacheReadTokens: 0,
+  cacheWriteTokens: 0, costUsd: 0, currency: "USD" }) === false,
+  "空 usage 结构（cost=0 out=0，撞限额形）⇒ 无真产出（旧判据在此漏判）");
+ok(fireProducedOutput({ source: "provider", inputTokens: 1, outputTokens: 5, cacheReadTokens: 0,
+  cacheWriteTokens: 0, costUsd: 0, currency: "USD" }) === true, "有 output token ⇒ 有产出");
+ok(fireProducedOutput({ source: "provider", inputTokens: 1, outputTokens: 0, cacheReadTokens: 0,
+  cacheWriteTokens: 0, costUsd: 0.5, currency: "USD" }) === true, "有 costUsd ⇒ 有产出");
+ok(isHardFail(1, false, 5, fireProducedOutput({ source: "provider", inputTokens: 0, outputTokens: 0,
+  cacheReadTokens: 0, cacheWriteTokens: 0, costUsd: 0, currency: "USD" }), false) === true,
+  "全链路：5s exit1 + 空 usage（撞限额）⇒ 硬失败（修复前此处为 false = 熔断器盲区）");
 ok(!isHardFail(143, true, 3601, false, false), "超时被杀 ⇒ 非硬失败（cap 是另一类问题）");
 ok(!isHardFail(1, false, 45, false, false), "45s 失败 ⇒ 非硬失败（跑起来过）");
 ok(!isHardFail(0, false, 4, false, false), "exit 0 ⇒ 非硬失败");
