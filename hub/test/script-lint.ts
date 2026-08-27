@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyLintBaseline, lintEpisodeScript, parseEpisodeScript, parseLintBaseline, parsePresenceFact, resolveTicketFile,
-  scenesMaxForFormat, sentenceCapForFormat, type ScriptLintContext } from "../src/script-lint.ts";
+  scenesMaxForFormat, sentenceCapForFormat, ticketDirectWrite, type ScriptLintContext } from "../src/script-lint.ts";
 
 let fails = 0;
 const ok = (c: boolean, m: string): void => { console.log((c ? "PASS " : "FAIL ") + m); if (!c) fails++; };
@@ -97,6 +97,23 @@ ok(!codes(FM() + BODY_OK.replace("▲ 顾知行把两份誊清稿交给书吏。
 ok(codes(FM() + BODY_OK, { directWrite: true }).includes("L1-mode"), "YJJS-157：Mode: direct-write 票缺 `mode: direct-write` ⇒ L1-mode");
 ok(!codes(FM("mode: direct-write\n") + BODY_OK, { directWrite: true }).includes("L1-mode"), "带 mode 行的 direct-write 稿通过");
 ok(codes(FM("mode: direct-write\n") + BODY_OK, { directWrite: false }).includes("L1-mode"), "非 direct-write 票却带 mode 行 ⇒ L1-mode");
+
+// —— WLSYS-352989e：L1-mode 的 directWrite 只可由「本集出稿票」裁定 ——
+// 修复前 script.ts 用 `/^Mode: direct-write/.test(--ticket 票体)` 从任意票求 directWrite：拿一集
+// direct-write 正文用其 continuity Bug 复核票（无裸 `episode` 标签、有 `Episode:` 行、无 Mode 行）去 lint 时，
+// 旧逻辑求得 directWrite=false ⇒ 对带 `mode: direct-write` 的正文误报 L1-mode（回炉重写→再审空转）。
+// 出稿票判据：labels 含裸 `episode` 标签 ∧ 票体 `Episode: N` == 本集号（tests 上文 FM 集号=23）。
+const DW_ISSUE_TICKET = "labels: [writing-loop, Feature, episode, continuity, reviewer, story-designer]\nEpisode: 23\nMode: direct-write\n";
+const PLAIN_ISSUE_TICKET = "labels: [writing-loop, Feature, episode, reviewer, episode-writer]\nEpisode: 23\n";
+const BUG_REVIEW_TICKET = "labels: [writing-loop, Bug, continuity, reviewer, episode-writer]\nEpisode: 23\n";
+const PUNCHUP_TICKET = "labels: [writing-loop, Improvement, punch-up, showrunner, story-designer]\n";
+ok(ticketDirectWrite(DW_ISSUE_TICKET, 23) === true, "出稿票（labels∋episode ∧ Episode:23 ∧ Mode: direct-write）⇒ directWrite=true");
+ok(ticketDirectWrite(PLAIN_ISSUE_TICKET, 23) === false, "出稿票（非 direct-write）⇒ directWrite=false（真检保留）");
+ok(ticketDirectWrite(BUG_REVIEW_TICKET, 23) === null, "单集 Bug 复核票（无裸 episode 标签）⇒ null（跳过 L1-mode；修复前求得 false ⇒ 对 DW 集假阳性）");
+ok(ticketDirectWrite(PUNCHUP_TICKET, 23) === null, "arc punch-up 票（无 Episode: 行）⇒ null（修复前求得 false）");
+ok(ticketDirectWrite(DW_ISSUE_TICKET, 24) === null, "出稿票 Episode(23)≠lint集号(24) ⇒ null（别集票不裁定本集 mode）");
+ok(!codes(FM("mode: direct-write\n") + BODY_OK, { directWrite: ticketDirectWrite(BUG_REVIEW_TICKET, 23) }).includes("L1-mode"),
+  "全链路：direct-write 正文以复核票 lint ⇒ L1-mode 跳过（假阳性消解；修复前 directWrite=false ⇒ 误报）");
 
 // frontmatter / 细纲一致性
 ok(codes(FM().replace("hook-type: H4", "hook-type: H1") + BODY_OK).includes("L10-hook-type"), "hook-type 与细纲 hookType 不符 ⇒ L10-hook-type");

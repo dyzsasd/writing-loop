@@ -275,6 +275,23 @@ export function resolveTicketFile(root: string, key: string, file: string): stri
   return isAbsolute(file) ? file : join(projectDataDir(root, key), "board", "tickets", file);
 }
 
+// L1-mode 的 directWrite 只可由「本集出稿票」裁定（WLSYS-352989e）。L1-mode 校验的是「集正文的
+// `mode: direct-write` 字段 == 本集出稿票 `Mode: direct-write` 行」这条镜像（fail 计数的机械载体，
+// tests/yjjs-397 反向钉死「direct-write 集 ⟺ 板上 direct-write 承载票」双射）。出稿票判据：labels 含裸
+// `episode` 标签 ∧ 票体 `Episode: N` 机读行 == 本集号。punch-up／arc 复核票无 `Episode:` 行；continuity Bug
+// 复核票有 `Episode:` 行但 labels 无裸 `episode`——它们 lint 一集已交付正文时不是本集出稿票，mode 字段不由
+// 本票裁定，返回 null（L1-mode 跳过），否则任何 direct-write 集在复审/复核票下恒判 L1-mode 假阳性。
+export function ticketDirectWrite(ticketBody: string, episode: number): boolean | null {
+  const labelsMatch = /^labels:[ \t]*\[([^\]]*)\]/m.exec(ticketBody);
+  const hasEpisodeLabel = labelsMatch
+    ? labelsMatch[1].split(",").map((s) => s.trim()).includes("episode")
+    : false;
+  const episodeMatch = /^Episode:[ \t]*(\d+)\b/m.exec(ticketBody);
+  const ticketEpisode = episodeMatch ? Number(episodeMatch[1]) : null;
+  if (!hasEpisodeLabel || ticketEpisode !== episode) return null;
+  return /^Mode:[ \t]*direct-write\b/m.test(ticketBody);
+}
+
 // —— 存量豁免（waiver/baseline）——门中途启用时，门落地前已交付且项目正式裁定「不追溯改写」的
 // 存量正文不该永久假红（WLSYS-4dbfc385：ep-002「淳安县衙」）。每项目一份显式、可稽核的
 // `<repoPath>/.writing-loop-lint-baseline.json`：{ "version": 1, "entries": [ { "episode": 2,

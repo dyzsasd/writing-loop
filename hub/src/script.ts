@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { readStoryDesign } from "./story-design.ts";
 import { readStoryAssetCatalog } from "./story-assets.ts";
 import { applyLintBaseline, LINT_BASELINE_RELATIVE_PATH, lintEpisodeScript, parseEpisodeScript, parseLintBaseline, parsePresenceFact,
-  resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat, summarizeFindings, type ScriptLintContext } from "./script-lint.ts";
+  resolveTicketFile, scenesMaxForFormat, sentenceCapForFormat, summarizeFindings, ticketDirectWrite, type ScriptLintContext } from "./script-lint.ts";
 import { readProjectResource } from "./project-detail.ts";
 import { findWorkspaceRoot, loadConfig, projectEntries, resolveRepoPath, WsError } from "./workspace.ts";
 
@@ -54,7 +54,7 @@ async function main(): Promise<void> {
     const ticket = readProjectResource(ws, key, "ticket", ticketId).ticket;
     if (!ticket) throw new WsError(`没有创作任务 '${ticketId}'`);
     const body = readFileSync(resolveTicketFile(root, key, ticket.summary.file), "utf8");
-    directWrite = /^Mode:[ \t]*direct-write\b/m.test(body);
+    directWrite = ticketDirectWrite(body, episode);  // 只在 --ticket 是本集出稿票时裁定（WLSYS-352989e）
   }
   let presence: Map<number, string[]> | null = null;
   const epCard = catalog?.manifest.assets.find((asset) => asset.type === "episode" && asset.id === `EP${String(episode).padStart(3, "0")}`);
