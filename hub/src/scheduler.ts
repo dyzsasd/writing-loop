@@ -2254,15 +2254,22 @@ export class Scheduler {
     const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z").replace(/[-:]/g, "");
     const logPath = join(this.logsDir, `${stamp}-${String(this.logSeq).padStart(2, "0")}-${agent}.log`);
     const fd = openSync(logPath, "w");
+    // stdin 显式给 /dev/null 的只读 fd，而非 Node 的 "ignore"。2026-08-27 故障：claude CLI
+    // 2.1.246 起在 `-p` 下仍会**等待 stdin**（无 tty 时无限等，日志「no stdin data received」）；
+    // spawn 是 detached 无 tty ⇒ 每个 fire 挂起等 stdin、CPU 睡眠、cap 前不退出（熔断器/cap 都
+    // 兜不住）。实测 `< /dev/null` 让同款大 prompt fire 8s 正常完成。openSync 显式 fd 等价于
+    // shell 重定向、跨 Node 版本对 detached 子进程稳定（"ignore" 在该组合下未给 claude 一个
+    // 可判 EOF 的 stdin）。spawn 后父进程关此 fd（子已 dup 继承）。
+    const nullInFd = openSync("/dev/null", "r");
     let child: ChildProcess;
     try {
       child = spawn(argv[0], argv.slice(1), {
         cwd: this.repo, env: fireEnv(this.sched, this.wsRoot, this.providers),
-        stdio: ["ignore", fd, fd], detached: true, // detached ⇒ 新进程组（cap 超时可 killpg 全组）
+        stdio: [nullInFd, fd, fd], detached: true, // stdin=/dev/null（claude CLI 等 stdin 的对策）；detached ⇒ 新进程组（cap killpg 全组）
       });
     } catch (e) {
       // 同步 spawn 失败（罕见）：同 0.4.0 的 OSError 分支——记 spawnError 行、不进 inflight。
-      closeSync(fd);
+      closeSync(fd); closeSync(nullInFd);
       const msg = e instanceof Error ? e.message : String(e);
       console.log(`[${utcIso()}] FAIL ${agent}：无法起进程（${msg}）`);
       const nowIso = utcIso();
@@ -2274,7 +2281,7 @@ export class Scheduler {
       this.firedOnce.add(agent);
       return true;
     }
-    closeSync(fd); // 子进程已持有 fd
+    closeSync(fd); closeSync(nullInFd); // 子进程已 dup 继承两 fd，父进程关自己的副本
     const fire = new Fire(agent, child, model, effort, escalated, this.sched.agents[agent].capSeconds, logPath);
     // showrunner 基线候选 = 门控求值时刻的快照（north-star 读取失败 ⇒ 不设候选，保持保守）
     fire.gateSnapshot = gate && agent === "showrunner" && gate.northStarHash !== null
