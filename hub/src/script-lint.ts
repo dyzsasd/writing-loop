@@ -107,6 +107,19 @@ export function parseEpisodeScript(text: string): ParsedEpisodeScript {
   return out;
 }
 
+// 场内「独立生产标注行」（整行 `【…】`，如【闪回结束】【插入闪回】）：parseEpisodeScript 把它保留在
+// scene.lines 里，但既不计入 actionLines 也不计入 speakers（见上面的 `^【` 分支）。ShotRequest 预填要把它
+// 当作紧随其后镜头的生产标注与强制切分点（video-provider-interface DESIGN §6.1），因此这里只增加一个
+// 只读投影，解析行为与既有 lint 判据完全不变。
+export function sceneAnnotationLines(scene: ScriptScene): Array<{ line: number; text: string }> {
+  const actionLines = new Set(scene.actionLines);
+  const speakerLines = new Set(scene.speakers.map((speaker) => speaker.line));
+  return scene.lines
+    .filter((entry) => entry.line !== scene.rosterLine && !actionLines.has(entry.line)
+      && !speakerLines.has(entry.line) && /^【/.test(entry.text.trim()))
+    .map((entry) => ({ line: entry.line, text: entry.text.trim() }));
+}
+
 const countSentences = (dialogue: string): number => {
   // 句号/问号/叹号（全角半角）各计一句；省略号不计；结尾无终止符的残句计一句。
   const cleaned = dialogue.replace(/[「」『』“”"'（）()【】]/g, "").trim();

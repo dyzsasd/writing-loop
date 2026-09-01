@@ -228,8 +228,8 @@ ShotRequest 以 `application/vnd.writing-loop.shot-request+json` 存入 CAS，�
 - seed：Seedance 分支 `output.seed` 非 null 时返回 `seed_rejected`（error，无 warning 形态）；Veo 分支接受 uint32 但总是记 `seed-not-reproducible`；H3 分支 seed 逐镜下发且可复现。
 - negative prompt：H3 契约无 negative 输入，H3 分支 `prompt.negativeText` 非 null 时返回 `negative_prompt_unsupported`（error）；Seedance 折叠进 prompt 文本并记 `negative-prompt-folded`；Veo 有原生 `negativePrompt` 字段。
 - prompt 语言：后端 `limits.promptLanguages` 非 null 且不含 `draft.prompt.language` 时，若 `translations` 中存在受支持语言的译文则选用该译文作为 `prompt.text`，记 `prompt-translated`（`from: 原语言, to: 译文语言`，`requiresReapproval: true`）并写入 `selectedTranslation`；否则返回 `prompt_language_unsupported`。`dialogue[]` 中 `lipSync: true` 且 `language` 不在 `promptLanguages` 内时返回 `dialogue_language_unsupported`（含中文口型对白的镜头不路由到 Veo）。本版 draft 的 `prompt.language` 与 `dialogue[].language` 固定 `zh-CN` 且 `translations` 为空数组，因此 Veo 分支恒返回 `prompt_language_unsupported`（§8.5）。
-- provider 文本指令：`prompt.text` 与 `negativeText` 命中 `(^|\s)--(rs|rt|dur|fps|seed|cf|wm|frames)\b` 时返回 `prompt_contains_provider_directive`（error，所有后端一律拒绝）。
-- 参考序号：prompt 中 `@?(图片|图像|图|视频|音频)\s*(\d+)` 的序号超过对应类别的参考数量时返回 `reference_index_out_of_range`。
+- provider 文本指令：`prompt.text` 与 `negativeText` 命中 `(^|[\s，。；：、！？（）()])--[A-Za-z][A-Za-z_-]*` 时返回 `prompt_contains_provider_directive`（error，所有后端一律拒绝）。判据按形态而非词表：Ark 的 `--rs/--rt/--dur/--fps/--seed/--cf/--wm/--frames` 会随 provider 版本增删，任意 `--flag` 一律拒绝，参数只走请求体（长写形式与紧邻中文标点的写法同样命中）。
+- 参考序号：prompt 中 `@(?:图片|图像|图|视频|音频)\s*\d+|(?:图片|图像|视频|音频)\s*\d+|图\d+` 的序号超过对应类别的参考数量时返回 `reference_index_out_of_range`。裸「图」只在带 `@` 前缀或数字紧邻（无空白）时算序号引用，避免「画面构图 2 层」误报。
 - 长度提示：Seedance 分支对超过 500 中文字 / 1000 英文词的 prompt 返回 warning `prompt_length_over_recommendation`（provider 建议值）。
 - `ValidationReport.issues[{code, field, severity, message}]`，错误码：`unsupported_operation | unsupported_continuity_mode | last_frame_without_first | keyframe_not_approved | reference_cap_exceeded | audio_only_reference_unsupported | duration_out_of_range | aspect_ratio_unsupported | resolution_unsupported | image_too_large | image_mime_unsupported | real_face_unauthorized | license_blocked | license_obligation_unmet | processing_region_not_allowed | prop_state_missing | prompt_language_unsupported | dialogue_language_unsupported | prompt_contains_provider_directive | reference_index_out_of_range | seed_rejected | output_intent_mismatch | negative_prompt_unsupported | native_audio_unverified(warning) | prompt_length_over_recommendation(warning)`。含 error 级 issue 的镜头不进入 ShotBatchPlan。
 
@@ -562,11 +562,15 @@ writing-loop 侧批次与样片：
 | 3 | `camera` 六字段与 `cameraId` 完全相同 |
 | 4 | `scene.lightingStateId` 与 `scene.dressingVariantId` 相同 |
 | 5 | `cast[]` 的 `characterId` 集合与各自的 `appearanceStateId` 相同（`stage` 站位允许不同） |
-| 6 | 两行都不含【画面定格】标注（该标注表示镜头结束定格，为强制切分点） |
+| 6 | 两行都不含强制切分标注：【画面定格】【插入闪回】【闪回结束】（前者是镜头结束定格，后两者是闪回进出点，必须落在镜头边界上） |
 | 7 | 合并后 `dialogue[]` 中 `lipSync: true` 的说话人不超过 1 个 |
 | 8 | 合并后 `storyboardDurationSeconds` 之和不超过 execution profile 的时长网格上界 |
+| 9 | 右行的 `continuity.{firstFrame, lastFrame, references, spatialPasses}` 为空，或与左行完全相同（合并只保留首行的连续性输入，右行非空且不同即丢信息） |
+| 10 | 逐镜请求参数一致：`output.{seed, aspectRatio, generateAudio}` 相同，且两行 `prompt.text` 不是「都非 null 且不同」（`prompt.text` 为 null 表示写作侧尚未撰写，不构成冲突） |
 
-合并结果：`shotId` 与 `provenance.scriptLine` 取首行的值；被并入行的行号写入 `provenance.mergedScriptLines`（无合并时为空数组）；`action` 按行序以换行拼接；`productionTags` 取并集；`props[]` 与 `cast[]` 取并集（同 id 冲突时取首行值并在 `validation` 记 warning）；`dialogue[]` 按行序拼接；`storyboardDurationSeconds` 取和。合并只改变 draft，编译规则与 ShotRequest 结构不变。
+合并结果：`shotId` 与 `provenance.scriptLine` 取首行的值；被并入行的行号写入 `provenance.mergedScriptLines`（无合并时为空数组）；`action` 按行序以换行拼接；`productionTags` 取并集；`props[]` 与 `cast[]` 取并集（同 id 冲突时取首行值并在 `validation` 记 warning）；`crowd` 一侧为空取另一侧、两侧不同取首行并记 warning；`dialogue[]` 按行序拼接；`storyboardDurationSeconds` 取和；`prompt` 取已撰写的一侧。被并入镜头的 `shotId` 在其余镜头的 `continuity.prevShotId` 上改写为吸收它的存活镜头，不留悬空引用。合并只改变 draft，编译规则与 ShotRequest 结构不变。
+
+两处非「一行动作 = 一个镜头」的语料形态（预填按此处理，不改 `script-lint.ts` 既有判据）：场内首个 ▲ 之前出现的对白（`ep-018.md:18` 实测形）归入本场第一镜，并在预填返回值的 `warnings[]` 记行号与原文；整行生产标注（`ep-008.md:22` 的【闪回结束】形）记为紧随其后那一镜的 `productionTags`，并因此成为条件 6 的强制切分点。
 
 ### 6.2 关键帧来源
 
@@ -587,7 +591,7 @@ writing-loop 侧批次与样片：
 
 ### 6.6 参考用途与序号
 
-参考用途只决定 role 与顺序（Ark `reference_image` 按 purpose 排序；Veo `style` 单独成 `referenceType: style`）；prompt 中引用参考序号时，编译器按 `@?(图片|图像|图|视频|音频)\s*(\d+)` 识别（官方写法为「图片N / 视频N / 音频N」与「@图片1」），校验序号不超过对应类别的参考数量，越界返回 `reference_index_out_of_range`。
+参考用途只决定 role 与顺序（Ark `reference_image` 按 purpose 排序；Veo `style` 单独成 `referenceType: style`）；prompt 中引用参考序号时，编译器按 `@(?:图片|图像|图|视频|音频)\s*\d+|(?:图片|图像|视频|音频)\s*\d+|图\d+` 识别（官方写法为「图片N / 视频N / 音频N」与「@图片1」；裸「图」只在带 `@` 前缀或数字紧邻时算引用，避免「画面构图 2 层」误报），校验序号不超过对应类别的参考数量，越界返回 `reference_index_out_of_range`。`trim_by_priority` 裁剪掉的参考若在 draft 原序中排在某个保留项之前，保留项序号会前移：此时 prompt 只要出现序号引用即返回 `reference_index_out_of_range`（error），`references-trimmed` 一律 `requiresReapproval: true`。
 
 ## 7. 错误与恢复语义
 
@@ -656,7 +660,7 @@ worker runtime config：`backends[]`、`gateway`（ingest）与 `stagingProfiles
 |---|---|
 | 改动文件 | 新增 `hub/src/production-shot-request.ts`、`hub/src/production-provider-adapter.ts`；修改 `hub/src/production-intent.ts`、`production-adapter.ts`、`production-domain.ts`、`production-coordinator.ts`、`production-coordinator-domain.ts`、`production-reconcile.ts`、`production-ingestor.ts`、`production-read-model.ts`、`production-runtime-config.ts`、`production.ts`、`cli.ts`、`visual-production.ts`；`docs/design/phase-3-remote-production/AI-SPEC.md`；`references/config-schema.md`、`references/visual-production-schema.md`；`hub/test/production-*.ts` |
 | 交付物 | ShotRequest 类型、解析、`deriveVideoMode`、`compileShotRequest`、`shotRequestFromScript`、镜头合并（§6.1）；intent 新枚举与三个 execution 分支（H3 为实现路径；seedance / veo 只到类型、解析与编译校验层，adapter 后置）；三个 gate 与 license `obligations`；capability 与 locator 联合类型；`ProductionProviderAdapter` 接口、`PreparedProviderSubmission` 与 `ComfyUiAdapter` 包装；cost 扩展；runtime config 的 `transport: "insecure-private-http"` 选项与 `executionProfileSnapshotFile`；`production plan-shots`、`production qc`、`visual approve-candidate` 子命令；`visual/production.v1.json` 的 `shotIds`、`subjectReferences[]` 与 `mappings.v1.json`、`prop-states.v1.json` schema；AI-SPEC fixture 更新与「H3 输出不得用于改进其他模型」使用约束 |
-| 验收标准 | 现有 `hub/test/production-*.ts` 全部通过；旧 H3 intent JSON 解析结果与 idempotencyKey 不变；validate 矩阵测试（每家后端 × 每个错误码至少 1 例，含 `prompt_contains_provider_directive`、`prompt_language_unsupported`、`dialogue_language_unsupported`、`reference_index_out_of_range`、`license_obligation_unmet`、`output_intent_mismatch`、`negative_prompt_unsupported`）；H3 分支拒绝 t2v、拒绝非空 `negativeText`、拒绝不在已配置 profile 集合内的时长档；seedance 分支拒绝 `seed ≠ null`（error 级 `seed_rejected`）、fast + 1080p、首尾帧与参考混用、2.0 仅音频参考、`adaptive` 画幅；veo 分支拒绝 6 s ref2v、lite + ref2v、lite + 4k、fast + 4k、1080p + 4 s，并对 `zh-CN` prompt 返回 `prompt_language_unsupported`；veo 分支对每个 ShotRequest 记录 `seed-not-reproducible`；镜头合并的八条判定条件逐条有用例（可合并、机位不同不合并、【画面定格】不合并、口型说话人超过 1 不合并、时长超上界不合并）；`output.aspectRatio` / `generateAudio` 与 profile 不一致各 1 例被拒；同一 draft 编译产生字节相同的 ShotRequest 与 intent draft；`--plan` 零写入（目录快照前后一致）；runtime config 解析测试：`transport: "insecure-private-http"` 对 10.x / 127.0.0.1 + 非空 `credentialEnv` 通过，对公网 IP、域名、`https:`、空 `credentialEnv`、`kind: comfyui` 各拒绝 1 例，缺省 transport 仍要求 HTTPS；`ep-001.md` 1-1 场经 `script-lint.ts` 预填的 draft 在人工补齐 `camera` 字段后通过合并、解析与编译（H3 fl2va 模式，首帧为 `operator-upload`） |
+| 验收标准 | 现有 `hub/test/production-*.ts` 全部通过；旧 H3 intent JSON 解析结果与 idempotencyKey 不变；validate 矩阵测试（每家后端 × 每个错误码至少 1 例，含 `prompt_contains_provider_directive`、`prompt_language_unsupported`、`dialogue_language_unsupported`、`reference_index_out_of_range`、`license_obligation_unmet`、`output_intent_mismatch`、`negative_prompt_unsupported`）；H3 分支拒绝 t2v、拒绝非空 `negativeText`、拒绝不在已配置 profile 集合内的时长档；seedance 分支拒绝 `seed ≠ null`（error 级 `seed_rejected`）、fast + 1080p、2.0 仅音频参考、`adaptive` 画幅，首尾帧与参考混用时按 `anchorPreference` 选侧并记 `anchor-mode-selected`（`requiresReapproval: true`）；veo 分支拒绝 6 s ref2v、lite + ref2v、lite + 4k、fast + 4k、1080p + 4 s，并对 `zh-CN` prompt 返回 `prompt_language_unsupported`；veo 分支对每个 ShotRequest 记录 `seed-not-reproducible`；镜头合并的十条判定条件逐条有用例（可合并、机位不同不合并、强制切分标注不合并、口型说话人超过 1 不合并、时长超上界不合并、右行连续性输入不同不合并、prompt / seed 不同不合并），并有合并后 `prevShotId` 改写与乱序输入抛错各 1 例；`output.aspectRatio` / `generateAudio` 与 profile 不一致各 1 例被拒；同一 draft 编译产生字节相同的 ShotRequest 与 intent draft；`--plan` 零写入（目录快照前后一致）；runtime config 解析测试：`transport: "insecure-private-http"` 对 10.x / 127.0.0.1 + 非空 `credentialEnv` 通过，对公网 IP、域名、`https:`、空 `credentialEnv`、`kind: comfyui` 各拒绝 1 例，缺省 transport 仍要求 HTTPS；ep-001 场 1-1 的文本（作为测试 fixture 内联，剧本数据不入库）经 `script-lint.ts` 预填的 draft 在补齐 `camera` 与 `prompt.text` 后通过合并、解析与编译（H3 fl2va 模式，首帧为 `operator-upload`）；设 `WL_EP001_PATH` 时额外对整集文件做同一核对 |
 | 前提条件（并行外部，负责人：项目操作者；截止：Phase 0 验收前） | (a) 在 writing-loop-sg 上核实 ffmpeg / ffprobe、Node 版本、systemd 权限（本轮 ssh 失败未能核实）；(b) S01 候选图批准轨道启动（§6.2，不阻塞任何 Phase） |
 
 ### 8.2 Phase 1：gateway 进程装配与部署（GPU VM 同机）
