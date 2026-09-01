@@ -95,13 +95,43 @@ export type ProductionSubjectRef =
   | { version: 1; kind: "episode"; episode: EpisodeRevisionRef }
   | { version: 1; kind: "shot"; shot: ShotRevisionRef };
 
+/**
+ * How a known amount was determined.  `reported`/`billed` come from the provider, `tariff` is the
+ * configured profile price applied to a measured duration, `reported-converted` is a provider
+ * amount billed in a native currency, and `estimated` remains a planning-only figure.
+ */
+export const PRODUCTION_COST_BASES = [
+  "reported", "billed", "estimated", "tariff", "reported-converted",
+] as const;
+
+export type ProductionCostBasis = typeof PRODUCTION_COST_BASES[number];
+
+/**
+ * Native-currency evidence behind a converted USD amount.  The rate is an operator-declared
+ * registry fact carrying its own date and source, so no offline exchange-rate guess is ever needed.
+ *
+ * `rateMicrosPerUnit` is USD micros per one unit of `nativeCurrency` (0.138 USD/CNY is 138_000), so
+ * the direction is native -> USD and the identity the parser enforces is
+ * `amountMicros === round_half_up(nativeAmountMicros * rateMicrosPerUnit / 1_000_000)`, evaluated in
+ * BigInt so neither factor's upper bound can overflow the product.
+ */
+export type ProductionCostSettlement = {
+  nativeCurrency: "CNY";
+  nativeAmountMicros: number;
+  rateMicrosPerUnit: number;
+  rateAsOf: string;
+  rateSource: "gateway-registry";
+};
+
 export type ProductionCost =
   | {
       version: 1;
       state: "known";
       currency: "USD";
       amountMicros: number;
-      basis: "reported" | "billed" | "estimated";
+      basis: ProductionCostBasis;
+      /** Non-null exactly when basis is reported-converted; legacy records read as null. */
+      settlement: ProductionCostSettlement | null;
     }
   | {
       version: 1;
@@ -281,7 +311,7 @@ const CANCELLATION_EVENTUAL_STATUSES = {
 const COST_UNKNOWN_REASONS = new Set([
   "not-recorded", "provider-not-reported", "in-flight", "unavailable", "legacy-record",
 ]);
-const COST_BASES = new Set(["reported", "billed", "estimated"]);
+const COST_BASES = new Set<string>(PRODUCTION_COST_BASES);
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT_KEY = /^[a-z0-9][a-z0-9._-]{0,31}$/;
@@ -301,8 +331,14 @@ function requireRecord(value: unknown, subject: string): Record<string, unknown>
   return value;
 }
 
-function exactKeys(value: Record<string, unknown>, allowed: readonly string[], subject: string): void {
-  const extras = Object.keys(value).filter((key) => !allowed.includes(key));
+function exactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  subject: string,
+  /** Keys a v1 record may omit; only used where an older durable record predates the field. */
+  optional: readonly string[] = [],
+): void {
+  const extras = Object.keys(value).filter((key) => !allowed.includes(key) && !optional.includes(key));
   if (extras.length) fail(subject, `含不支持字段：${extras.join("、")}（v1 schema 严格拒绝未知字段）`);
   const missing = allowed.filter((key) => !Object.prototype.hasOwnProperty.call(value, key));
   if (missing.length) fail(subject, `缺少字段：${missing.join("、")}`);
@@ -465,19 +501,64 @@ export function subjectRevision(subject: ProductionSubjectRef): number {
   return subject.kind === "episode" ? subject.episode.revision : subject.shot.revision;
 }
 
+function parseCostSettlement(value: unknown, subject: string): ProductionCostSettlement {
+  const row = requireRecord(value, subject);
+  exactKeys(row, ["nativeCurrency", "nativeAmountMicros", "rateMicrosPerUnit", "rateAsOf", "rateSource"], subject);
+  if (row.nativeCurrency !== "CNY") fail(`${subject}.nativeCurrency`, "v1 仅支持 CNY 原币结算");
+  if (row.rateSource !== "gateway-registry") fail(`${subject}.rateSource`, "汇率只能来自 gateway registry 的声明");
+  return {
+    nativeCurrency: "CNY",
+    nativeAmountMicros: requireSafeInteger(
+      row.nativeAmountMicros, `${subject}.nativeAmountMicros`, 0, MAX_PRODUCTION_COST_MICROS,
+    ),
+    rateMicrosPerUnit: requireSafeInteger(
+      row.rateMicrosPerUnit, `${subject}.rateMicrosPerUnit`, 1, MAX_PRODUCTION_COST_MICROS,
+    ),
+    rateAsOf: requireIso(row.rateAsOf, `${subject}.rateAsOf`),
+    rateSource: "gateway-registry",
+  };
+}
+
 export function parseProductionCost(value: unknown, subject = "ProductionCost"): ProductionCost {
   const row = requireRecord(value, subject);
   if (row.state === "known") {
-    exactKeys(row, ["version", "state", "currency", "amountMicros", "basis"], subject);
+    exactKeys(row, ["version", "state", "currency", "amountMicros", "basis"], subject, ["settlement"]);
     requireVersion(row.version, subject);
     if (row.currency !== "USD") fail(`${subject}.currency`, "v1 仅支持 USD，禁止离线猜测汇率");
-    if (!COST_BASES.has(String(row.basis))) fail(`${subject}.basis`, "必须是 reported、billed 或 estimated");
+    if (!COST_BASES.has(String(row.basis))) {
+      fail(`${subject}.basis`, `必须是 ${PRODUCTION_COST_BASES.join("、")} 之一`);
+    }
+    const basis = row.basis as ProductionCostBasis;
+    const amountMicros = requireSafeInteger(
+      row.amountMicros, `${subject}.amountMicros`, 0, MAX_PRODUCTION_COST_MICROS,
+    );
+    // Records written before the converted basis carry no settlement; absent reads as null.
+    const settlement = row.settlement === undefined || row.settlement === null
+      ? null
+      : parseCostSettlement(row.settlement, `${subject}.settlement`);
+    if ((basis === "reported-converted") !== (settlement !== null)) {
+      fail(`${subject}.settlement`, "reported-converted 必须记录原币结算，其余 basis 必须是 null");
+    }
+    if (settlement !== null) {
+      // The USD amount must be exactly the declared conversion of the native amount, so a drifting
+      // rate or a hand-edited total cannot pass as settled evidence.  BigInt keeps the product exact.
+      const expected = (BigInt(settlement.nativeAmountMicros) * BigInt(settlement.rateMicrosPerUnit)
+        + 500_000n) / 1_000_000n;
+      if (BigInt(amountMicros) !== expected) {
+        fail(
+          `${subject}.amountMicros`,
+          `必须等于原币金额按声明汇率 half-up 折算的 ${expected} micros`
+            + `（${settlement.nativeAmountMicros} × ${settlement.rateMicrosPerUnit} / 1000000），实际是 ${amountMicros}`,
+        );
+      }
+    }
     return {
       version: 1,
       state: "known",
       currency: "USD",
-      amountMicros: requireSafeInteger(row.amountMicros, `${subject}.amountMicros`, 0, MAX_PRODUCTION_COST_MICROS),
-      basis: row.basis as "reported" | "billed" | "estimated",
+      amountMicros,
+      basis,
+      settlement,
     };
   }
   if (row.state === "unknown") {

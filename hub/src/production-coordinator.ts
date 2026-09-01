@@ -21,6 +21,7 @@ import {
   parseAssetRef,
   parseProductionCost,
   parseProductionTaskEvent,
+  type ProductionCostBasis,
   type ProductionTask,
   type ProductionTaskEvent,
 } from "./production-domain.ts";
@@ -211,6 +212,11 @@ type EventDetail = { type: ProductionTaskEvent["type"] } & Record<string, unknow
 const SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_BACKEND_ERROR = /^(?:execution_error(?::[A-Za-z_][A-Za-z0-9_.]{0,119})?|execution_interrupted)$/;
 const MODEL_FAMILIES = new Set<ProductionModelFamily>(["generic", "minimax-h3"]);
+// Bases that state an amount actually incurred, so the reservation can be settled against it.
+// estimated stays a planning figure and unknown has no amount at all; neither releases exposure.
+const SETTLED_COST_BASES = new Set<ProductionCostBasis>([
+  "reported", "billed", "tariff", "reported-converted",
+]);
 
 export const PRODUCTION_COORDINATOR_RETRY_BASE_DELAY_MS = 1_000;
 export const PRODUCTION_COORDINATOR_RETRY_MAX_DELAY_MS = 300_000;
@@ -539,8 +545,7 @@ function settleQcBudget(context: RunContext, task: ProductionTask): void {
   const control = context.control.read().tasks.find((row) => row.taskId === task.id);
   if (control?.budgetReservation === null || control?.budgetReservation === undefined
     || control.budgetReservation.state === "released") return;
-  const reconciled = task.cost.state === "known"
-    && (task.cost.basis === "reported" || task.cost.basis === "billed");
+  const reconciled = task.cost.state === "known" && SETTLED_COST_BASES.has(task.cost.basis);
   if (!reconciled) {
     issue(context, task.id, "cost-unreconciled");
     return;

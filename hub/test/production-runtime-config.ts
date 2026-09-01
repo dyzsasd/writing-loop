@@ -524,6 +524,83 @@ try {
   ok(parseProductionRuntimeConfig(loopbackDevelopment).gateway.baseUrl === "http://127.0.0.1:8080/dev",
     "explicit uncredentialed loopback HTTP remains available for local development");
 
+  // Owner-only `transport: insecure-private-http`: VPC-private plaintext plus a bearer credential.
+  const defaultTransport = parseProductionRuntimeConfig(validConfig());
+  const defaultBackend = defaultTransport.backends[0];
+  ok(defaultTransport.gateway.transport === "tls"
+    && defaultBackend?.kind === "production-gateway" && defaultBackend.transport === "tls",
+  "omitted transport reads as tls and leaves the existing HTTPS rules in force");
+
+  const privateBackend = structuredClone(validConfig());
+  const privateBackendRow = (privateBackend.backends as Record<string, unknown>[])[0]!;
+  privateBackendRow.baseUrl = "http://10.128.0.7:8080/jobs";
+  privateBackendRow.transport = "insecure-private-http";
+  const parsedPrivateBackend = parseProductionRuntimeConfig(privateBackend).backends[0];
+  ok(parsedPrivateBackend?.kind === "production-gateway"
+    && parsedPrivateBackend.transport === "insecure-private-http"
+    && parsedPrivateBackend.baseUrl === "http://10.128.0.7:8080/jobs"
+    && parsedPrivateBackend.credentialEnv === "PRODUCTION_JOB_GATEWAY_TOKEN",
+  "job gateway backend accepts RFC1918 plaintext HTTP only with an explicit transport and a credential");
+
+  const tlsBackendOnHttp = structuredClone(validConfig());
+  ((tlsBackendOnHttp.backends as Record<string, unknown>[])[0]!).baseUrl = "http://10.128.0.7:8080/jobs";
+  ok(configError(() => parseProductionRuntimeConfig(tlsBackendOnHttp), "config-invalid-schema"),
+    "a private address alone does not relax the default HTTPS requirement");
+
+  const privateBackendOverHttps = structuredClone(privateBackend);
+  ((privateBackendOverHttps.backends as Record<string, unknown>[])[0]!).baseUrl = "https://10.128.0.7:8080/jobs";
+  ok(configError(() => parseProductionRuntimeConfig(privateBackendOverHttps), "config-invalid-schema"),
+    "insecure-private-http is a plaintext-only declaration and cannot be claimed for an HTTPS endpoint");
+
+  const publicPrivateTransport = structuredClone(privateBackend);
+  ((publicPrivateTransport.backends as Record<string, unknown>[])[0]!).baseUrl = "http://203.0.113.10:8080/jobs";
+  ok(configError(() => parseProductionRuntimeConfig(publicPrivateTransport), "config-invalid-schema"),
+    "insecure-private-http rejects a routable public address");
+
+  for (const host of ["172.15.0.1", "172.32.0.1", "0.0.0.0", "127.0.0.2"]) {
+    const outsideRange = structuredClone(privateBackend);
+    ((outsideRange.backends as Record<string, unknown>[])[0]!).baseUrl = `http://${host}:8080/jobs`;
+    ok(configError(() => parseProductionRuntimeConfig(outsideRange), "config-invalid-schema"),
+      `insecure-private-http rejects ${host}, which sits outside the RFC1918 blocks and the loopback literal`);
+  }
+  const rfc1918Edge = structuredClone(privateBackend);
+  ((rfc1918Edge.backends as Record<string, unknown>[])[0]!).baseUrl = "http://192.168.1.1:8080/jobs";
+  const parsedRfc1918Edge = parseProductionRuntimeConfig(rfc1918Edge).backends[0];
+  ok(parsedRfc1918Edge?.kind === "production-gateway"
+    && parsedRfc1918Edge.baseUrl === "http://192.168.1.1:8080/jobs",
+  "insecure-private-http accepts the 192.168/16 block alongside 10/8 and 172.16/12");
+
+  const explicitTls = structuredClone(validConfig());
+  ((explicitTls.backends as Record<string, unknown>[])[0]!).transport = "tls";
+  (explicitTls.gateway as Record<string, unknown>).transport = "tls";
+  ok(JSON.stringify(parseProductionRuntimeConfig(explicitTls))
+    === JSON.stringify(parseProductionRuntimeConfig(validConfig())),
+  "an explicit transport: tls parses byte-identically to omitting the field");
+
+  const comfyPrivateTransport = structuredClone(directComfyDevelopment);
+  ((comfyPrivateTransport.backends as Record<string, unknown>[])[0]!).transport = "insecure-private-http";
+  ok(configError(() => parseProductionRuntimeConfig(comfyPrivateTransport), "config-invalid-schema"),
+    "direct ComfyUI backend does not accept the transport field and keeps its loopback-only rule");
+
+  const privateGateway = structuredClone(validConfig());
+  (privateGateway.gateway as Record<string, unknown>).baseUrl = "http://127.0.0.1:8080/ingest";
+  (privateGateway.gateway as Record<string, unknown>).transport = "insecure-private-http";
+  const parsedPrivateGateway = parseProductionRuntimeConfig(privateGateway).gateway;
+  ok(parsedPrivateGateway.transport === "insecure-private-http"
+    && parsedPrivateGateway.baseUrl === "http://127.0.0.1:8080/ingest"
+    && parsedPrivateGateway.credentialEnv === "PRODUCTION_GATEWAY_TOKEN",
+  "ingest gateway accepts the literal loopback address under an explicit private-HTTP transport");
+
+  const uncredentialedPrivateGateway = structuredClone(privateGateway);
+  (uncredentialedPrivateGateway.gateway as Record<string, unknown>).credentialEnv = null;
+  ok(configError(() => parseProductionRuntimeConfig(uncredentialedPrivateGateway), "config-invalid-schema"),
+    "plaintext private transport still requires a bearer credential, unlike the loopback dev escape hatch");
+
+  const namedPrivateGateway = structuredClone(privateGateway);
+  (namedPrivateGateway.gateway as Record<string, unknown>).baseUrl = "http://gateway.internal.example";
+  ok(configError(() => parseProductionRuntimeConfig(namedPrivateGateway), "config-invalid-schema"),
+    "insecure-private-http rejects a domain name that could resolve anywhere");
+
   const unknownBackend = structuredClone(validConfig());
   ((unknownBackend.projects as Record<string, unknown>[])[0]!).backendInstanceIds = ["unregistered"];
   ok(configError(() => parseProductionRuntimeConfig(unknownBackend), "config-invalid-schema"),
@@ -764,6 +841,27 @@ try {
   };
   ok(configError(() => parseProductionRuntimeConfig(rawComfyStaged), "config-invalid-schema"),
     "scoped-staging workflow cannot target raw direct Comfy adapter without inputBinding support");
+
+  const privateStagingProfile = structuredClone(h3Config());
+  const privateProfileRow = (privateStagingProfile.stagingProfiles as Record<string, unknown>[])[0]!;
+  privateProfileRow.baseUrl = "http://172.16.4.9:8188/stage";
+  privateProfileRow.transport = "insecure-private-http";
+  const parsedPrivateProfile = parseProductionRuntimeConfig(privateStagingProfile).stagingProfiles[0];
+  ok(parsedPrivateProfile?.transport === "insecure-private-http"
+    && parsedPrivateProfile.baseUrl === "http://172.16.4.9:8188/stage"
+    && parsedPrivateProfile.credentialEnv === "PRODUCTION_STAGE_TOKEN"
+    && parseProductionRuntimeConfig(h3Config()).stagingProfiles[0]?.transport === "tls",
+  "staging profile accepts RFC1918 plaintext HTTP under the owner-only transport and defaults to tls");
+
+  const ipv6StagingProfile = structuredClone(privateStagingProfile);
+  ((ipv6StagingProfile.stagingProfiles as Record<string, unknown>[])[0]!).baseUrl = "http://[fd00::1]:8188/stage";
+  ok(configError(() => parseProductionRuntimeConfig(ipv6StagingProfile), "config-invalid-schema"),
+    "insecure-private-http is an IPv4-literal allowlist and rejects IPv6 hosts");
+
+  const unknownTransport = structuredClone(privateStagingProfile);
+  ((unknownTransport.stagingProfiles as Record<string, unknown>[])[0]!).transport = "plaintext";
+  ok(configError(() => parseProductionRuntimeConfig(unknownTransport), "config-invalid-schema"),
+    "transport accepts only the two declared values");
   const immutableH3Config = parseProductionRuntimeConfig(h3Config());
   const immutableH3Execution = immutableH3Config.stagingProfiles[0]!.execution;
   let nestedExecutionMutationRejected = false;

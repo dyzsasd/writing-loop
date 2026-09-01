@@ -83,6 +83,14 @@ export const PRODUCTION_RUNTIME_WORKFLOW_INPUT_POLICIES = [
 export type ProductionRuntimeWorkflowInputPolicy =
   typeof PRODUCTION_RUNTIME_WORKFLOW_INPUT_POLICIES[number];
 
+/**
+ * Owner-only transport declaration.  `insecure-private-http` trades TLS for VPC isolation plus a
+ * bearer credential on a private-network endpoint; it is valid only while no third-party workload
+ * shares that VPC (§9.4).  Absent means `tls` and keeps the existing HTTPS rules unchanged.
+ */
+export const PRODUCTION_RUNTIME_TRANSPORTS = ["tls", "insecure-private-http"] as const;
+export type ProductionRuntimeTransport = typeof PRODUCTION_RUNTIME_TRANSPORTS[number];
+
 export type ProductionRuntimeH3GeneratorClass = ProductionH3GeneratorClass;
 export type ProductionRuntimeH3GeneratorContract = ProductionH3GeneratorContract;
 export type ProductionRuntimeH3ModelComponentContract = ProductionH3ModelComponentContract;
@@ -106,6 +114,7 @@ export type ProductionRuntimeGatewayBackendConfig = Readonly<{
   baseUrl: string;
   credentialEnv: string;
   profileId: string;
+  transport: ProductionRuntimeTransport;
 }>;
 
 export type ProductionRuntimeBackendConfig =
@@ -116,6 +125,7 @@ export type ProductionRuntimeGatewayConfig = Readonly<{
   version: 1;
   baseUrl: string;
   credentialEnv: string | null;
+  transport: ProductionRuntimeTransport;
 }>;
 
 export type ProductionRuntimeWorkflowConfig = Readonly<{
@@ -142,6 +152,7 @@ export type ProductionRuntimeStagingProfileConfig = Readonly<{
   credentialEnv: string | null;
   execution: ProductionIntentExecution;
   bindings: readonly ProductionRuntimeStagingBindingConfig[];
+  transport: ProductionRuntimeTransport;
 }>;
 
 export type ProductionRuntimeProjectConfig = Readonly<{
@@ -252,10 +263,16 @@ function record(value: unknown, subject: string): Record<string, unknown> {
   return value;
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[], subject: string): void {
+function exactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+  subject: string,
+  /** Owner-only opt-in keys; omitting them must keep the pre-existing parse result. */
+  optional: readonly string[] = [],
+): void {
   const keys = Object.keys(value);
   const missing = expected.filter((key) => !Object.prototype.hasOwnProperty.call(value, key));
-  const extras = keys.filter((key) => !expected.includes(key));
+  const extras = keys.filter((key) => !expected.includes(key) && !optional.includes(key));
   if (missing.length || extras.length) {
     schemaError(subject, `字段无效（缺少：${missing.join("、") || "无"}；未知：${extras.join("、") || "无"}）`);
   }
@@ -290,6 +307,15 @@ function credentialEnv(value: unknown, subject: string): string | null {
   return safeString(value, SAFE_ENV, subject);
 }
 
+/** Absent transport keeps the pre-existing HTTPS/loopback rules, so old configs parse unchanged. */
+function transport(value: unknown, subject: string): ProductionRuntimeTransport {
+  if (value === undefined) return "tls";
+  if (typeof value !== "string" || !(PRODUCTION_RUNTIME_TRANSPORTS as readonly string[]).includes(value)) {
+    schemaError(subject, "必须是 tls 或 insecure-private-http");
+  }
+  return value as ProductionRuntimeTransport;
+}
+
 function parseH3GraphContract(value: unknown, subject: string): ProductionRuntimeH3GraphContract {
   try { return parseProductionH3GraphContract(value); }
   catch (error) {
@@ -309,11 +335,30 @@ function isLiteralLoopback(hostname: string): boolean {
     && Number(octets[0]) === 127;
 }
 
+/**
+ * RFC1918 IPv4 or the loopback literal, written as a literal address.  WHATWG URL already
+ * canonicalises numeric hosts, so a decimal-dotted match here also covers octal/hex spellings while
+ * every domain name — which could resolve anywhere — stays outside the accepted set.
+ */
+function isPrivateIpv4Literal(hostname: string): boolean {
+  if (hostname === "127.0.0.1") return true;
+  const octets = hostname.split(".");
+  if (octets.length !== 4
+    || !octets.every((part) => /^(?:0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)) {
+    return false;
+  }
+  const [first, second] = octets.map(Number) as [number, number, number, number];
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
 function trustedServiceUrl(
   value: unknown,
   subject: string,
   secretEnv: string | null,
   policy: "gateway" | "production-gateway" | "direct-comfy-dev" = "gateway",
+  declaredTransport: ProductionRuntimeTransport = "tls",
 ): string {
   if (typeof value !== "string" || value.length < 1 || value.length > 2_048) schemaError(subject, "必须是有界 URL 字符串");
   let url: URL;
@@ -327,7 +372,18 @@ function trustedServiceUrl(
     schemaError(subject, "path 必须是固定的安全 path segment 序列");
   }
   const literalLoopback = isLiteralLoopback(url.hostname);
-  if (policy === "direct-comfy-dev") {
+  if (declaredTransport === "insecure-private-http") {
+    // 明文只在 VPC 私网内成立：endpoint 必须是私网字面 IP，且仍以 bearer credential 鉴权。
+    if (url.protocol !== "http:") {
+      schemaError(subject, "insecure-private-http transport 只接受 http:// endpoint");
+    }
+    if (!isPrivateIpv4Literal(url.hostname)) {
+      schemaError(subject, "insecure-private-http transport 只接受 RFC1918 私网 IPv4 或 127.0.0.1 字面地址");
+    }
+    if (secretEnv === null) {
+      schemaError(subject, "insecure-private-http transport 必须引用非空 credentialEnv");
+    }
+  } else if (policy === "direct-comfy-dev") {
     if (url.protocol !== "http:" || secretEnv !== null || !literalLoopback) {
       schemaError(subject, "direct ComfyUI 仅允许无凭据的 literal-loopback HTTP development endpoint");
     }
@@ -373,19 +429,24 @@ function parseBackend(value: unknown, index: number): ProductionRuntimeBackendCo
     });
   }
   if (row.kind === "production-gateway") {
-    exactKeys(row, ["version", "backendInstanceId", "kind", "baseUrl", "credentialEnv", "profileId"], subject);
+    exactKeys(
+      row, ["version", "backendInstanceId", "kind", "baseUrl", "credentialEnv", "profileId"], subject,
+      ["transport"],
+    );
     version(row.version, subject);
     const backendCredentialEnv = credentialEnv(row.credentialEnv, `${subject}.credentialEnv`);
     if (backendCredentialEnv === null) schemaError(`${subject}.credentialEnv`, "production gateway 必须引用 server credential env");
+    const backendTransport = transport(row.transport, `${subject}.transport`);
     return Object.freeze({
       version: 1,
       backendInstanceId: safeString(row.backendInstanceId, SAFE_ID, `${subject}.backendInstanceId`),
       kind: "production-gateway",
       baseUrl: trustedServiceUrl(
-        row.baseUrl, `${subject}.baseUrl`, backendCredentialEnv, "production-gateway",
+        row.baseUrl, `${subject}.baseUrl`, backendCredentialEnv, "production-gateway", backendTransport,
       ),
       credentialEnv: backendCredentialEnv,
       profileId: safeString(row.profileId, SAFE_PROFILE_ID, `${subject}.profileId`),
+      transport: backendTransport,
     });
   }
   schemaError(`${subject}.kind`, "必须是 comfyui 或 production-gateway");
@@ -394,13 +455,17 @@ function parseBackend(value: unknown, index: number): ProductionRuntimeBackendCo
 function parseGateway(value: unknown): ProductionRuntimeGatewayConfig {
   const subject = "ProductionRuntimeConfig.gateway";
   const row = record(value, subject);
-  exactKeys(row, ["version", "baseUrl", "credentialEnv"], subject);
+  exactKeys(row, ["version", "baseUrl", "credentialEnv"], subject, ["transport"]);
   version(row.version, subject);
   const gatewayCredentialEnv = credentialEnv(row.credentialEnv, `${subject}.credentialEnv`);
+  const gatewayTransport = transport(row.transport, `${subject}.transport`);
   return Object.freeze({
     version: 1,
-    baseUrl: trustedServiceUrl(row.baseUrl, `${subject}.baseUrl`, gatewayCredentialEnv, "gateway"),
+    baseUrl: trustedServiceUrl(
+      row.baseUrl, `${subject}.baseUrl`, gatewayCredentialEnv, "gateway", gatewayTransport,
+    ),
     credentialEnv: gatewayCredentialEnv,
+    transport: gatewayTransport,
   });
 }
 
@@ -460,9 +525,13 @@ function parseWorkflow(value: unknown, index: number): ProductionRuntimeWorkflow
 function parseStagingProfile(value: unknown, index: number): ProductionRuntimeStagingProfileConfig {
   const subject = `ProductionRuntimeConfig.stagingProfiles[${index}]`;
   const row = record(value, subject);
-  exactKeys(row, ["version", "profileId", "baseUrl", "credentialEnv", "execution", "bindings"], subject);
+  exactKeys(
+    row, ["version", "profileId", "baseUrl", "credentialEnv", "execution", "bindings"], subject,
+    ["transport"],
+  );
   version(row.version, subject);
   const profileCredentialEnv = credentialEnv(row.credentialEnv, `${subject}.credentialEnv`);
+  const profileTransport = transport(row.transport, `${subject}.transport`);
   let execution: ProductionIntentExecution;
   try { execution = parseProductionIntentExecution(row.execution, `${subject}.execution`); }
   catch { schemaError(`${subject}.execution`, "不是严格 ProductionIntentExecution"); }
@@ -488,10 +557,13 @@ function parseStagingProfile(value: unknown, index: number): ProductionRuntimeSt
   return Object.freeze({
     version: 1,
     profileId: safeString(row.profileId, SAFE_PROFILE_ID, `${subject}.profileId`),
-    baseUrl: trustedServiceUrl(row.baseUrl, `${subject}.baseUrl`, profileCredentialEnv, "gateway"),
+    baseUrl: trustedServiceUrl(
+      row.baseUrl, `${subject}.baseUrl`, profileCredentialEnv, "gateway", profileTransport,
+    ),
     credentialEnv: profileCredentialEnv,
     execution: Object.freeze({ ...execution }),
     bindings: Object.freeze(bindings),
+    transport: profileTransport,
   });
 }
 

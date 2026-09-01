@@ -269,6 +269,7 @@ try {
         currency: "USD",
         amountMicros: concurrentCostCalls,
         basis: "reported",
+        settlement: null,
       };
     },
   });
@@ -572,7 +573,9 @@ try {
   const billed = await gateway({
     costResolver: () => {
       costCalls++;
-      return { version: 1, state: "known", currency: "USD", amountMicros: 42_000, basis: "billed" };
+      return {
+        version: 1, state: "known", currency: "USD", amountMicros: 42_000, basis: "billed", settlement: null,
+      };
     },
   });
   const billedFirst = await bodyJson(await billed.gateway.handle(ingestRequest()));

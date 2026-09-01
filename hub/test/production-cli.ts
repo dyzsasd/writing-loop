@@ -69,6 +69,7 @@ try {
   const estimatedState = store.read();
   estimatedState.tasks[0]!.cost = {
     version: 1, state: "known", currency: "USD", amountMicros: 3_500_000, basis: "estimated",
+    settlement: null,
   };
   writeFileSync(productionStatePath(root, "demo"), JSON.stringify(estimatedState, null, 2) + "\n");
   const coordinatorStore = new ProductionCoordinatorStore(root, workspaceId, "demo");

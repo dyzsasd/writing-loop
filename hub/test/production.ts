@@ -455,16 +455,47 @@ try {
   "read model 不把 provider 未上报的成本伪装成 0");
   const splitCostState = structuredClone(store.read());
   splitCostState.tasks[0]!.cost = {
-    version: 1, state: "known", currency: "USD", amountMicros: 2_000_000, basis: "billed",
+    version: 1, state: "known", currency: "USD", amountMicros: 2_000_000, basis: "billed", settlement: null,
   };
   splitCostState.tasks[1]!.cost = {
-    version: 1, state: "known", currency: "USD", amountMicros: 5_000_000, basis: "estimated",
+    version: 1, state: "known", currency: "USD", amountMicros: 5_000_000, basis: "estimated", settlement: null,
   };
   const splitCost = buildProductionReadModel(splitCostState).summary.cost;
   ok(splitCost.actual.state === "unknown" && splitCost.actual.amountMicros === null
     && splitCost.actual.knownAmountMicros === 2_000_000 && splitCost.actual.unknownTasks === 1
     && splitCost.estimatedAmountMicros === 5_000_000 && splitCost.estimatedTasks === 1,
   "read model 将 estimated 与 actual 分栏，估算绝不冒充已发生成本");
+  ok(splitCost.byBasis.billed.amountMicros === 2_000_000 && splitCost.byBasis.billed.tasks === 1
+    && splitCost.byBasis.estimated.amountMicros === 5_000_000 && splitCost.byBasis.estimated.tasks === 1
+    && splitCost.byBasis.reported.tasks === 0 && splitCost.byBasis.tariff.tasks === 0
+    && splitCost.byBasis["reported-converted"].tasks === 0,
+  "read model 按 basis 分列小计，未出现的 basis 保持 0 而不是被并入其他列");
+  const derivedCostState = structuredClone(store.read());
+  derivedCostState.tasks[0]!.cost = {
+    version: 1, state: "known", currency: "USD", amountMicros: 1_200_000, basis: "tariff", settlement: null,
+  };
+  derivedCostState.tasks[1]!.cost = {
+    version: 1,
+    state: "known",
+    currency: "USD",
+    // 2_880_000 CNY micros × 138_000 USD micros/CNY / 1_000_000 = 397_440 USD micros.
+    amountMicros: 397_440,
+    basis: "reported-converted",
+    settlement: {
+      nativeCurrency: "CNY",
+      nativeAmountMicros: 2_880_000,
+      rateMicrosPerUnit: 138_000,
+      rateAsOf: "2026-08-20T00:00:00.000Z",
+      rateSource: "gateway-registry",
+    },
+  };
+  const derivedCost = buildProductionReadModel(derivedCostState).summary.cost;
+  ok(derivedCost.byBasis.tariff.amountMicros === 1_200_000 && derivedCost.byBasis.tariff.tasks === 1
+    && derivedCost.byBasis["reported-converted"].amountMicros === 397_440
+    && derivedCost.byBasis["reported-converted"].tasks === 1
+    && derivedCost.actual.state === "known" && derivedCost.actual.amountMicros === 1_597_440
+    && derivedCost.estimatedTasks === 0,
+  "tariff 与 reported-converted 各占一列，并计入实际发生成本而非估算");
   ok(throwsProduction(() => readProductionState(root, "ws_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "demo"), "不能作为"),
     "production state 与 workspaceId + project 绑定，拒绝跨 workspace 读取");
 

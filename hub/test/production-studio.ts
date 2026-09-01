@@ -120,7 +120,10 @@ function model(workspaceId: string, marker: string, revision: number): Productio
     cancellationConfirmation: null,
     assetCount: 0,
     cost: index === 0
-      ? { version: 1, state: "known" as const, currency: "USD" as const, amountMicros: 2_500_000, basis: "estimated" as const }
+      ? {
+          version: 1, state: "known" as const, currency: "USD" as const, amountMicros: 2_500_000,
+          basis: "estimated" as const, settlement: null,
+        }
       : { version: 1, state: "unknown" as const, reason: "provider-not-reported" as const },
     approval: null,
     statusMessage: index === 0 ? `<img src=x onerror=alert('${marker}')>` : null,
@@ -144,6 +147,13 @@ function model(workspaceId: string, marker: string, revision: number): Productio
         currency: "USD",
         estimatedAmountMicros: 2_500_000,
         estimatedTasks: 1,
+        byBasis: {
+          reported: { amountMicros: 0, tasks: 0 },
+          billed: { amountMicros: 0, tasks: 0 },
+          estimated: { amountMicros: 2_500_000, tasks: 1 },
+          tariff: { amountMicros: 0, tasks: 0 },
+          "reported-converted": { amountMicros: 0, tasks: 0 },
+        },
         actual: {
           state: "unknown",
           amountMicros: null,

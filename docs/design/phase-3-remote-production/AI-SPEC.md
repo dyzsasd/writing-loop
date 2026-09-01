@@ -256,7 +256,14 @@ type ProductionEventReceipt = {
 
 type ProductionCost =
   | { version: 1; state: "known"; currency: "USD"; amountMicros: number;
-      basis: "reported" | "billed" | "estimated" }
+      basis: "reported" | "billed" | "estimated" | "tariff" | "reported-converted";
+      // reported-converted 必须非 null，其余 basis 必须为 null；旧记录缺省该字段按 null 读取。
+      // rateMicrosPerUnit 是 1 单位原币折合的 USD micros（0.138 USD/CNY 记 138_000），方向为
+      // 原币 → USD；解析器强制 amountMicros == round_half_up(nativeAmountMicros × rate / 1_000_000)，
+      // 该等式以 BigInt 计算，两个因子的上界相乘不会溢出。
+      settlement: null | { nativeCurrency: "CNY"; nativeAmountMicros: number;
+                           rateMicrosPerUnit: number; rateAsOf: string;
+                           rateSource: "gateway-registry" } }
   | { version: 1; state: "unknown";
       reason: "not-recorded" | "provider-not-reported" | "in-flight" |
               "unavailable" | "legacy-record" };
@@ -307,8 +314,8 @@ type ProductionState = {
 observation。Phase 3B 把 immutable workflow/model/parameters digest 保存在每 task 的 intent companion，
 把 retry/budget/cancel attempt/最近 observation 保存在非权威 `production-control.v1.json`；两者都不能
 冒充权威任务字段。当前 read
-model 会把 `basis: "estimated"` 与 reported/billed actual 分栏展示；没有 actual 证据时仍为
-`unknown`，不能写 0。QC/approval 独立于生成状态，并绑定被审核的 task/subject revision。
+model 按 basis 分列小计（`summary.cost.byBasis`）：`reported / billed / tariff / reported-converted`
+计入实际发生成本，`estimated` 单列，不并入 actual；没有 actual 证据时仍为 `unknown`，不能写 0。QC/approval 独立于生成状态，并绑定被审核的 task/subject revision。
 `eventReceipts` 绑定 event ID 与 canonical payload digest：完全相同的重放是 no-op，同 ID 不同 payload
 会硬错；`cancellationRequest` 即使取消竞态失败也作为审计事实保留；`cancellationConfirmation` 只在
 `cancelled` 终态出现并投影到 read model。

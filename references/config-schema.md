@@ -692,6 +692,17 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
 - `production-gateway` backend：credentialed HTTPS、固定 safe path、server profile alias；按 project
   构造 scope-bound adapter。
 - direct `comfyui` backend：仅无凭据 literal-loopback HTTP development endpoint；正式远程部署禁止。
+- owner-only `transport`（`backends[]` 的 `production-gateway`、顶层 `gateway`、`stagingProfiles[]` 三处
+  可选，缺省等价于 `tls`，即上述 HTTPS 规则不变）：取 `insecure-private-http` 时 `baseUrl` 必须是
+  `http://` 且 host 为 RFC1918 私网 IPv4（10/8、172.16/12、192.168/16）或 `127.0.0.1` 的字面地址，
+  `credentialEnv` 必须非空；域名、公网 IP、`https:`、IPv6 与 `kind: comfyui` 一律拒绝。该选项以 VPC
+  隔离与防火墙规则替代 TLS，威胁模型与适用条件如下，任一条不成立时必须改回 `transport: "tls"`：
+  - worker 与 gateway 两台主机在同一 VPC，gateway 只绑定该 VPC 的内网 IP，不监听公网地址；
+  - 防火墙不对公网开放 gateway 端口，入站规则只允许来自 writing-loop-sg 内网 IP 的该端口；
+  - GPU VM 按批次启停，非批次期间不存在监听端口；
+  - 明文传输下 bearer 与请求体对同 VPC 内的其他工作负载可见。当前该 VPC 内只有 writing-loop-sg 与
+    按需启动的 GPU VM 两台主机，且均由同一操作者控制；VPC 内出现第三方工作负载时该前提失效；
+  - 不适用于跨 VPC、跨云或经公网的部署。
 - workflow：完整 backend/model/workflow/parameters tuple、显式 projects allowlist、必填
   `inputPolicy: static-pre-staged | scoped-staging` 与 `h3GraphContract`（generic 必须为 `null`）；MiniMax H3
   只能用 `scoped-staging`。H3 contract 固定 native generator、768 short-edge canvas、24fps 对应的

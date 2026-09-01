@@ -19,6 +19,7 @@ import {
   ProductionError,
   type AssetRef,
   type ProductionCost,
+  type ProductionCostBasis,
   type ProductionSubjectRef,
   type ProductionTask,
   type ProductionTaskEvent,
@@ -339,14 +340,16 @@ class FakeAdapter implements ProductionAdapter {
   }
 }
 
+type FakeCostMode = ProductionCostBasis | "unknown";
+
 class FakeIngestor implements ProductionArtifactIngestor {
   calls = 0;
   failuresRemaining: number;
-  costMode: "reported" | "billed" | "estimated" | "unknown";
+  costMode: FakeCostMode;
 
   constructor(
     failuresRemaining = 0,
-    costMode: "reported" | "billed" | "estimated" | "unknown" = "reported",
+    costMode: FakeCostMode = "reported",
   ) {
     this.failuresRemaining = failuresRemaining;
     this.costMode = costMode;
@@ -368,8 +371,18 @@ class FakeIngestor implements ProductionArtifactIngestor {
           version: 1,
           state: "known",
           currency: "USD",
-          amountMicros: 400_000,
+          // 2_880_000 CNY micros × 138_000 USD micros/CNY / 1_000_000 = 397_440 USD micros.
+          amountMicros: this.costMode === "reported-converted" ? 397_440 : 400_000,
           basis: this.costMode,
+          settlement: this.costMode === "reported-converted"
+            ? {
+                nativeCurrency: "CNY",
+                nativeAmountMicros: 2_880_000,
+                rateMicrosPerUnit: 138_000,
+                rateAsOf: "2026-08-20T00:00:00.000Z",
+                rateSource: "gateway-registry",
+              }
+            : null,
         };
     return {
       version: 1,
@@ -952,20 +965,23 @@ try {
       && run.issues.some((row) => row.taskId === "take-b" && row.code === "gate-denied"),
     `${costMode} cost 不释放 exposure，后续同预算 task 不会 dispatch/超支`);
   }
-  const billedA = createTask(root, "cost-billed", "take-a");
-  const billedB = createTask(root, "cost-billed", "take-b");
-  const billedAdapter = new FakeAdapter(["succeeded"]);
-  await runProductionProjectOnce(dependencies(
-    root,
-    "cost-billed",
-    billedAdapter,
-    new FakeIngestor(0, "billed"),
-    [billedA.intent, billedB.intent],
-  ));
-  ok(billedAdapter.submitCalls === 2
-    && new ProductionCoordinatorStore(root, WS, "cost-billed").read().tasks
-      .every((row) => row.budgetReservation?.state === "released"),
-  "billed cost 与 reported 一样完成预算对账并允许容量复用");
+  for (const costMode of ["billed", "tariff", "reported-converted"] as const) {
+    const project = `cost-${costMode}`;
+    const settledA = createTask(root, project, "take-a");
+    const settledB = createTask(root, project, "take-b");
+    const settledAdapter = new FakeAdapter(["succeeded"]);
+    await runProductionProjectOnce(dependencies(
+      root,
+      project,
+      settledAdapter,
+      new FakeIngestor(0, costMode),
+      [settledA.intent, settledB.intent],
+    ));
+    ok(settledAdapter.submitCalls === 2
+      && new ProductionCoordinatorStore(root, WS, project).read().tasks
+        .every((row) => row.budgetReservation?.state === "released"),
+    `${costMode} cost 与 reported 一样完成预算对账并允许容量复用`);
+  }
   const beforeQcSkip = { submits: budgetAdapter.submitCalls, inspects: budgetAdapter.inspectCalls, ingests: budgetIngestor.calls };
   await runProductionProjectOnce(dependencies(
     root, "budget", budgetAdapter, budgetIngestor, [budgetA.intent, budgetB.intent],

@@ -2,6 +2,7 @@
 // No wall clock or backend lookup participates, so identical state bytes always produce identical
 // JSON (including task ordering and a deliberately honest unknown cost summary).
 import {
+  PRODUCTION_COST_BASES,
   PRODUCTION_STATUSES,
   compareProductionAscii,
   isTerminalProductionStatus,
@@ -11,15 +12,23 @@ import {
   type ProductionCancellationConfirmation,
   type ProductionCancellationRequest,
   type ProductionCost,
+  type ProductionCostBasis,
   type ProductionState,
   type ProductionStatus,
 } from "./production-domain.ts";
+
+export type ProductionCostBasisSubtotal = {
+  amountMicros: number;
+  tasks: number;
+};
 
 export type ProductionCostSummary = {
   currency: "USD";
   /** Estimates are planning facts, never evidence that money was actually incurred. */
   estimatedAmountMicros: number;
   estimatedTasks: number;
+  /** Known amounts split by how each was determined; bases never collapse into one total. */
+  byBasis: Record<ProductionCostBasis, ProductionCostBasisSubtotal>;
   actual: {
     state: "known" | "unknown";
     /** Null means a complete actual total cannot be stated; knownAmountMicros is only a subtotal. */
@@ -97,13 +106,28 @@ function emptyStatusCounts(): Record<ProductionStatus, number> {
   };
 }
 
+function emptyBasisSubtotals(): Record<ProductionCostBasis, ProductionCostBasisSubtotal> {
+  return {
+    reported: { amountMicros: 0, tasks: 0 },
+    billed: { amountMicros: 0, tasks: 0 },
+    estimated: { amountMicros: 0, tasks: 0 },
+    tariff: { amountMicros: 0, tasks: 0 },
+    "reported-converted": { amountMicros: 0, tasks: 0 },
+  };
+}
+
 function costSummary(state: ProductionState): ProductionCostSummary {
   let knownActualAmountMicros = 0;
   let unknownActualTasks = 0;
   let estimatedAmountMicros = 0;
   let estimatedTasks = 0;
   let onlyNotRecorded = true;
+  const byBasis = emptyBasisSubtotals();
   for (const task of state.tasks) {
+    if (task.cost.state === "known") {
+      byBasis[task.cost.basis].amountMicros += task.cost.amountMicros;
+      byBasis[task.cost.basis].tasks++;
+    }
     if (task.cost.state === "known" && task.cost.basis === "estimated") {
       estimatedAmountMicros += task.cost.amountMicros;
       estimatedTasks++;
@@ -117,7 +141,7 @@ function costSummary(state: ProductionState): ProductionCostSummary {
       if (task.cost.reason !== "not-recorded") onlyNotRecorded = false;
     }
   }
-  const base = { currency: "USD" as const, estimatedAmountMicros, estimatedTasks };
+  const base = { currency: "USD" as const, estimatedAmountMicros, estimatedTasks, byBasis };
   if (state.tasks.length > 0 && unknownActualTasks === 0) {
     return {
       ...base,
@@ -184,6 +208,10 @@ export function buildProductionReadModel(value: ProductionState): ProductionRead
   if (Object.keys(byStatus).length !== PRODUCTION_STATUSES.length) {
     throw new Error("production read model status table is out of sync with the v1 domain");
   }
+  const cost = costSummary(state);
+  if (Object.keys(cost.byBasis).length !== PRODUCTION_COST_BASES.length) {
+    throw new Error("production read model cost basis table is out of sync with the v1 domain");
+  }
   const tasks = state.tasks.map(taskView).sort((left, right) =>
     compareProductionAscii(right.updatedAt, left.updatedAt) || compareProductionAscii(left.id, right.id));
   return {
@@ -198,7 +226,7 @@ export function buildProductionReadModel(value: ProductionState): ProductionRead
       terminal,
       needsAttention,
       byStatus,
-      cost: costSummary(state),
+      cost,
     },
     tasks,
   };
