@@ -712,6 +712,29 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
   `LoadImage.image` output 0；consumer 必须是 contract 中真实 H3 generator 的 `first_frame`、
   `last_frame` 或 `ref_images.ref_image_N`。source→consumer exact edge、无 fanout、无 decoy node 与 provider
   key 唯一性都在 graph verifier 中证明；未知/漂移 profile 在预算与 provider I/O 前 fail-closed。
+- intent license evidence 的可选 `obligations`（`{attribution, revenueThresholdUsd, noModelImprovement}`，
+  三字段一旦出现就必须齐全）：许可文本附加的持续义务，是编译器与 intent gate 共同的唯一来源，
+  execution profile 不复制该字段。MiniMax H3 Community License IV.1 / IV.2 / V.3 对应
+  `{"attribution": "MiniMax H3", "revenueThresholdUsd": 20000000, "noModelImprovement": true}`。缺省与显式
+  `null` 都规范化为「不带该键」，因此不带义务的既有 intent 的 canonical JSON 与 `idempotencyKey` 逐字节不变。
+- intent gate context 的四项策略字段（来自项目配置与后端 capability，缺省即「未声明」）：
+  - `backendProcessingRegions` 与 `allowedProcessingRegions`：数据实际被处理的物理位置，取 ISO-3166
+    alpha-2 国家/地区代码。集合别名 `EU`、非标准码 `UK` 与 `WORLDWIDE` 一律拒绝——欧盟须逐个写成员国
+    代码（`FR`、`DE`……），英国写 `GB`。判定：项目声明了 `allowedProcessingRegions` 而后端地域未声明
+    → deny；后端任一地域不在允许集合内 → deny；项目未声明 `allowedProcessingRegions` 时 seedance / veo
+    家族 deny（云后端在 provider 自有地域处理素材，不能默许），`minimax-h3` / `generic` 在 runtime
+    `projects[]` 供给该字段前暂放行。deny 码为 `processing-region-not-allowed`。
+  - `licenseCompliance{annualRevenueUsdBelow, attributionSurfaces[]}`：项目对许可义务的声明。
+    `obligations.revenueThresholdUsd` 非 null 而项目未声明年收入低于该阈值、且没有完整的
+    written-license evidence（`basis: written-license` 且 status verified、`licenseSha256`、`evidence`、
+    `issuedBy`、`issuedAt` 齐全）时 deny `license-obligation-unmet`；`obligations.attribution` 非 null 而
+    `attributionSurfaces` 为空时同样 deny。义务判据在编译器与 gate 是同一个纯函数，两侧结论必然一致。
+  - `realFaceInputs`（`undeclared | present | absent`）：汇总 ShotRequest 的 `containsRealFace`
+    （intent 的 `inputs[]` 只有 AssetRef，不携带该标记）。Seedance 2.x 拒绝真人人脸参考，未声明
+    `absent` 即 `provider-likeness-policy` deny。
+- `obligations.noModelImprovement` 只在编译期按项目声明的 `usesOutputToImproveModels` 判定，gate 不判定：
+  输出是否被用于改进其他模型是产物的后续使用方式，dispatch 前拿不到可取证的事实（AI-SPEC 使用约束）。
+  该字段是 `ShotCompilePolicy.project` 的独立字段，不在 `licenseCompliance` 内。
 - canonical workflow identity：intent/config 的 `workflowSha256` 钉住 immutable template。scoped stage 返回
   exact execution + ordered bindings 的 `VerifiedStageReceipt`；trusted materializer 只替换上述 allowlisted
   source literal，产生 `boundWorkflowSha256`。worker 发送 bound digest，job Gateway 从 server-owned template

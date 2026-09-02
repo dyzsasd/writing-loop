@@ -21,8 +21,13 @@ import {
 } from "./production-domain.ts";
 import {
   MAX_PRODUCTION_INTENT_INPUTS,
+  hasExplicitWrittenLicense,
+  licenseObligationViolations,
   parseProductionIntentDraft,
+  parseProductionLicenseCompliance,
+  parseProductionLicenseEvidence,
   type H3Variant,
+  type ProductionLicenseCompliance,
   type ProductionIntentBudget,
   type ProductionIntentDraft,
   type ProductionLicenseEvidence,
@@ -410,12 +415,6 @@ export type ShotCompileCapability = {
 };
 
 // —— execution profile（gateway server-owned registry 的只读快照形态，§4.2） ——
-export type ShotLicenseObligations = {
-  attribution: string | null;
-  revenueThresholdUsd: number | null;
-  noModelImprovement: boolean;
-};
-
 type ShotExecutionProfileBase = {
   version: 1;
   kind: "writing-loop/execution-profile";
@@ -428,7 +427,6 @@ type ShotExecutionProfileBase = {
   resolution: string;
   aspectRatio: string;
   generateAudio: boolean;
-  licenseObligations: ShotLicenseObligations | null;
 };
 
 export type ShotExecutionProfile =
@@ -462,11 +460,13 @@ export type H3ExecutionProfile = Extract<ShotExecutionProfile, { modelFamily: "m
 
 export type ShotCompileProjectPolicy = {
   allowedProcessingRegions: readonly string[];
-  licenseCompliance: {
-    attribution: string | null;
-    annualRevenueUsd: number | null;
-    usesOutputToImproveModels: boolean;
-  };
+  /** 与 intent gate context 的 `licenseCompliance` 同一类型、同一判据（production-intent.ts）。 */
+  licenseCompliance: ProductionLicenseCompliance;
+  /**
+   * 输出是否会用于改进其他模型。该条款只在编译期判定，gate 不判定（§4.1、AI-SPEC 使用约束）：它描述的是
+   * 产物的后续使用方式，dispatch 前拿不到可取证的事实，只能按项目声明检查。
+   */
+  usesOutputToImproveModels: boolean;
 };
 
 export type ApprovedCandidateRecord = {
@@ -1199,8 +1199,7 @@ export function parseShotExecutionProfile(
   const row = requireRecord(value, subject);
   const common = [
     "version", "kind", "profileId", "backendInstanceId", "workflowSha256", "modelSha256",
-    "parametersSha256", "resolution", "aspectRatio", "generateAudio", "licenseObligations",
-    "modelFamily", "operation",
+    "parametersSha256", "resolution", "aspectRatio", "generateAudio", "modelFamily", "operation",
   ] as const;
   const family = requireEnum(row.modelFamily, `${subject}.modelFamily`, SHOT_MODEL_FAMILIES);
   const extras: Readonly<Record<ShotModelFamily, readonly string[]>> = {
@@ -1213,18 +1212,6 @@ export function parseShotExecutionProfile(
   if (row.kind !== "writing-loop/execution-profile") {
     fail(`${subject}.kind`, "必须是 writing-loop/execution-profile");
   }
-  let obligations: ShotLicenseObligations | null = null;
-  if (row.licenseObligations !== null) {
-    const obligationRow = requireRecord(row.licenseObligations, `${subject}.licenseObligations`);
-    exactKeys(obligationRow, ["attribution", "revenueThresholdUsd", "noModelImprovement"], `${subject}.licenseObligations`);
-    obligations = {
-      attribution: nullableText(obligationRow.attribution, `${subject}.licenseObligations.attribution`, 128),
-      revenueThresholdUsd: obligationRow.revenueThresholdUsd === null
-        ? null
-        : requireFiniteNumber(obligationRow.revenueThresholdUsd, `${subject}.licenseObligations.revenueThresholdUsd`, 0, Number.MAX_SAFE_INTEGER),
-      noModelImprovement: requireBoolean(obligationRow.noModelImprovement, `${subject}.licenseObligations.noModelImprovement`),
-    };
-  }
   const base = {
     version: 1 as const,
     kind: "writing-loop/execution-profile" as const,
@@ -1236,7 +1223,6 @@ export function parseShotExecutionProfile(
     resolution: requireText(row.resolution, `${subject}.resolution`, 32),
     aspectRatio: requireText(row.aspectRatio, `${subject}.aspectRatio`, 32),
     generateAudio: requireBoolean(row.generateAudio, `${subject}.generateAudio`),
-    licenseObligations: obligations,
   };
   if (family === "minimax-h3") {
     if (row.operation !== "comfyui-workflow" && row.operation !== "minimax-h3") {
@@ -1293,22 +1279,23 @@ export function parseShotCompilePolicy(value: unknown, subject = "ShotCompilePol
   if (!CAS_AUTHORITY_RE.test(casAuthority)) fail(`${subject}.casAuthority`, "必须是小写 CAS authority（如 wl-sg）");
 
   const projectRow = requireRecord(row.project, `${subject}.project`);
-  exactKeys(projectRow, ["allowedProcessingRegions", "licenseCompliance"], `${subject}.project`);
+  exactKeys(projectRow, [
+    "allowedProcessingRegions", "licenseCompliance", "usesOutputToImproveModels",
+  ], `${subject}.project`);
   const regions = requireArray(projectRow.allowedProcessingRegions, `${subject}.project.allowedProcessingRegions`, 64)
     .map((entry, index) => {
       const label = `${subject}.project.allowedProcessingRegions[${index}]`;
       if (typeof entry !== "string" || !TERRITORY_RE.test(entry)) fail(label, "必须是大写二位地域码");
       return entry as string;
     });
-  const complianceRow = requireRecord(projectRow.licenseCompliance, `${subject}.project.licenseCompliance`);
-  exactKeys(complianceRow, ["attribution", "annualRevenueUsd", "usesOutputToImproveModels"], `${subject}.project.licenseCompliance`);
 
   const intentRow = requireRecord(row.intent, `${subject}.intent`);
   exactKeys(intentRow, [
     "taskId", "createdAt", "useTerritories", "budget", "rights", "moderation", "license",
   ], `${subject}.intent`);
-  // budget / rights / moderation / license 的深校验由 parseProductionIntentDraft 承担（同一套 v1 语义，
-  // 不在此复制第二份判据）；这里只固定形状与 exactKeys。
+  // budget / rights / moderation 的深校验由 parseProductionIntentDraft 承担（同一套 v1 语义，
+  // 不在此复制第二份判据）；这里只固定形状与 exactKeys。license 是例外：编译期就要读它的 obligations
+  // 判定 license_obligation_unmet，因此直接调用 production-intent.ts 的同一个解析器，而不是第二份判据。
   const intent = {
     taskId: requireId(intentRow.taskId, `${subject}.intent.taskId`),
     createdAt: requireText(intentRow.createdAt, `${subject}.intent.createdAt`, 64),
@@ -1317,7 +1304,7 @@ export function parseShotCompilePolicy(value: unknown, subject = "ShotCompilePol
     budget: requireRecord(intentRow.budget, `${subject}.intent.budget`) as unknown as ShotCompilePolicy["intent"]["budget"],
     rights: requireRecord(intentRow.rights, `${subject}.intent.rights`) as unknown as ShotCompilePolicy["intent"]["rights"],
     moderation: requireRecord(intentRow.moderation, `${subject}.intent.moderation`) as unknown as ShotCompilePolicy["intent"]["moderation"],
-    license: requireRecord(intentRow.license, `${subject}.intent.license`) as unknown as ShotCompilePolicy["intent"]["license"],
+    license: parseProductionLicenseEvidence(intentRow.license, `${subject}.intent.license`),
   };
 
   return {
@@ -1328,16 +1315,14 @@ export function parseShotCompilePolicy(value: unknown, subject = "ShotCompilePol
     execution: parseShotExecutionProfile(row.execution, `${subject}.execution`),
     project: {
       allowedProcessingRegions: regions,
-      licenseCompliance: {
-        attribution: nullableText(complianceRow.attribution, `${subject}.project.licenseCompliance.attribution`, 128),
-        annualRevenueUsd: complianceRow.annualRevenueUsd === null
-          ? null
-          : requireFiniteNumber(complianceRow.annualRevenueUsd, `${subject}.project.licenseCompliance.annualRevenueUsd`, 0, Number.MAX_SAFE_INTEGER),
-        usesOutputToImproveModels: requireBoolean(
-          complianceRow.usesOutputToImproveModels,
-          `${subject}.project.licenseCompliance.usesOutputToImproveModels`,
-        ),
-      },
+      licenseCompliance: parseProductionLicenseCompliance(
+        projectRow.licenseCompliance,
+        `${subject}.project.licenseCompliance`,
+      ),
+      usesOutputToImproveModels: requireBoolean(
+        projectRow.usesOutputToImproveModels,
+        `${subject}.project.usesOutputToImproveModels`,
+      ),
     },
     approvedCandidates: parseRecord(row.approvedCandidates, `${subject}.approvedCandidates`, (entry, label) => {
       const candidate = requireRecord(entry, label);
@@ -1406,32 +1391,21 @@ export function compileShotRequest(
   if (policy.intent.license.status === "blocked") {
     sink.error("license_blocked", "ProductionIntentDraft.license.status", "许可证据为 blocked，禁止编译该镜头");
   }
-  const obligations = profile.licenseObligations;
-  if (obligations !== null) {
-    const compliance = policy.project.licenseCompliance;
-    if (obligations.attribution !== null && compliance.attribution !== obligations.attribution) {
-      sink.error(
-        "license_obligation_unmet",
-        "project.licenseCompliance.attribution",
-        `许可要求署名「${obligations.attribution}」，项目声明为 ${JSON.stringify(compliance.attribution)}`,
-      );
-    }
-    if (obligations.revenueThresholdUsd !== null
-      && compliance.annualRevenueUsd !== null
-      && compliance.annualRevenueUsd >= obligations.revenueThresholdUsd) {
-      sink.error(
-        "license_obligation_unmet",
-        "project.licenseCompliance.annualRevenueUsd",
-        `年收入 ${compliance.annualRevenueUsd} ≥ 阈值 ${obligations.revenueThresholdUsd}，须先取得书面授权`,
-      );
-    }
-    if (obligations.noModelImprovement && compliance.usesOutputToImproveModels) {
-      sink.error(
-        "license_obligation_unmet",
-        "project.licenseCompliance.usesOutputToImproveModels",
-        "许可禁止以输出改进其他模型，项目声明为 true",
-      );
-    }
+  // 义务的唯一来源是 license evidence，判据是 production-intent.ts 的 licenseObligationViolations——
+  // 编译器与 intent gate 对同一输入必然给出同一结论（§4.2、§4.7）。
+  const license = policy.intent.license;
+  for (const violation of licenseObligationViolations(license, policy.project.licenseCompliance, {
+    explicitWrittenLicense: hasExplicitWrittenLicense(license),
+  })) {
+    sink.error("license_obligation_unmet", `project.licenseCompliance.${violation.field}`, violation.message);
+  }
+  // noModelImprovement 是编译期专属条款（§4.1、AI-SPEC 使用约束），gate 不判定。
+  if ((license.obligations?.noModelImprovement ?? false) && policy.project.usesOutputToImproveModels) {
+    sink.error(
+      "license_obligation_unmet",
+      "project.usesOutputToImproveModels",
+      "许可禁止以输出改进其他模型，项目声明为 true",
+    );
   }
 
   // 画幅 / 分辨率 / 输出意图（§4.1）

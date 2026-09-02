@@ -27,6 +27,8 @@ import {
   type AssetRef,
   type ProductionSubjectRef,
 } from "./production-domain.ts";
+// 只在 parseInputs 内取值：production-shot-request.ts 反向依赖本模块，模块顶层引用会落进 TDZ。
+import { SHOT_REQUEST_MEDIA_TYPE } from "./production-shot-request.ts";
 import { assertProjectKey } from "./workspace.ts";
 
 export const PRODUCTION_INTENT_SCHEMA_VERSION = 1 as const;
@@ -34,16 +36,105 @@ export const PRODUCTION_INTENT_DIRECTORY = "production-intents.v1";
 export const MAX_PRODUCTION_INTENT_BYTES = 256 * 1024;
 export const MAX_PRODUCTION_INTENT_INPUTS = 32;
 export const MAX_PRODUCTION_INTENT_TERRITORIES = 64;
+export const MAX_PRODUCTION_INTENT_ATTRIBUTION_SURFACES = 32;
 
-export const PRODUCTION_INTENT_OPERATIONS = ["comfyui-workflow", "minimax-h3"] as const;
+export const PRODUCTION_INTENT_OPERATIONS = [
+  "comfyui-workflow", "minimax-h3", "ark-video-task", "vertex-veo-lro",
+] as const;
 export type ProductionIntentOperation = typeof PRODUCTION_INTENT_OPERATIONS[number];
 
 /** Transport and model identity are separate: H3 may execute through a ComfyUI workflow. */
-export const PRODUCTION_MODEL_FAMILIES = ["generic", "minimax-h3"] as const;
+export const PRODUCTION_MODEL_FAMILIES = ["generic", "minimax-h3", "seedance", "veo"] as const;
 export type ProductionModelFamily = typeof PRODUCTION_MODEL_FAMILIES[number];
 
 export const H3_VARIANTS = ["fl2va", "ref2va"] as const;
 export type H3Variant = typeof H3_VARIANTS[number];
+
+/** 火山方舟用 `doubao-` 前缀，BytePlus ModelArk 用 `dreamina-` 前缀（DESIGN §5.1）。 */
+export const SEEDANCE_MODEL_IDS = [
+  "doubao-seedance-2-0-260128",
+  "doubao-seedance-2-0-fast-260128",
+  "doubao-seedance-2-0-mini-260615",
+  "doubao-seedance-2-5-260628",
+  "dreamina-seedance-2-0-260128",
+  "dreamina-seedance-2-0-fast-260128",
+  "dreamina-seedance-2-0-mini-260615",
+  "dreamina-seedance-2-5-260628",
+] as const;
+export type SeedanceModelId = typeof SEEDANCE_MODEL_IDS[number];
+
+export const SEEDANCE_PROVIDERS = ["volcengine-ark", "byteplus-modelark"] as const;
+export type SeedanceProvider = typeof SEEDANCE_PROVIDERS[number];
+
+/** 画幅枚举以 ShotRequest 为准；4:3 / 3:4 / adaptive 不在 v1 支持（§4.2）。 */
+export const SEEDANCE_ASPECT_RATIOS = ["16:9", "1:1", "9:16", "21:9"] as const;
+export type SeedanceAspectRatio = typeof SEEDANCE_ASPECT_RATIOS[number];
+
+export const SEEDANCE_RESOLUTIONS = ["480p", "720p", "1080p", "4k"] as const;
+export type SeedanceResolution = typeof SEEDANCE_RESOLUTIONS[number];
+
+/** `execution_expires_after` 的 provider 区间（§5.1），按批次规模配置。 */
+export const SEEDANCE_EXECUTION_EXPIRY_SECONDS = { minimum: 3_600, maximum: 259_200 } as const;
+
+export const VEO_MODEL_IDS = [
+  "veo-3.1-generate-001", "veo-3.1-fast-generate-001", "veo-3.1-lite-generate-001",
+] as const;
+export type VeoModelId = typeof VEO_MODEL_IDS[number];
+
+export const VEO_ASPECT_RATIOS = ["16:9", "9:16"] as const;
+export type VeoAspectRatio = typeof VEO_ASPECT_RATIOS[number];
+
+export const VEO_RESOLUTIONS = ["720p", "1080p", "4k"] as const;
+export type VeoResolution = typeof VEO_RESOLUTIONS[number];
+
+export const VEO_IO_MODES = ["inline-base64", "gcs"] as const;
+export type VeoIoMode = typeof VEO_IO_MODES[number];
+
+/** §4.2：fast / mini 只允许 480p / 720p；4k 只允许 `*-seedance-2-0-260128`。 */
+const SEEDANCE_RESOLUTIONS_BY_MODEL_ID: Readonly<Record<SeedanceModelId, readonly SeedanceResolution[]>> = {
+  "doubao-seedance-2-0-260128": ["480p", "720p", "1080p", "4k"],
+  "doubao-seedance-2-0-fast-260128": ["480p", "720p"],
+  "doubao-seedance-2-0-mini-260615": ["480p", "720p"],
+  "doubao-seedance-2-5-260628": ["480p", "720p", "1080p"],
+  "dreamina-seedance-2-0-260128": ["480p", "720p", "1080p", "4k"],
+  "dreamina-seedance-2-0-fast-260128": ["480p", "720p"],
+  "dreamina-seedance-2-0-mini-260615": ["480p", "720p"],
+  "dreamina-seedance-2-5-260628": ["480p", "720p", "1080p"],
+};
+
+/** §4.2：lite 与 fast 只允许 720p / 1080p（fast 的 4k 在探针前拒绝）；generate-001 允许 4k。 */
+const VEO_RESOLUTIONS_BY_MODEL_ID: Readonly<Record<VeoModelId, readonly VeoResolution[]>> = {
+  "veo-3.1-generate-001": ["720p", "1080p", "4k"],
+  "veo-3.1-fast-generate-001": ["720p", "1080p"],
+  "veo-3.1-lite-generate-001": ["720p", "1080p"],
+};
+
+/** §5.1：火山方舟的 modelId 用 `doubao-` 前缀、BytePlus ModelArk 用 `dreamina-`，两者不得交叉下发。 */
+const SEEDANCE_MODEL_ID_PROVIDER: Readonly<Record<SeedanceModelId, SeedanceProvider>> = {
+  "doubao-seedance-2-0-260128": "volcengine-ark",
+  "doubao-seedance-2-0-fast-260128": "volcengine-ark",
+  "doubao-seedance-2-0-mini-260615": "volcengine-ark",
+  "doubao-seedance-2-5-260628": "volcengine-ark",
+  "dreamina-seedance-2-0-260128": "byteplus-modelark",
+  "dreamina-seedance-2-0-fast-260128": "byteplus-modelark",
+  "dreamina-seedance-2-0-mini-260615": "byteplus-modelark",
+  "dreamina-seedance-2-5-260628": "byteplus-modelark",
+};
+
+/**
+ * §5.1：Seedance 2.x 拒绝真人人脸参考，gate `provider-likeness-policy` 据此判定。逐 modelId 列表而不是
+ * 版本号正则——新 modelId 进枚举时类型强制在这里补齐结论，不会被前缀匹配默默归类。
+ */
+const SEEDANCE_LIKENESS_POLICY: Readonly<Record<SeedanceModelId, "likeness-restricted" | "unrestricted">> = {
+  "doubao-seedance-2-0-260128": "likeness-restricted",
+  "doubao-seedance-2-0-fast-260128": "likeness-restricted",
+  "doubao-seedance-2-0-mini-260615": "likeness-restricted",
+  "doubao-seedance-2-5-260628": "likeness-restricted",
+  "dreamina-seedance-2-0-260128": "likeness-restricted",
+  "dreamina-seedance-2-0-fast-260128": "likeness-restricted",
+  "dreamina-seedance-2-0-mini-260615": "likeness-restricted",
+  "dreamina-seedance-2-5-260628": "likeness-restricted",
+};
 
 /** H3 v1 intentionally exposes only the output shapes the coordinator can validate end-to-end. */
 export const H3_ASPECT_RATIOS = ["9:16", "16:9", "1:1"] as const;
@@ -80,6 +171,31 @@ export type ProductionIntentExecution =
       durationSeconds: number;
       shortEdge: 768;
       aspectRatio: H3AspectRatio;
+    }
+  // 云家族的字段全部是 execution profile 的静态值；逐镜变量（模式、时长、seed、输入 slot、prompt）
+  // 一律由 inputs[0] 的 ShotRequest 决定（§4.2 修正 F1），因此这两个分支没有 durationSeconds。
+  | ProductionExecutionBase & {
+      operation: "ark-video-task";
+      modelFamily: "seedance";
+      provider: SeedanceProvider;
+      modelId: SeedanceModelId;
+      resolution: SeedanceResolution;
+      aspectRatio: SeedanceAspectRatio;
+      generateAudio: boolean;
+      watermark: false;
+      returnLastFrame: true;
+      executionExpiresAfterSeconds: number;
+    }
+  | ProductionExecutionBase & {
+      operation: "vertex-veo-lro";
+      modelFamily: "veo";
+      modelId: VeoModelId;
+      location: "us-central1";
+      resolution: VeoResolution;
+      aspectRatio: VeoAspectRatio;
+      generateAudio: boolean;
+      sampleCount: 1;
+      ioMode: VeoIoMode;
     };
 
 export type ProductionIntentBudget = {
@@ -104,6 +220,30 @@ export type ProductionModerationEvidence = {
   evidence: AssetRef | null;
 };
 
+/**
+ * 许可文本附加的持续义务（§4.2）。MiniMax H3 Community License IV.1 / IV.2 / V.3 对应
+ * `{attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true}`。
+ */
+export type ProductionLicenseObligations = {
+  /** 必须署名的名称；null = 无署名义务。 */
+  attribution: string | null;
+  /** 许可只对年收入低于该 USD 阈值的使用者生效；null = 无收入门槛。 */
+  revenueThresholdUsd: number | null;
+  /** 输出不得用于改进其他模型。 */
+  noModelImprovement: boolean;
+};
+
+/**
+ * 项目侧对许可义务的声明（runtime `projects[].licenseCompliance`，§4.7）。intent gate 与
+ * `compileShotRequest` 共用同一形状与同一判据（`licenseObligationViolations`），不存在第二份定义。
+ */
+export type ProductionLicenseCompliance = {
+  /** 项目声明的年收入上界（USD）；null = 未声明。 */
+  annualRevenueUsdBelow: number | null;
+  /** 已落实署名的展示面（发布文案、片尾……）；空数组 = 未落实。 */
+  attributionSurfaces: string[];
+};
+
 export type ProductionLicenseEvidence = {
   version: 1;
   status: "verified" | "unknown" | "blocked";
@@ -114,6 +254,11 @@ export type ProductionLicenseEvidence = {
   issuedBy: string | null;
   issuedAt: string | null;
   expiresAt: string | null;
+  /**
+   * 缺省与显式 null 一律规范化为「不带该键」——旧 intent JSON 的 canonical 形态与 idempotencyKey
+   * 因此逐字节不变（`ProductionLicenseObligations`，gate 见 §4.7）。
+   */
+  obligations?: ProductionLicenseObligations | null;
 };
 
 export type ProductionIntentDraft = {
@@ -135,16 +280,33 @@ export type ProductionDispatchIntent = ProductionIntentDraft & {
   idempotencyKey: string;
 };
 
+/**
+ * 本次 dispatch 的输入是否含真人人脸。intent `inputs[]` 只有 AssetRef，不携带 ShotRequest 的
+ * `containsRealFace`，因此该结论由 gate context 的供给方汇总后声明；`undeclared` 表示未证明不含。
+ */
+export const PRODUCTION_INTENT_REAL_FACE_DECLARATIONS = ["undeclared", "present", "absent"] as const;
+export type ProductionIntentRealFaceDeclaration = typeof PRODUCTION_INTENT_REAL_FACE_DECLARATIONS[number];
+
 export type ProductionIntentGateContext = {
   version: 1;
   evaluatedAt: string;
   deploymentTerritories: string[];
   availableBudgetMicros: number;
+  /**
+   * 以下四项来自 runtime `projects[]` 与后端 capability（§4.7）。runtime config 尚未持有这些字段
+   * （§8.6 的 `production-runtime-config.ts` 行），因此解析层允许缺省：缺省即「未声明」，
+   * 其判定结果与 §4.7 中的空集合形态一致（region 无可比对项，obligations 与真人人脸 deny）。
+   */
+  backendProcessingRegions?: string[];
+  allowedProcessingRegions?: string[];
+  licenseCompliance?: ProductionLicenseCompliance;
+  realFaceInputs?: ProductionIntentRealFaceDeclaration;
 };
 
 export const PRODUCTION_INTENT_GATE_CODES = [
   "budget-maximum-exceeded",
   "budget-available-exceeded",
+  "processing-region-not-allowed",
   "rights-not-cleared",
   "rights-evidence-missing",
   "rights-territory-missing",
@@ -157,7 +319,9 @@ export const PRODUCTION_INTENT_GATE_CODES = [
   "license-territory-missing",
   "license-expired",
   "license-issued-in-future",
+  "license-obligation-unmet",
   "h3-written-license-required",
+  "provider-likeness-policy",
 ] as const;
 
 export type ProductionIntentGateCode = typeof PRODUCTION_INTENT_GATE_CODES[number];
@@ -188,6 +352,9 @@ export type EnqueueProductionIntentResult = {
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TERRITORY = /^(?:[A-Z]{2}|WORLDWIDE)$/;
+const PROCESSING_REGION = /^[A-Z]{2}$/;
+/** 形如 alpha-2 但不指向单一处理地：EU 是成员国集合，UK 不是 ISO-3166 代码（GB 才是）。 */
+const NON_ISO_PROCESSING_REGIONS = new Set(["EU", "UK"]);
 const RIGHTS_STATUSES = new Set(["cleared", "unknown", "expired", "blocked"]);
 const MODERATION_STATUSES = new Set(["passed", "not-reviewed", "failed"]);
 const LICENSE_STATUSES = new Set(["verified", "unknown", "blocked"]);
@@ -209,11 +376,29 @@ function requireRecord(value: unknown, subject: string): Record<string, unknown>
   return value;
 }
 
-function exactKeys(value: Record<string, unknown>, allowed: readonly string[], subject: string): void {
-  const extras = Object.keys(value).filter((key) => !allowed.includes(key));
+function exactKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  subject: string,
+  /** 可缺省的键；省略它们必须保持既有解析结果逐字节不变。 */
+  optional: readonly string[] = [],
+): void {
+  const extras = Object.keys(value).filter((key) => !allowed.includes(key) && !optional.includes(key));
   if (extras.length) fail(subject, `含不支持字段：${extras.join("、")}（v1 schema 严格拒绝未知字段）`);
   const missing = allowed.filter((key) => !Object.prototype.hasOwnProperty.call(value, key));
   if (missing.length) fail(subject, `缺少字段：${missing.join("、")}`);
+}
+
+function requireEnum<T extends string>(value: unknown, subject: string, allowed: readonly T[]): T {
+  if (typeof value !== "string" || !(allowed as readonly string[]).includes(value)) {
+    fail(subject, `必须是 ${allowed.join("、")} 之一`);
+  }
+  return value as T;
+}
+
+function requireBoolean(value: unknown, subject: string): boolean {
+  if (typeof value !== "boolean") fail(subject, "必须是布尔值");
+  return value;
 }
 
 function requireVersion(value: unknown, subject: string): void {
@@ -291,13 +476,40 @@ function parseTerritories(value: unknown, subject: string, allowEmpty = false): 
   return [...parsed].sort();
 }
 
-function parseInputs(value: unknown, subject: string): AssetRef[] {
+/**
+ * 逐镜变量全部由 `inputs[0]` 的 ShotRequest 决定，因此云家族的 `inputs[0]` 必须是 ShotRequest
+ * （§4.2、§8.6）。H3 在 graph 契约 v2（Phase 1）落地前保持现状——契约 v1 的 stage 绑定没有 index 0 的
+ * `shot-request` slot；届时把该家族改为 true 即可。
+ */
+const FAMILIES_REQUIRING_SHOT_REQUEST_INPUT: Readonly<Record<ProductionModelFamily, boolean>> = {
+  generic: false,
+  "minimax-h3": false,
+  seedance: true,
+  veo: true,
+};
+
+/**
+ * 云后端在 provider 自有地域处理素材，项目必须显式声明允许地域后才能 dispatch；本地 ComfyUI（H3 与
+ * generic）在 runtime `projects[]` 供给 `allowedProcessingRegions` 前暂不强制（§4.7）。该表是那次改动的
+ * 唯一改动点：四个值一起置 true 即为全家族 deny。
+ */
+const FAMILIES_REQUIRING_PROCESSING_REGIONS: Readonly<Record<ProductionModelFamily, boolean>> = {
+  generic: false,
+  "minimax-h3": false,
+  seedance: true,
+  veo: true,
+};
+
+function parseInputs(value: unknown, subject: string, modelFamily: ProductionModelFamily): AssetRef[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PRODUCTION_INTENT_INPUTS) {
     fail(subject, `必须是 1–${MAX_PRODUCTION_INTENT_INPUTS} 项 AssetRef 数组`);
   }
   const inputs = value.map((entry, index) => parseAssetRef(entry, `${subject}[${index}]`));
   const identities = inputs.map((entry) => `${entry.uri}\0${entry.sha256}`);
   if (new Set(identities).size !== identities.length) fail(subject, "不得包含重复 AssetRef");
+  if (FAMILIES_REQUIRING_SHOT_REQUEST_INPUT[modelFamily] && inputs[0].mediaType !== SHOT_REQUEST_MEDIA_TYPE) {
+    fail(`${subject}[0]`, `${modelFamily} 家族的 inputs[0] 必须是 ShotRequest（mediaType ${SHOT_REQUEST_MEDIA_TYPE}）`);
+  }
   return inputs;
 }
 
@@ -353,7 +565,86 @@ export function parseProductionIntentExecution(
       aspectRatio: row.aspectRatio as H3AspectRatio,
     };
   }
-  fail(`${subject}.modelFamily`, "必须是 generic 或 minimax-h3");
+  if (row.modelFamily === "seedance") {
+    exactKeys(row, [
+      ...common, "provider", "modelId", "resolution", "aspectRatio", "generateAudio", "watermark",
+      "returnLastFrame", "executionExpiresAfterSeconds",
+    ], subject);
+    requireVersion(row.version, subject);
+    if (row.operation !== "ark-video-task") {
+      fail(`${subject}.operation`, "seedance transport 必须是 ark-video-task");
+    }
+    const modelId = requireEnum(row.modelId, `${subject}.modelId`, SEEDANCE_MODEL_IDS);
+    const resolution = requireEnum(row.resolution, `${subject}.resolution`, SEEDANCE_RESOLUTIONS);
+    const allowedResolutions = SEEDANCE_RESOLUTIONS_BY_MODEL_ID[modelId];
+    if (!allowedResolutions.includes(resolution)) {
+      fail(`${subject}.resolution`, `${modelId} 只支持 ${allowedResolutions.join("、")}`);
+    }
+    const provider = requireEnum(row.provider, `${subject}.provider`, SEEDANCE_PROVIDERS);
+    const modelIdProvider = SEEDANCE_MODEL_ID_PROVIDER[modelId];
+    if (provider !== modelIdProvider) {
+      fail(`${subject}.provider`, `${modelId} 只在 ${modelIdProvider} 下发（modelId 前缀与 endpoint 必须一致）`);
+    }
+    if (row.watermark !== false) fail(`${subject}.watermark`, "必须固定为 false");
+    if (row.returnLastFrame !== true) fail(`${subject}.returnLastFrame`, "必须固定为 true");
+    return {
+      version: 1,
+      operation: "ark-video-task",
+      modelFamily: "seedance",
+      backendInstanceId: requireOpaque(row.backendInstanceId, `${subject}.backendInstanceId`),
+      workflowSha256: requireSha256(row.workflowSha256, `${subject}.workflowSha256`),
+      modelSha256: requireSha256(row.modelSha256, `${subject}.modelSha256`),
+      parametersSha256: requireSha256(row.parametersSha256, `${subject}.parametersSha256`),
+      provider,
+      modelId,
+      resolution,
+      aspectRatio: requireEnum(row.aspectRatio, `${subject}.aspectRatio`, SEEDANCE_ASPECT_RATIOS),
+      generateAudio: requireBoolean(row.generateAudio, `${subject}.generateAudio`),
+      watermark: false,
+      returnLastFrame: true,
+      executionExpiresAfterSeconds: requireSafeInteger(
+        row.executionExpiresAfterSeconds,
+        `${subject}.executionExpiresAfterSeconds`,
+        SEEDANCE_EXECUTION_EXPIRY_SECONDS.minimum,
+        SEEDANCE_EXECUTION_EXPIRY_SECONDS.maximum,
+      ),
+    };
+  }
+  if (row.modelFamily === "veo") {
+    exactKeys(row, [
+      ...common, "modelId", "location", "resolution", "aspectRatio", "generateAudio", "sampleCount",
+      "ioMode",
+    ], subject);
+    requireVersion(row.version, subject);
+    if (row.operation !== "vertex-veo-lro") {
+      fail(`${subject}.operation`, "veo transport 必须是 vertex-veo-lro");
+    }
+    const modelId = requireEnum(row.modelId, `${subject}.modelId`, VEO_MODEL_IDS);
+    const resolution = requireEnum(row.resolution, `${subject}.resolution`, VEO_RESOLUTIONS);
+    const allowedResolutions = VEO_RESOLUTIONS_BY_MODEL_ID[modelId];
+    if (!allowedResolutions.includes(resolution)) {
+      fail(`${subject}.resolution`, `${modelId} 只支持 ${allowedResolutions.join("、")}`);
+    }
+    if (row.location !== "us-central1") fail(`${subject}.location`, "v1 只接受 us-central1");
+    if (row.sampleCount !== 1) fail(`${subject}.sampleCount`, "必须固定为 1");
+    return {
+      version: 1,
+      operation: "vertex-veo-lro",
+      modelFamily: "veo",
+      backendInstanceId: requireOpaque(row.backendInstanceId, `${subject}.backendInstanceId`),
+      workflowSha256: requireSha256(row.workflowSha256, `${subject}.workflowSha256`),
+      modelSha256: requireSha256(row.modelSha256, `${subject}.modelSha256`),
+      parametersSha256: requireSha256(row.parametersSha256, `${subject}.parametersSha256`),
+      modelId,
+      location: "us-central1",
+      resolution,
+      aspectRatio: requireEnum(row.aspectRatio, `${subject}.aspectRatio`, VEO_ASPECT_RATIOS),
+      generateAudio: requireBoolean(row.generateAudio, `${subject}.generateAudio`),
+      sampleCount: 1,
+      ioMode: requireEnum(row.ioMode, `${subject}.ioMode`, VEO_IO_MODES),
+    };
+  }
+  fail(`${subject}.modelFamily`, `必须是 ${PRODUCTION_MODEL_FAMILIES.join("、")} 之一`);
 }
 
 function parseBudget(value: unknown, subject: string): ProductionIntentBudget {
@@ -410,12 +701,95 @@ function parseModeration(value: unknown, subject: string): ProductionModerationE
   };
 }
 
+function parseLicenseObligations(value: unknown, subject: string): ProductionLicenseObligations {
+  const row = requireRecord(value, subject);
+  exactKeys(row, ["attribution", "revenueThresholdUsd", "noModelImprovement"], subject);
+  return {
+    attribution: row.attribution === null
+      ? null
+      : requireOpaque(row.attribution, `${subject}.attribution`, 128),
+    revenueThresholdUsd: row.revenueThresholdUsd === null
+      ? null
+      : requireSafeInteger(row.revenueThresholdUsd, `${subject}.revenueThresholdUsd`, 0),
+    noModelImprovement: requireBoolean(row.noModelImprovement, `${subject}.noModelImprovement`),
+  };
+}
+
+export function parseProductionLicenseEvidence(
+  value: unknown,
+  subject = "ProductionLicenseEvidence",
+): ProductionLicenseEvidence {
+  return parseLicense(value, subject);
+}
+
+export function parseProductionLicenseCompliance(
+  value: unknown,
+  subject = "ProductionLicenseCompliance",
+): ProductionLicenseCompliance {
+  return parseLicenseCompliance(value, subject);
+}
+
+/**
+ * 明确的书面许可 evidence（§4.7）：仅把 `basis` 文本写成 written-license 不算数，必须同时有验证状态、
+ * 签发方与签发时间、许可文本 digest 与稳定 evidence AssetRef。H3 受限地域门与许可义务门共用该判据。
+ */
+export function hasExplicitWrittenLicense(license: ProductionLicenseEvidence): boolean {
+  return license.basis === "written-license"
+    && license.status === "verified"
+    && license.evidence !== null
+    && license.licenseSha256 !== null
+    && license.issuedBy !== null
+    && license.issuedAt !== null;
+}
+
+export type ProductionLicenseObligationViolation = {
+  clause: "revenue-threshold" | "attribution";
+  /** 相对 licenseCompliance 的字段名，供编译器的 ValidationIssue.field 拼装完整路径。 */
+  field: "annualRevenueUsdBelow" | "attributionSurfaces";
+  message: string;
+};
+
+/**
+ * 许可义务的唯一判据（§4.7）：intent gate 与 `compileShotRequest` 都调用它，两侧结论必然一致。
+ * `noModelImprovement` 不在此判定——项目是否用输出改进其他模型是使用方式而非可在 dispatch 前取证的
+ * 声明，只在编译期按项目声明检查（DESIGN §4.1、AI-SPEC 使用约束）。
+ */
+export function licenseObligationViolations(
+  license: ProductionLicenseEvidence,
+  compliance: ProductionLicenseCompliance,
+  options: { explicitWrittenLicense: boolean },
+): ProductionLicenseObligationViolation[] {
+  const obligations = license.obligations ?? null;
+  if (obligations === null) return [];
+  const violations: ProductionLicenseObligationViolation[] = [];
+  const threshold = obligations.revenueThresholdUsd;
+  if (threshold !== null) {
+    const declaredBelowThreshold = compliance.annualRevenueUsdBelow !== null
+      && compliance.annualRevenueUsdBelow <= threshold;
+    if (!declaredBelowThreshold && !options.explicitWrittenLicense) {
+      violations.push({
+        clause: "revenue-threshold",
+        field: "annualRevenueUsdBelow",
+        message: `许可以年收入低于 ${threshold} USD 为条件，项目声明为 ${compliance.annualRevenueUsdBelow ?? "未声明"}，且无明确 written-license evidence`,
+      });
+    }
+  }
+  if (obligations.attribution !== null && compliance.attributionSurfaces.length === 0) {
+    violations.push({
+      clause: "attribution",
+      field: "attributionSurfaces",
+      message: `许可要求署名「${obligations.attribution}」，项目未声明任何 attributionSurfaces`,
+    });
+  }
+  return violations;
+}
+
 function parseLicense(value: unknown, subject: string): ProductionLicenseEvidence {
   const row = requireRecord(value, subject);
   exactKeys(row, [
     "version", "status", "basis", "territories", "licenseSha256", "evidence", "issuedBy",
     "issuedAt", "expiresAt",
-  ], subject);
+  ], subject, ["obligations"]);
   requireVersion(row.version, subject);
   if (typeof row.status !== "string" || !LICENSE_STATUSES.has(row.status)) {
     fail(`${subject}.status`, "必须是 verified、unknown 或 blocked");
@@ -428,6 +802,10 @@ function parseLicense(value: unknown, subject: string): ProductionLicenseEvidenc
   if (issuedAt !== null && expiresAt !== null && expiresAt < issuedAt) {
     fail(`${subject}.expiresAt`, "不得早于 issuedAt");
   }
+  // 缺省与显式 null 都规范化为「不带该键」：不带义务的旧 intent 的 canonical JSON 与 idempotencyKey 不变。
+  const obligations = row.obligations === undefined || row.obligations === null
+    ? null
+    : parseLicenseObligations(row.obligations, `${subject}.obligations`);
   return {
     version: 1,
     status: row.status as ProductionLicenseEvidence["status"],
@@ -438,19 +816,23 @@ function parseLicense(value: unknown, subject: string): ProductionLicenseEvidenc
     issuedBy: nullableOpaque(row.issuedBy, `${subject}.issuedBy`),
     issuedAt,
     expiresAt,
+    ...(obligations === null ? {} : { obligations }),
   };
 }
 
 function parseDraftFields(row: Record<string, unknown>, subject: string): ProductionIntentDraft {
   requireVersion(row.version, subject);
+  // inputs[0] 的形态按 execution 家族判定，因此 execution 先解析；返回对象的键序保持不变
+  // （JSON.stringify 的插入序即 idempotencyKey 的输入）。
+  const execution = parseProductionIntentExecution(row.execution, `${subject}.execution`);
   return {
     version: 1,
     taskId: requireId(row.taskId, `${subject}.taskId`),
     subject: parseProductionSubjectRef(row.subject, `${subject}.subject`),
     createdAt: requireIso(row.createdAt, `${subject}.createdAt`),
     useTerritories: parseTerritories(row.useTerritories, `${subject}.useTerritories`),
-    execution: parseProductionIntentExecution(row.execution, `${subject}.execution`),
-    inputs: parseInputs(row.inputs, `${subject}.inputs`),
+    execution,
+    inputs: parseInputs(row.inputs, `${subject}.inputs`, execution.modelFamily),
     budget: parseBudget(row.budget, `${subject}.budget`),
     rights: parseRights(row.rights, `${subject}.rights`),
     moderation: parseModeration(row.moderation, `${subject}.moderation`),
@@ -498,14 +880,60 @@ export function parseProductionDispatchIntent(
   return { ...draft, idempotencyKey: expected };
 }
 
+/**
+ * 处理地域是数据实际被处理的物理位置，只接受 ISO-3166 alpha-2 国家/地区代码。集合别名 EU 与非标准码
+ * UK 长得像 alpha-2 但不指向单一处理地，显式拒绝——否则 `allowedProcessingRegions: ["EU"]` 会把
+ * 「允许 27 个成员国」写成一个既不匹配 FR 也不匹配 DE 的字面量，判定结果与配置意图相反。
+ */
+function parseProcessingRegions(value: unknown, subject: string): string[] {
+  if (!Array.isArray(value) || value.length > MAX_PRODUCTION_INTENT_TERRITORIES) {
+    fail(subject, `必须是最多 ${MAX_PRODUCTION_INTENT_TERRITORIES} 项的地域数组`);
+  }
+  const parsed = value.map((entry, index) => {
+    const label = `${subject}[${index}]`;
+    if (typeof entry !== "string" || !PROCESSING_REGION.test(entry)) {
+      fail(label, "必须是大写二位地域码");
+    }
+    if (NON_ISO_PROCESSING_REGIONS.has(entry as string)) {
+      fail(label, `${entry} 是集合别名或非标准码，处理地域必须写 ISO-3166 alpha-2 成员国代码（EU→FR、DE……；UK→GB）`);
+    }
+    return entry as string;
+  });
+  if (new Set(parsed).size !== parsed.length) fail(subject, "不得包含重复地域");
+  return [...parsed].sort();
+}
+
+function parseLicenseCompliance(value: unknown, subject: string): ProductionLicenseCompliance {
+  const row = requireRecord(value, subject);
+  exactKeys(row, ["annualRevenueUsdBelow", "attributionSurfaces"], subject);
+  const surfaces = row.attributionSurfaces;
+  if (!Array.isArray(surfaces) || surfaces.length > MAX_PRODUCTION_INTENT_ATTRIBUTION_SURFACES) {
+    fail(`${subject}.attributionSurfaces`, `必须是最多 ${MAX_PRODUCTION_INTENT_ATTRIBUTION_SURFACES} 项的数组`);
+  }
+  const parsed = surfaces.map((entry, index) =>
+    requireOpaque(entry, `${subject}.attributionSurfaces[${index}]`, 128));
+  if (new Set(parsed).size !== parsed.length) fail(`${subject}.attributionSurfaces`, "不得包含重复署名面");
+  return {
+    annualRevenueUsdBelow: row.annualRevenueUsdBelow === null
+      ? null
+      : requireSafeInteger(row.annualRevenueUsdBelow, `${subject}.annualRevenueUsdBelow`, 0),
+    attributionSurfaces: [...parsed].sort(),
+  };
+}
+
 export function parseProductionIntentGateContext(
   value: unknown,
   subject = "ProductionIntentGateContext",
 ): ProductionIntentGateContext {
   const row = requireRecord(value, subject);
-  exactKeys(row, ["version", "evaluatedAt", "deploymentTerritories", "availableBudgetMicros"], subject);
+  exactKeys(
+    row,
+    ["version", "evaluatedAt", "deploymentTerritories", "availableBudgetMicros"],
+    subject,
+    ["backendProcessingRegions", "allowedProcessingRegions", "licenseCompliance", "realFaceInputs"],
+  );
   requireVersion(row.version, subject);
-  return {
+  const context: ProductionIntentGateContext = {
     version: 1,
     evaluatedAt: requireIso(row.evaluatedAt, `${subject}.evaluatedAt`),
     deploymentTerritories: parseTerritories(
@@ -518,6 +946,50 @@ export function parseProductionIntentGateContext(
       0,
       MAX_PRODUCTION_COST_MICROS,
     ),
+  };
+  if (row.backendProcessingRegions !== undefined) {
+    context.backendProcessingRegions = parseProcessingRegions(
+      row.backendProcessingRegions,
+      `${subject}.backendProcessingRegions`,
+    );
+  }
+  if (row.allowedProcessingRegions !== undefined) {
+    context.allowedProcessingRegions = parseProcessingRegions(
+      row.allowedProcessingRegions,
+      `${subject}.allowedProcessingRegions`,
+    );
+  }
+  if (row.licenseCompliance !== undefined) {
+    context.licenseCompliance = parseLicenseCompliance(
+      row.licenseCompliance,
+      `${subject}.licenseCompliance`,
+    );
+  }
+  if (row.realFaceInputs !== undefined) {
+    context.realFaceInputs = requireEnum(
+      row.realFaceInputs,
+      `${subject}.realFaceInputs`,
+      PRODUCTION_INTENT_REAL_FACE_DECLARATIONS,
+    );
+  }
+  return context;
+}
+
+type ProductionIntentGatePolicy = {
+  backendProcessingRegions: readonly string[];
+  allowedProcessingRegions: readonly string[];
+  licenseCompliance: ProductionLicenseCompliance;
+  realFaceInputs: ProductionIntentRealFaceDeclaration;
+};
+
+/** 未声明的策略字段取「空集合 / 未声明」形态——§4.7 的判定对该形态与显式空值结论相同。 */
+function gatePolicy(context: ProductionIntentGateContext): ProductionIntentGatePolicy {
+  return {
+    backendProcessingRegions: context.backendProcessingRegions ?? [],
+    allowedProcessingRegions: context.allowedProcessingRegions ?? [],
+    licenseCompliance: context.licenseCompliance
+      ?? { annualRevenueUsdBelow: null, attributionSurfaces: [] },
+    realFaceInputs: context.realFaceInputs ?? "undeclared",
   };
 }
 
@@ -532,6 +1004,7 @@ export function evaluateProductionIntentGates(
 ): ProductionIntentGateDecision {
   const intent = parseProductionDispatchIntent(intentValue);
   const context = parseProductionIntentGateContext(contextValue);
+  const policy = gatePolicy(context);
   const failures: ProductionIntentGateFailure[] = [];
   const deny = (code: ProductionIntentGateCode, message: string): void => {
     failures.push({ version: 1, code, message });
@@ -542,6 +1015,32 @@ export function evaluateProductionIntentGates(
   }
   if (intent.budget.maximumAmountMicros > context.availableBudgetMicros) {
     deny("budget-available-exceeded", "不可变单任务上限超过本次 gate 的可用预算快照");
+  }
+
+  // 处理地域门（§4.7）。runtime config 目前还不供给这两组地域（§8.6 的 runtime-config 行），因此空集合的
+  // 语义按家族分裂：云家族的处理地在境外，未声明即 deny；minimax-h3 / generic 暂放行。runtime-config
+  // 供给 regions 后改为全家族 deny（EXECUTION-PLAN 的「0-C 审查后的两处遗留」(b)）。
+  if (policy.allowedProcessingRegions.length === 0) {
+    if (FAMILIES_REQUIRING_PROCESSING_REGIONS[intent.execution.modelFamily]) {
+      deny(
+        "processing-region-not-allowed",
+        `项目未声明 allowedProcessingRegions，${intent.execution.modelFamily} 家族不得 dispatch`,
+      );
+    }
+  } else if (policy.backendProcessingRegions.length === 0) {
+    deny(
+      "processing-region-not-allowed",
+      `后端处理地域未声明，无法与项目 allowedProcessingRegions=[${policy.allowedProcessingRegions.join("、")}] 比对`,
+    );
+  } else {
+    for (const region of policy.backendProcessingRegions) {
+      if (!policy.allowedProcessingRegions.includes(region)) {
+        deny(
+          "processing-region-not-allowed",
+          `后端处理地域 ${region} 不在项目 allowedProcessingRegions=[${policy.allowedProcessingRegions.join("、")}] 内`,
+        );
+      }
+    }
   }
 
   if (intent.rights.status !== "cleared") {
@@ -587,6 +1086,14 @@ export function evaluateProductionIntentGates(
     deny("license-issued-in-future", "license issuedAt 晚于 gate 时间");
   }
 
+  // 许可附加义务（§4.7）：编译器已提前拒绝一次，这里是 dispatch 前的二次强制，判据与编译器同一函数。
+  const explicitWrittenLicense = hasExplicitWrittenLicense(intent.license);
+  for (const violation of licenseObligationViolations(
+    intent.license, policy.licenseCompliance, { explicitWrittenLicense },
+  )) {
+    deny("license-obligation-unmet", violation.message);
+  }
+
   if (intent.execution.modelFamily === "minimax-h3") {
     const restricted = new Set<string>();
     if (licenseTerritories.has("WORLDWIDE")) {
@@ -598,12 +1105,6 @@ export function evaluateProductionIntentGates(
         else if (RESTRICTED_H3_TERRITORIES.has(territory)) restricted.add(territory);
       }
     }
-    const explicitWrittenLicense = intent.license.basis === "written-license"
-      && intent.license.status === "verified"
-      && intent.license.evidence !== null
-      && intent.license.licenseSha256 !== null
-      && intent.license.issuedBy !== null
-      && intent.license.issuedAt !== null;
     if (restricted.size > 0 && !explicitWrittenLicense) {
       deny(
         "h3-written-license-required",
@@ -614,6 +1115,16 @@ export function evaluateProductionIntentGates(
       && !failures.some((failure) => failure.code === "h3-written-license-required")) {
       deny("h3-written-license-required", "H3 written-license 必须包含验证状态、签发方/时间、digest 与 evidence");
     }
+  }
+
+  // Seedance 2.x 拒绝真人人脸参考（§5.1）：intent inputs[] 不携带该标记，未声明即视为未证明不含。
+  if (intent.execution.modelFamily === "seedance"
+    && SEEDANCE_LIKENESS_POLICY[intent.execution.modelId] === "likeness-restricted"
+    && policy.realFaceInputs !== "absent") {
+    deny(
+      "provider-likeness-policy",
+      `${intent.execution.modelId} 拒绝含真人人脸的输入，本次 realFaceInputs 声明为 ${policy.realFaceInputs}`,
+    );
   }
 
   return { version: 1, allowed: failures.length === 0, failures };

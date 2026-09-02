@@ -1,6 +1,12 @@
 // ShotRequest 契约 / 编译器 / 剧本预填 / 镜头合并回归 —— DESIGN §4.1、§4.3、§5.1–§5.3、§6.1、§8.1 验收矩阵。
 import { existsSync, readFileSync } from "node:fs";
 import { ProductionError, type AssetRef } from "../src/production-domain.ts";
+import {
+  createProductionDispatchIntent,
+  evaluateProductionIntentGates,
+  type ProductionLicenseCompliance,
+  type ProductionLicenseEvidence,
+} from "../src/production-intent.ts";
 import { productionCanonicalJson } from "../src/production-canonical-json.ts";
 import {
   DEGRADATION_CODES,
@@ -102,7 +108,6 @@ const h3Profile = (over: Record<string, unknown> = {}): ShotExecutionProfile => 
   resolution: "768p",
   aspectRatio: "9:16",
   generateAudio: true,
-  licenseObligations: { attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true },
   modelFamily: "minimax-h3",
   operation: "comfyui-workflow",
   variant: "fl2va",
@@ -122,7 +127,8 @@ const policy = (
   execution,
   project: {
     allowedProcessingRegions: ["SG"],
-    licenseCompliance: { attribution: "MiniMax H3", annualRevenueUsd: 0, usesOutputToImproveModels: false },
+    licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+    usesOutputToImproveModels: false,
   },
   approvedCandidates: {},
   propStates: { O01: ["O01_CLOSED"] },
@@ -133,9 +139,11 @@ const policy = (
     budget: { version: 1, currency: "USD", estimatedAmountMicros: 1_000_000, maximumAmountMicros: 4_000_000 },
     rights: { version: 1, status: "cleared", territories: ["SG"], evidence: null, expiresAt: null },
     moderation: { version: 1, status: "passed", reviewedAt: AT, evidence: null },
+    // 义务的唯一来源是 license evidence（§4.2）；MiniMax H3 Community License IV.1 / IV.2 / V.3。
     license: {
       version: 1, status: "verified", basis: "community", territories: ["SG"], licenseSha256: null,
       evidence: null, issuedBy: null, issuedAt: null, expiresAt: null,
+      obligations: { attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true },
     },
   },
   ...over,
@@ -333,7 +341,6 @@ const seedanceProfile = (over: Record<string, unknown> = {}): ShotExecutionProfi
   resolution: "720p",
   aspectRatio: "9:16",
   generateAudio: true,
-  licenseObligations: null,
   modelFamily: "seedance",
   operation: "ark-video-task",
   provider: "byteplus-modelark",
@@ -378,7 +385,6 @@ const veoProfile = (over: Record<string, unknown> = {}): ShotExecutionProfile =>
   resolution: "720p",
   aspectRatio: "9:16",
   generateAudio: true,
-  licenseObligations: null,
   modelFamily: "veo",
   operation: "vertex-veo-lro",
   modelId: "veo-3.1-generate-001",
@@ -399,7 +405,16 @@ const veoCapability = (
 const cloudPolicy = (execution: ShotExecutionProfile): ShotCompilePolicy => policy(execution, {
   project: {
     allowedProcessingRegions: ["SG", "US"],
-    licenseCompliance: { attribution: "MiniMax H3", annualRevenueUsd: 0, usesOutputToImproveModels: false },
+    licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+    usesOutputToImproveModels: false,
+  },
+  // 云后端按 provider terms 计费使用，不带 H3 Community License 的三项义务。
+  intent: {
+    ...policy().intent,
+    license: {
+      version: 1, status: "verified", basis: "provider-terms", territories: ["SG"], licenseSha256: null,
+      evidence: null, issuedBy: null, issuedAt: null, expiresAt: null,
+    },
   },
 });
 
@@ -516,7 +531,8 @@ const imageReference = (sha256: string, over: Record<string, unknown> = {}) => (
   const obligation = compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
     project: {
       allowedProcessingRegions: ["SG"],
-      licenseCompliance: { attribution: null, annualRevenueUsd: 0, usesOutputToImproveModels: false },
+      licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: [] },
+      usesOutputToImproveModels: false,
     },
   }));
   expectCode(obligation, "license_obligation_unmet", "H3 署名义务未满足");
@@ -524,15 +540,96 @@ const imageReference = (sha256: string, over: Record<string, unknown> = {}) => (
   const revenue = compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
     project: {
       allowedProcessingRegions: ["SG"],
-      licenseCompliance: { attribution: "MiniMax H3", annualRevenueUsd: 25_000_000, usesOutputToImproveModels: false },
+      licenseCompliance: { annualRevenueUsdBelow: 25_000_000, attributionSurfaces: ["片尾字幕"] },
+      usesOutputToImproveModels: false,
     },
   }));
   expectCode(revenue, "license_obligation_unmet", "年收入超阈值须书面授权");
 
+  // 义务的唯一来源是 license evidence：profile 不再复制该字段（0-B 遗留第 5 条）。
+  ok(throwsProduction(
+    () => parseShotExecutionProfile({ ...h3Profile(), licenseObligations: null }),
+    "含不支持字段",
+  ), "execution profile 不再接受 licenseObligations，义务只来自 license evidence");
+  const noObligations = compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
+    project: {
+      allowedProcessingRegions: ["SG"],
+      licenseCompliance: { annualRevenueUsdBelow: 25_000_000, attributionSurfaces: [] },
+      usesOutputToImproveModels: true,
+    },
+    intent: {
+      ...policy().intent,
+      license: {
+        version: 1, status: "verified", basis: "provider-terms", territories: ["SG"], licenseSha256: null,
+        evidence: null, issuedBy: null, issuedAt: null, expiresAt: null,
+      },
+    },
+  }));
+  ok(!noObligations.validation.issues.some((issue) => issue.code === "license_obligation_unmet"),
+    "license evidence 不带 obligations 时不判定义务（同一项目声明在 H3 许可下会被拒）");
+  const modelImprovement = compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
+    project: {
+      allowedProcessingRegions: ["SG"],
+      licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+      usesOutputToImproveModels: true,
+    },
+  }));
+  expectCode(modelImprovement, "license_obligation_unmet", "输出不得用于改进其他模型");
+
+  // 编译器与 intent gate 共用 licenseObligationViolations：同一 (license, compliance) 输入两侧结论必然一致。
+  const compliant: ProductionLicenseCompliance = {
+    annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"],
+  };
+  const nonCompliant: ProductionLicenseCompliance = {
+    annualRevenueUsdBelow: 25_000_000, attributionSurfaces: [],
+  };
+  const baseIntentDraft = compileShotRequest(baseDraft(), capability(), policy()).intentDraft!;
+  const compileDenies = (
+    compliance: ProductionLicenseCompliance,
+    license: ProductionLicenseEvidence,
+  ): boolean => compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
+    project: {
+      allowedProcessingRegions: ["SG"], licenseCompliance: compliance, usesOutputToImproveModels: false,
+    },
+    intent: { ...policy().intent, license },
+  })).validation.issues.some((issue) => issue.code === "license_obligation_unmet");
+  const gateDenies = (
+    compliance: ProductionLicenseCompliance,
+    license: ProductionLicenseEvidence,
+  ): boolean => evaluateProductionIntentGates(
+    createProductionDispatchIntent({ ...baseIntentDraft, license }),
+    {
+      version: 1,
+      evaluatedAt: AT,
+      deploymentTerritories: ["SG"],
+      availableBudgetMicros: 10_000_000,
+      licenseCompliance: compliance,
+    },
+  ).failures.some((failure) => failure.code === "license-obligation-unmet");
+
+  const communityLicense = policy().intent.license;
+  ok(compileDenies(nonCompliant, communityLicense) && gateDenies(nonCompliant, communityLicense)
+    && !compileDenies(compliant, communityLicense) && !gateDenies(compliant, communityLicense),
+  "同一 (license, compliance) 输入下编译器与 gate 的义务结论一致");
+  const writtenLicense: ProductionLicenseEvidence = {
+    ...communityLicense,
+    basis: "written-license",
+    licenseSha256: SHA.a,
+    evidence: asset(SHA.b, "text/plain", 1_024),
+    issuedBy: "MiniMax authorized licensing",
+    issuedAt: AT,
+    obligations: { attribution: null, revenueThresholdUsd: 20_000_000, noModelImprovement: true },
+  };
+  ok(!compileDenies(nonCompliant, writtenLicense) && !gateDenies(nonCompliant, writtenLicense)
+    && compileDenies(nonCompliant, { ...writtenLicense, issuedBy: null })
+    && gateDenies(nonCompliant, { ...writtenLicense, issuedBy: null }),
+  "written-license 豁免场景下编译器与 gate 结论一致（issuedBy 缺失则两侧同时不豁免）");
+
   const region = compileShotRequest(baseDraft(), capability(), policy(h3Profile(), {
     project: {
       allowedProcessingRegions: ["US"],
-      licenseCompliance: { attribution: "MiniMax H3", annualRevenueUsd: 0, usesOutputToImproveModels: false },
+      licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+      usesOutputToImproveModels: false,
     },
   }));
   expectCode(region, "processing_region_not_allowed", "后端处理地域不在项目允许集合内");

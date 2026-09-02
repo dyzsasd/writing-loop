@@ -225,6 +225,7 @@ ShotRequest 以 `application/vnd.writing-loop.shot-request+json` 存入 CAS，�
 - 参考裁剪：超过 capability 上限时，`strict` 返回 `reference_cap_exceeded`；`trim_by_priority` 按 purpose 顺序（character-identity > costume > prop > set-dressing > lighting > style > motion > voice）再按 `priority` 保留，被裁剪项写入 `droppedReferences` 并记 `references-trimmed`。上限按 `limitsByModelId[modelId]` 取（§4.3），不按家族。
 - 输出意图：`output.aspectRatio` 与 `output.generateAudio` 必须与 execution profile 的 `aspectRatio`、`generateAudio` 相等，不等返回 `output_intent_mismatch`（error）。分辨率不在 ShotRequest 内；profile 的 `resolution` 不在 `limitsByModelId[modelId].resolutions` 内时返回 `resolution_unsupported`；profile 的 `aspectRatio` 不在 `aspectRatios` 内时返回 `aspect_ratio_unsupported`。
 - 时长：`durationSeconds = 后端网格上取整(max(4, storyboardDurationSeconds))`，Veo 取 {4, 6, 8}，记 `duration-rounded-trim`（`requiresReapproval: false`）；Veo 在 execution profile 的 `resolution ∈ {1080p, 4k}` 时网格固定为 {8}（保守默认，探针后可放宽）；H3 网格由已配置 profile 集合定义（§5.3）。
+- 许可义务：`policy.project.licenseCompliance{annualRevenueUsdBelow, attributionSurfaces[]}` 与 license evidence 的 `obligations` 经 `licenseObligationViolations`（`production-intent.ts`，与 intent gate 同一纯函数）判定，违反项返回 `license_obligation_unmet`。`obligations.noModelImprovement` 只在这里判定、gate 不判定：它描述产物的后续使用方式，dispatch 前拿不到可取证的事实，因此按 `policy.project.usesOutputToImproveModels`（`licenseCompliance` 之外的独立字段）检查，并在 AI-SPEC 的使用约束中同步说明。
 - seed：Seedance 分支 `output.seed` 非 null 时返回 `seed_rejected`（error，无 warning 形态）；Veo 分支接受 uint32 但总是记 `seed-not-reproducible`；H3 分支 seed 逐镜下发且可复现。
 - negative prompt：H3 契约无 negative 输入，H3 分支 `prompt.negativeText` 非 null 时返回 `negative_prompt_unsupported`（error）；Seedance 折叠进 prompt 文本并记 `negative-prompt-folded`；Veo 有原生 `negativePrompt` 字段。
 - prompt 语言：后端 `limits.promptLanguages` 非 null 且不含 `draft.prompt.language` 时，若 `translations` 中存在受支持语言的译文则选用该译文作为 `prompt.text`，记 `prompt-translated`（`from: 原语言, to: 译文语言`，`requiresReapproval: true`）并写入 `selectedTranslation`；否则返回 `prompt_language_unsupported`。`dialogue[]` 中 `lipSync: true` 且 `language` 不在 `promptLanguages` 内时返回 `dialogue_language_unsupported`（含中文口型对白的镜头不路由到 Veo）。本版 draft 的 `prompt.language` 与 `dialogue[].language` 固定 `zh-CN` 且 `translations` 为空数组，因此 Veo 分支恒返回 `prompt_language_unsupported`（§8.5）。
@@ -271,11 +272,11 @@ execution profile 与价目文件的归属：profile 文件（含固定参数、
 
 `parseProductionIntentExecution` 新增两分支的约束：
 
-- seedance：fast / mini 只允许 480p / 720p；4k 只允许 `*-seedance-2-0-260128`；`executionExpiresAfterSeconds ∈ [3600, 259200]`。
+- seedance：fast / mini 只允许 480p / 720p；4k 只允许 `*-seedance-2-0-260128`；`executionExpiresAfterSeconds ∈ [3600, 259200]`；`provider` 与 modelId 前缀必须一致（`doubao-` ↔ `volcengine-ark`，`dreamina-` ↔ `byteplus-modelark`），交叉组合在解析层拒绝。
 - veo：`location` 只接受 `us-central1`；`veo-3.1-lite-generate-001` 时 `resolution ∈ {720p, 1080p}`，`profile.allowedModes` 不得含 ref2v；`veo-3.1-fast-generate-001` 时 `resolution ∈ {720p, 1080p}`，4k 标 unverified，探针前拒绝；`veo-3.1-generate-001` 允许 720p / 1080p / 4k。
 - 逐镜约束在编译与 gateway 两处执行：seedance `durationSeconds` 按 modelId 分档（2.0 系列 4–15，2.5 为 4–30）；2.5 在 i2v / fl2v 模式要求 `aspectRatio: adaptive`，该取值不在 v1 画幅集合内，因此 2.5 的 i2v / fl2v 组合不在 v1 路径内（Phase 3 处理）；`seed` 非 null 时编译返回 `seed_rejected`（error）；veo ref2v 固定 8 s，`reference_image` ≤3（或 1 张 style）、`reference_video` / `reference_audio` 为 0；veo `seed` 为 uint32 但仅 best-effort，Veo 分支编译时总是记录 `seed-not-reproducible`（`requiresReapproval: false`）且 `fingerprint.seedReproducible = false`；veo `resolution ∈ {1080p, 4k}` ⇒ `durationSeconds = 8`（保守默认，来源为 Gemini API 文档与 `tools/video/veo_video.py`；Phase 3 探针写入 `profile.limits` 后可放宽）。
 
-license evidence 扩展（`ProductionLicenseEvidence`）：新增可选 `obligations: { attribution: string | null; revenueThresholdUsd: number | null; noModelImprovement: boolean } | null`；H3 profile 填 `{ attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true }`（MiniMax H3 Community License IV.1、IV.2、V.3）。gate 见 §4.7。
+license evidence 扩展（`ProductionLicenseEvidence`）：新增可选 `obligations: { attribution: string | null; revenueThresholdUsd: number | null; noModelImprovement: boolean } | null`；H3 填 `{ attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true }`（MiniMax H3 Community License IV.1、IV.2、V.3）。该字段是编译器与 gate 判定许可义务的唯一来源，execution profile 不复制；缺省与显式 `null` 都规范化为「不带该键」，因此不带义务的既有 intent 的 canonical JSON 与 `idempotencyKey` 逐字节不变。gate 见 §4.7。
 
 ### 4.3 Capability descriptor（`hub/src/production-adapter.ts` 扩展）
 
@@ -400,7 +401,11 @@ writing-loop 侧批次与样片：
 
 机器门与 gateway 准入：
 
-- `evaluateProductionIntentGates`（`hub/src/production-intent.ts`）新增 `processing-region-not-allowed`、`provider-likeness-policy`、`license-obligation-unmet`；gate context 增加 `backendProcessingRegions`、`allowedProcessingRegions`、`licenseCompliance{ annualRevenueUsdBelow: number | null; attributionSurfaces: string[] }`（来自 runtime `projects[]`）。`license-obligation-unmet` 在 license evidence 含 `obligations` 时判定：`revenueThresholdUsd` 非 null 且项目未声明年收入低于该阈值、又无 `basis: written-license` evidence → deny；`attribution` 非 null 且 `attributionSurfaces` 为空 → deny。编译器提前拒绝只为减少无效计划，writing-loop 侧仍二次强制。
+- `evaluateProductionIntentGates`（`hub/src/production-intent.ts`）新增 `processing-region-not-allowed`、`provider-likeness-policy`、`license-obligation-unmet`；gate context 增加 `backendProcessingRegions`、`allowedProcessingRegions`、`licenseCompliance{ annualRevenueUsdBelow: number | null; attributionSurfaces: string[] }`（来自 runtime `projects[]`）与 `realFaceInputs: "undeclared" | "present" | "absent"`。四项在 runtime `projects[]` 供给它们之前允许缺省，缺省一律取「未声明」的 fail-closed 语义。
+- `realFaceInputs` 汇总 ShotRequest 的 `containsRealFace`（intent 的 `inputs[]` 只有 AssetRef，不携带该标记）：Seedance 2.x 拒绝真人人脸参考，非 `absent`（含缺省的 `undeclared`）即 `provider-likeness-policy` deny。
+- `processing-region-not-allowed` 的三条判定：`allowedProcessingRegions` 非空而 `backendProcessingRegions` 为空/缺省 → deny（无可比对项不等于合规）；后端任一地域不在允许集合内 → deny；`allowedProcessingRegions` 为空/缺省时 seedance / veo 家族 deny（云后端在 provider 自有地域处理素材），`minimax-h3` / `generic` 暂放行，runtime config 供给该字段后改为全家族 deny。两组地域只接受 ISO-3166 alpha-2 成员国代码，集合别名 `EU`、非标准码 `UK` 与 `WORLDWIDE` 在解析层拒绝。
+- `license-obligation-unmet` 在 license evidence 含 `obligations` 时判定：`revenueThresholdUsd` 非 null 且项目未声明年收入低于该阈值、又无完整 written-license evidence（`basis: written-license` 且 status verified、`licenseSha256`、`evidence`、`issuedBy`、`issuedAt` 齐全，与 H3 受限地域门同一判据）→ deny；`attribution` 非 null 且 `attributionSurfaces` 为空 → deny。该判定是一个纯函数 `licenseObligationViolations(license, compliance, { explicitWrittenLicense })`，编译器与 gate 都调用它，两侧对同一输入结论必然一致；编译器提前拒绝只为减少无效计划，writing-loop 侧仍二次强制。
+- `obligations.noModelImprovement` 是编译期专属条款，gate 不判定：输出是否被用于改进其他模型是产物的后续使用方式，dispatch 前拿不到可取证的事实，只能按项目声明的 `usesOutputToImproveModels` 在编译期检查（§4.1、AI-SPEC 使用约束）。
 - `SubmissionAdmissionPolicy.acquire/settle`（`hub/src/production-job-gateway.ts`）按 backend 配置并发上限（§3），只加配置。
 - reservation 语义不变：估算是计划事实，reservation 以 maximum 为准。
 

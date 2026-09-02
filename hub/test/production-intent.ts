@@ -22,6 +22,11 @@ import {
   MAX_PRODUCTION_INTENT_BYTES,
   MAX_PRODUCTION_INTENT_INPUTS,
   PRODUCTION_INTENT_DIRECTORY,
+  PRODUCTION_INTENT_GATE_CODES,
+  PRODUCTION_INTENT_OPERATIONS,
+  PRODUCTION_MODEL_FAMILIES,
+  SEEDANCE_MODEL_IDS,
+  VEO_MODEL_IDS,
   createProductionDispatchIntent,
   enqueueProductionIntent,
   evaluateProductionIntentGates,
@@ -34,9 +39,11 @@ import {
   readProductionIntent,
   type ProductionDispatchIntent,
   type ProductionIntentDraft,
+  type ProductionIntentExecution,
   type ProductionIntentGateContext,
   type ProductionIntentResolver,
 } from "../src/production-intent.ts";
+import { SHOT_REQUEST_MEDIA_TYPE } from "../src/production-shot-request.ts";
 
 let fails = 0;
 const ok = (condition: boolean, message: string): void => {
@@ -160,6 +167,39 @@ ok(/^[a-f0-9]{64}$/.test(intent.idempotencyKey)
 ok(productionIntentIdempotencyKey(draft()) === intent.idempotencyKey,
   "显式 digest API 与 intent 工厂使用同一 canonical parsed draft");
 
+// license `obligations` 落地前（main@5125510）该 H3 fixture 的 digest。canonical JSON 逐字节不变才能
+// 保证既有 companion 文件、ledger 里的 idempotencyKey 与 O_EXCL 重放判定继续成立（§8.1 验收）。
+const H3_FIXTURE_IDEMPOTENCY_KEY = "d013359b9dd971335a8a2fcad23c426bf455fd06347c3c67f4cb6d02ea4d5f1e";
+const H3_FIXTURE_CANONICAL_BYTES = 2_855;
+ok(intent.idempotencyKey === H3_FIXTURE_IDEMPOTENCY_KEY
+  && Buffer.byteLength(JSON.stringify(intent), "utf8") === H3_FIXTURE_CANONICAL_BYTES
+  && !Object.prototype.hasOwnProperty.call(intent.license, "obligations"),
+"不带 obligations 的旧 H3 intent 解析结果与 idempotencyKey 逐字节不变");
+ok(productionIntentIdempotencyKey({
+  ...draft(), license: { ...draft().license, obligations: null },
+}) === H3_FIXTURE_IDEMPOTENCY_KEY,
+"显式 obligations: null 与缺省规范化为同一 canonical intent");
+const obligated = draft({
+  license: {
+    ...draft().license,
+    obligations: { attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000, noModelImprovement: true },
+  },
+});
+ok(productionIntentIdempotencyKey(obligated) !== H3_FIXTURE_IDEMPOTENCY_KEY
+  && parseProductionIntentDraft(obligated).license.obligations?.attribution === "MiniMax H3",
+"obligations 进入 canonical intent 与 idempotencyKey");
+ok(throwsProduction(() => parseProductionIntentDraft({
+  ...draft(),
+  license: { ...draft().license, obligations: { attribution: "MiniMax H3", revenueThresholdUsd: 20_000_000 } },
+}), "缺少字段"), "obligations 一旦出现就必须是完整三字段记录");
+ok(throwsProduction(() => parseProductionIntentDraft({
+  ...draft(),
+  license: {
+    ...draft().license,
+    obligations: { attribution: "MiniMax H3", revenueThresholdUsd: -1, noModelImprovement: true },
+  },
+}), "安全整数"), "obligations 的收入阈值必须是非负安全整数");
+
 const shotSubject = draft().subject;
 if (shotSubject.kind !== "shot") throw new Error("test fixture 必须是 shot subject");
 
@@ -258,6 +298,137 @@ ok(throwsProduction(() => parseProductionIntentExecution({ ...comfyExecution, du
   "ComfyUI intent 不能夹带 H3-only 参数");
 ok(throwsProduction(() => parseProductionIntentExecution({ ...comfyExecution, operation: "minimax-h3" }), "只允许 comfyui-workflow"),
   "generic modelFamily 不能冒充 direct H3 transport");
+
+// —— 云家族 execution 分支（§4.2；本版只到解析层，adapter 归 Phase 3 / Phase 4） ——
+ok(PRODUCTION_INTENT_OPERATIONS.join(",") === "comfyui-workflow,minimax-h3,ark-video-task,vertex-veo-lro"
+  && PRODUCTION_MODEL_FAMILIES.join(",") === "generic,minimax-h3,seedance,veo"
+  && SEEDANCE_MODEL_IDS.length === 8 && VEO_MODEL_IDS.length === 3,
+"operation / modelFamily 枚举与两家云 modelId 集合集中定义");
+
+const seedanceExecution = {
+  version: 1,
+  operation: "ark-video-task",
+  modelFamily: "seedance",
+  backendInstanceId: "ark-sg-1",
+  workflowSha256: SHA.c,
+  modelSha256: SHA.d,
+  parametersSha256: SHA.e,
+  provider: "byteplus-modelark",
+  modelId: "dreamina-seedance-2-0-260128",
+  resolution: "720p",
+  aspectRatio: "9:16",
+  generateAudio: true,
+  watermark: false,
+  returnLastFrame: true,
+  executionExpiresAfterSeconds: 7_200,
+} as const;
+const veoExecution = {
+  version: 1,
+  operation: "vertex-veo-lro",
+  modelFamily: "veo",
+  backendInstanceId: "veo-us-1",
+  workflowSha256: SHA.c,
+  modelSha256: SHA.d,
+  parametersSha256: SHA.e,
+  modelId: "veo-3.1-generate-001",
+  location: "us-central1",
+  resolution: "1080p",
+  aspectRatio: "16:9",
+  generateAudio: true,
+  sampleCount: 1,
+  ioMode: "inline-base64",
+} as const;
+
+const parsedSeedance = parseProductionIntentExecution(seedanceExecution);
+const parsedVeo = parseProductionIntentExecution(veoExecution);
+ok(parsedSeedance.modelFamily === "seedance" && parsedSeedance.operation === "ark-video-task"
+  && parsedVeo.modelFamily === "veo" && parsedVeo.operation === "vertex-veo-lro",
+"seedance / veo execution 各自绑定 transport 与 backend/workflow/model/parameters digest");
+ok(parseProductionIntentExecution({ ...seedanceExecution, resolution: "4k" }).modelFamily === "seedance"
+  && parseProductionIntentExecution({ ...veoExecution, resolution: "4k" }).modelFamily === "veo"
+  && parseProductionIntentExecution({ ...veoExecution, ioMode: "gcs" }).modelFamily === "veo",
+"2-0-260128 允许 4k、generate-001 允许 4k 与 gcs ioMode");
+ok(throwsProduction(() => parseProductionIntentExecution({ ...seedanceExecution, durationSeconds: 8 }), "不支持字段"),
+  "云 execution 不接受 durationSeconds 等逐镜字段（逐镜变量在 inputs[0] 的 ShotRequest 内）");
+ok(parseProductionIntentExecution({
+  ...seedanceExecution, provider: "volcengine-ark", modelId: "doubao-seedance-2-0-260128",
+}).modelFamily === "seedance",
+"doubao- 前缀配 volcengine-ark、dreamina- 前缀配 byteplus-modelark 的组合被接受");
+
+for (const [label, execution, needle] of [
+  ["modelId 集合", { ...seedanceExecution, modelId: "doubao-seedance-3-0-260128" },
+    ".modelId 必须是"],
+  ["fast + 1080p", {
+    ...seedanceExecution, modelId: "dreamina-seedance-2-0-fast-260128", resolution: "1080p",
+  }, ".resolution dreamina-seedance-2-0-fast-260128 只支持 480p、720p"],
+  ["mini + 4k", {
+    ...seedanceExecution, modelId: "dreamina-seedance-2-0-mini-260615", resolution: "4k",
+  }, ".resolution dreamina-seedance-2-0-mini-260615 只支持 480p、720p"],
+  ["2.5 + 4k", { ...seedanceExecution, modelId: "doubao-seedance-2-5-260628", resolution: "4k" },
+    ".resolution doubao-seedance-2-5-260628 只支持 480p、720p、1080p"],
+  ["adaptive 画幅", { ...seedanceExecution, aspectRatio: "adaptive" }, ".aspectRatio 必须是"],
+  ["4:3 画幅", { ...seedanceExecution, aspectRatio: "4:3" }, ".aspectRatio 必须是"],
+  ["provider 枚举", { ...seedanceExecution, provider: "aliyun-dashscope" }, ".provider 必须是"],
+  ["provider 与 doubao- 前缀不符", { ...seedanceExecution, modelId: "doubao-seedance-2-0-260128" },
+    ".provider doubao-seedance-2-0-260128 只在 volcengine-ark 下发"],
+  ["provider 与 dreamina- 前缀不符", { ...seedanceExecution, provider: "volcengine-ark" },
+    ".provider dreamina-seedance-2-0-260128 只在 byteplus-modelark 下发"],
+  ["expiry 下界", { ...seedanceExecution, executionExpiresAfterSeconds: 3_599 },
+    ".executionExpiresAfterSeconds 必须是 3600–259200"],
+  ["expiry 上界", { ...seedanceExecution, executionExpiresAfterSeconds: 259_201 },
+    ".executionExpiresAfterSeconds 必须是 3600–259200"],
+  ["watermark", { ...seedanceExecution, watermark: true }, ".watermark 必须固定为 false"],
+  ["returnLastFrame", { ...seedanceExecution, returnLastFrame: false }, ".returnLastFrame 必须固定为 true"],
+  ["transport", { ...seedanceExecution, operation: "comfyui-workflow" }, ".operation seedance transport 必须是 ark-video-task"],
+] as const) {
+  ok(throwsProduction(() => parseProductionIntentExecution(execution), needle), `seedance ${label} 被 parser 拒绝`);
+}
+
+for (const [label, execution, needle] of [
+  ["modelId 集合", { ...veoExecution, modelId: "veo-3.0-generate-001" }, ".modelId 必须是"],
+  ["lite + 4k", { ...veoExecution, modelId: "veo-3.1-lite-generate-001", resolution: "4k" },
+    ".resolution veo-3.1-lite-generate-001 只支持 720p、1080p"],
+  ["fast + 4k", { ...veoExecution, modelId: "veo-3.1-fast-generate-001", resolution: "4k" },
+    ".resolution veo-3.1-fast-generate-001 只支持 720p、1080p"],
+  ["480p", { ...veoExecution, resolution: "480p" }, ".resolution 必须是"],
+  ["1:1 画幅", { ...veoExecution, aspectRatio: "1:1" }, ".aspectRatio 必须是"],
+  ["location", { ...veoExecution, location: "us-east4" }, ".location v1 只接受 us-central1"],
+  ["sampleCount", { ...veoExecution, sampleCount: 2 }, ".sampleCount 必须固定为 1"],
+  ["ioMode", { ...veoExecution, ioMode: "signed-url" }, ".ioMode 必须是"],
+  ["transport", { ...veoExecution, operation: "ark-video-task" }, ".operation veo transport 必须是 vertex-veo-lro"],
+] as const) {
+  ok(throwsProduction(() => parseProductionIntentExecution(execution), needle), `veo ${label} 被 parser 拒绝`);
+}
+
+// —— inputs[0]：云家族必须是 ShotRequest（§4.2、§8.6） ——
+const shotRequestInput = asset("shot-request.json", SHA.f, SHOT_REQUEST_MEDIA_TYPE);
+const cloudDraft = (
+  execution: typeof seedanceExecution | typeof veoExecution,
+  overrides: Record<string, unknown> = {},
+): ProductionIntentDraft => draft({
+  taskId: `take-${execution.modelFamily}-001`,
+  execution,
+  inputs: [shotRequestInput, asset("first-frame.png", SHA.c, "image/png")],
+  ...overrides,
+});
+ok(parseProductionIntentDraft(cloudDraft(seedanceExecution)).inputs[0].mediaType === SHOT_REQUEST_MEDIA_TYPE
+  && parseProductionIntentDraft(cloudDraft(veoExecution)).inputs[0].mediaType === SHOT_REQUEST_MEDIA_TYPE,
+"云家族接受以 ShotRequest 打头的 inputs");
+for (const execution of [seedanceExecution, veoExecution] as const) {
+  ok(throwsProduction(() => parseProductionIntentDraft(cloudDraft(execution, {
+    inputs: [asset("first-frame.png", SHA.c, "image/png"), shotRequestInput],
+  })), "必须是 ShotRequest"), `${execution.modelFamily} 的 inputs[0] 不是 ShotRequest 时 fail-closed`);
+}
+ok(parseProductionIntentDraft(draft()).inputs[0].mediaType === "image/png",
+  "H3 在 graph 契约 v2 落地前不强制 inputs[0] 为 ShotRequest（既有 intent 不受影响）");
+
+// Phase 3 / Phase 4 的 adapter 必须对着同一份 canonical execution 落地：这两个 digest 一旦变化，说明
+// 云 execution 的字段集合或规范化发生了漂移（§8.4、§8.5 验收基线）。
+ok(createProductionDispatchIntent(cloudDraft(seedanceExecution)).idempotencyKey
+  === "fe538267c38f98b1074f48eb7b72254192af5ca7e78af334b664804817b46ba7"
+  && createProductionDispatchIntent(cloudDraft(veoExecution)).idempotencyKey
+  === "ffbd9cdc5da88a70016ecb70a64411a831001dd1488561434adf600a7cf36bb5",
+"seedance / veo 的 canonical intent digest 钉为 Phase 3 / Phase 4 基线");
 ok(throwsProduction(() => parseProductionIntentDraft({ ...draft(), inputs: [] }), "1–32"),
   "intent 至少绑定一个输入 AssetRef");
 ok(throwsProduction(() => parseProductionIntentDraft({
@@ -332,6 +503,8 @@ ok(decisionCodes({ ...draft(), license: { ...draft().license, expiresAt: at(11) 
 ok(decisionCodes({ ...draft(), license: { ...draft().license, issuedAt: at(12) } }).includes("license-issued-in-future"),
   "未来签发的 license 不能 dispatch");
 
+const h3Execution = draft().execution as Extract<ProductionIntentExecution, { modelFamily: "minimax-h3" }>;
+const h3ComfyExecution: ProductionIntentExecution = { ...h3Execution, operation: "comfyui-workflow" };
 const euCommunity = {
   ...draft(),
   useTerritories: ["EU"],
@@ -342,12 +515,12 @@ ok(decisionCodes(euCommunity).includes("h3-written-license-required"),
   "H3 community license 在 EU 默认 deny");
 ok(decisionCodes({
   ...euCommunity,
-  execution: { ...euCommunity.execution, operation: "comfyui-workflow" },
+  execution: h3ComfyExecution,
 }).includes("h3-written-license-required"),
 "H3-over-ComfyUI 仍按 modelFamily 进入 restricted-territory written-license gate");
 ok(decisionCodes({
   ...euCommunity,
-  execution: { ...euCommunity.execution, operation: "comfyui-workflow" },
+  execution: h3ComfyExecution,
   license: { ...euCommunity.license, basis: "provider-terms" },
 }).includes("h3-written-license-required"),
 "EU 的 H3-over-ComfyUI 不能用 provider-terms 绕过 written-license gate");
@@ -398,6 +571,98 @@ ok(decisionCodes({
   license: { ...writtenLicense.license, issuedBy: null },
 }, { ...context(), deploymentTerritories: ["EU"] }).includes("h3-written-license-required"),
 "仅把 basis 文本改成 written-license 不足以放行，必须有明确签发/evidence 字段");
+
+// —— §4.7 三个新门：处理地域、许可义务、真人人脸 ——
+ok(PRODUCTION_INTENT_GATE_CODES.includes("processing-region-not-allowed")
+  && PRODUCTION_INTENT_GATE_CODES.includes("license-obligation-unmet")
+  && PRODUCTION_INTENT_GATE_CODES.includes("provider-likeness-policy"),
+"三个新 gate code 进入 PRODUCTION_INTENT_GATE_CODES");
+
+ok(decisionCodes(draft(), context({
+  backendProcessingRegions: ["US"], allowedProcessingRegions: ["SG"],
+})).includes("processing-region-not-allowed"),
+"后端处理地域不在项目允许集合内时 deny");
+ok(evaluateProductionIntentGates(intent, context({
+  backendProcessingRegions: ["SG"], allowedProcessingRegions: ["CN", "SG"],
+})).allowed, "处理地域在允许集合内时放行");
+ok(decisionCodes(draft(), context({ allowedProcessingRegions: ["SG"] }))
+  .includes("processing-region-not-allowed"),
+"项目声明了允许地域而后端处理地域未声明时 deny（无可比对项不等于合规）");
+ok(decisionCodes(cloudDraft(seedanceExecution), context({ realFaceInputs: "absent" }))
+  .includes("processing-region-not-allowed")
+  && decisionCodes(cloudDraft(veoExecution), context()).includes("processing-region-not-allowed"),
+"项目未声明 allowedProcessingRegions 时云家族 deny");
+ok(!decisionCodes(draft(), context({ backendProcessingRegions: ["SG"] }))
+  .includes("processing-region-not-allowed"),
+"项目未声明 allowedProcessingRegions 时 H3 / generic 暂放行（runtime-config 供给 regions 后改为全家族 deny）");
+ok(throwsProduction(
+  () => parseProductionIntentGateContext(context({ backendProcessingRegions: ["WORLDWIDE"] })),
+  "大写二位地域码",
+), "处理地域只接受 ISO-3166 alpha-2，不接受 WORLDWIDE 这类集合别名");
+for (const alias of ["EU", "UK"] as const) {
+  ok(throwsProduction(
+    () => parseProductionIntentGateContext(context({ allowedProcessingRegions: [alias] })),
+    "集合别名或非标准码",
+  ), `处理地域拒绝 ${alias}（要求写成员国代码）`);
+}
+ok(parseProductionIntentGateContext(context({ allowedProcessingRegions: ["FR", "DE", "GB"] }))
+  .allowedProcessingRegions?.join(",") === "DE,FR,GB",
+"处理地域接受成员国代码并规范化排序");
+ok(evaluateProductionIntentGates(intent, context()).allowed,
+  "缺省四项策略字段时既有 H3 gate 结论不变（runtime projects[] 落地前的兼容路径）");
+
+const obligationCodes = decisionCodes(obligated);
+ok(obligationCodes.filter((code) => code === "license-obligation-unmet").length === 2,
+  "项目既未声明年收入也未声明署名面时，两项义务各 deny 一次");
+ok(evaluateProductionIntentGates(createProductionDispatchIntent(obligated), context({
+  licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕", "发布文案"] },
+})).allowed, "声明年收入低于阈值且已落实署名面时放行");
+ok(decisionCodes(obligated, context({
+  licenseCompliance: { annualRevenueUsdBelow: 25_000_000, attributionSurfaces: ["片尾字幕"] },
+})).includes("license-obligation-unmet"),
+"声明的年收入上界高于许可阈值时 deny");
+ok(decisionCodes(obligated, context({
+  licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: [] },
+})).includes("license-obligation-unmet"),
+"署名面为空时 deny");
+ok(evaluateProductionIntentGates(createProductionDispatchIntent(draft({
+  license: {
+    ...draft().license,
+    basis: "written-license",
+    issuedBy: "MiniMax authorized licensing",
+    obligations: { attribution: null, revenueThresholdUsd: 20_000_000, noModelImprovement: true },
+  },
+})), context()).allowed,
+"完整 written-license evidence 解除年收入阈值条款");
+// 豁免判据与 H3 受限地域门同一个 hasExplicitWrittenLicense：只改 basis 文本不算数，且该判据不限家族。
+ok(decisionCodes(cloudDraft(seedanceExecution, {
+  license: {
+    ...draft().license,
+    basis: "written-license",
+    issuedBy: null,
+    obligations: { attribution: null, revenueThresholdUsd: 20_000_000, noModelImprovement: true },
+  },
+}), context({
+  allowedProcessingRegions: ["SG"], backendProcessingRegions: ["SG"], realFaceInputs: "absent",
+})).includes("license-obligation-unmet"),
+"非 H3 家族同样要求完整 written-license evidence：basis 文本 + issuedBy null 不构成豁免");
+
+const seedanceGateDraft = cloudDraft(seedanceExecution);
+const seedanceContext = (realFaceInputs: string): ProductionIntentGateContext => context({
+  allowedProcessingRegions: ["SG"], backendProcessingRegions: ["SG"], realFaceInputs,
+});
+ok(decisionCodes(seedanceGateDraft).includes("provider-likeness-policy"),
+  "缺省真人人脸声明时 Seedance 2.x deny（未证明不含即按含处理）");
+ok(decisionCodes(seedanceGateDraft, seedanceContext("undeclared")).includes("provider-likeness-policy"),
+  "显式 undeclared 与缺省同结论：Seedance 2.x deny");
+ok(decisionCodes(seedanceGateDraft, seedanceContext("present")).includes("provider-likeness-policy"),
+  "输入声明含真人人脸时 Seedance 2.x deny");
+ok(evaluateProductionIntentGates(
+  createProductionDispatchIntent(seedanceGateDraft),
+  seedanceContext("absent"),
+).allowed, "输入声明不含真人人脸且地域合规时 Seedance 放行");
+ok(!decisionCodes(draft(), context({ realFaceInputs: "present" })).includes("provider-likeness-policy"),
+  "真人人脸门只作用于 Seedance 2.x，H3 不受影响");
 
 // The interface is intentionally exercised at compile-time and preserves parser validation at the
 // trust boundary: a coordinator cannot treat an unparsed arbitrary object as a resolved intent.
