@@ -2,7 +2,7 @@
 
 状态日期：2026-08-31 ｜ 规格：同目录 `DESIGN.md`（v2，2026-08-28 落 9 项操作者决策）｜ v1 存档 `DESIGN.v1.md` ｜ 调研地图 `RESEARCH-MAPS.md`
 
-原则（操作者 2026-08-28 裁定）：GPU VM（Spot g4-standard-48，镜像 `wl-comfy-h3-g4-sg`）按时计价，视频生成之前的全部工作先完成，最后一次开机完成探针与首条任务。本版唯一执行后端为 MiniMax H3 over ComfyUI；Seedance 待 BytePlus 账户（Phase 3），Veo 归后续外语项目（Phase 4）。
+原则（操作者 2026-08-28 裁定；2026-09-02 追加：writing-loop 控制面与 worker 运行在本机，远程服务器不是必需的）：GPU VM（Spot g4-standard-48，镜像 `wl-comfy-h3-g4-sg`）按时计价，视频生成之前的全部工作先完成，最后一次开机完成探针与首条任务。本版唯一执行后端为 MiniMax H3 over ComfyUI；Seedance 待 BytePlus 账户（Phase 3），Veo 归后续外语项目（Phase 4）。
 
 ## 进度总表
 
@@ -17,9 +17,9 @@
 | 1a | gateway 进程装配（`production-gateway-main.ts`：三内核同进程、bearer、绑私网 IP、优雅停机）、server-owned registry（`production-gateway-runtime-config.ts`，含只读 profile 快照导出）、装配层三客户端接入 `insecure-private-http`、本机 `cas://` resolver、systemd 单元（gateway / worker.service+timer）、`gcp-h3-vm.sh` | §8.2、§8.0 | **已合并** main `75c0e9b`（2026-09-02；reviewer + codex 审查 2 blocker + 5 major + 12 minor 已修；rebase 到 0-D 之后全链 2455 PASS）。合并后待补：gateway-main 向 ComfyUiAdapter 注入 `h3Profiles` / `maxInputImageBytes` / `processingRegions`（registry 缺 `maxInputImageBytes` 字段）；快照 `durationGrid` 与 capability 网格一致性用例——归 1b | `hub/src/production-gateway-main.ts`、`production-gateway-runtime-config.ts`、`writing-loop-operator/` |
 | 1b | H3 graph 契约 v2（prompt / seed sentinel）、stage 契约 v2（index 0 `shot-request` slot + `slotPolicy`）、ingest ffmpeg 尾帧提取、快照补 `limits`（待 0-D capability 解析器）、跨实例 assets GET（Phase 3） | §8.2 | 未开始（依赖 1a 合并、0-D） | `hub/src/production-h3-graph.ts`、`production-stage-gateway.ts`、`production-gateway.ts` |
 | VCS | `pipeline_defs/scripted-drama.yaml`、handoff v2 schema、`import_handoff.py`、`publish_check.py`、四个 artifact schema 扩展、契约测试 12 条 | §4.8、§8.3 | 已实现，576 PASS（contracts）/ 941 PASS（全量），**未提交** | `~/workspace/citronetic/video-creation-studio` 主工作树 |
-| SRV | writing-loop-sg 前提：ffmpeg 6.1.1；根盘 30 → 100 GB（在线扩容，现 74 GB 可用）；剧本仓库与账本回同步到 8d90231；VPC `default-allow-internal`（10.128.0.0/9）覆盖 writing-loop-sg（10.148.0.5）与 GPU VM 之间的私网 HTTP，无需新增防火墙规则 | §8.0 | 2026-09-02 全部完成 | writing-loop-sg |
+| SRV | writing-loop-sg（**可选**，操作者 2026-09-02 裁定控制面在本机）：ffmpeg 6.1.1、根盘 100 GB、剧本仓库回同步到 8d90231 已完成；服务器不再参与视频生产，只保留剧本创作阶段的调度器与 Studio | §8.0 | 不再是前提 | writing-loop-sg |
 | NAR | 叙事侧数据：EP001 场 1-1 draft（`shotRequestFromScript` 预填 + 人工补 `camera`）、`mappings.v1.json`、`prop-states.v1.json`、首帧素材（S01 Blender EEVEE 渲染，`operator-upload` 入 CAS） | §6、§8.2 前提 | 未开始（依赖 0-B、0-E） | `~/dramas/yujing-jiushi` |
-| GPU | 最后一次开机：创建 Spot G4 → 镜像内服务与地域门启用 → `/object_info` 节点 schema 核对 → 权重 sha256 导出入 `h3GraphContract` → gateway 部署 → 首条 fl2va 全链路（plan → confirm → worker --once → qc → handoff）→ 模拟抢占用例 → 停机 | §8.2 验收 | 未开始；脚本已随 1a 进仓库（`writing-loop-operator/scripts/gcp-h3-vm.sh`）。**网络前提（2026-09-02 核实）**：asia-southeast1 无 Cloud Router / Cloud NAT，默认子网 10.148.0.0/20 的 Private Google Access 关闭——无外网 IP 的 VM 不能出网装包；两种处理：(1) 新建 Cloud NAT + 打开 Private Google Access（推荐，VM 全程不暴露公网）；(2) 装包时 `gcp-h3-vm.sh egress on` 临时挂外网 IP（`default-allow-ssh` 0.0.0.0/0:22 会短时暴露）。待操作者选择。防火墙：`default-allow-internal` 已覆盖 gateway 8790 端口，无需新规则 | GCP asia-southeast1 |
+| GPU | 最后一次开机：创建 Spot G4 → 镜像内服务与地域门启用 → `/object_info` 节点 schema 核对 → 权重 sha256 导出入 `h3GraphContract` → gateway 部署 → 首条 fl2va 全链路（plan → confirm → worker --once → qc → handoff）→ 模拟抢占用例 → 停机 | §8.2 验收 | 未开始；脚本已随 1a 进仓库（`writing-loop-operator/scripts/gcp-h3-vm.sh`）。**网络前提（2026-09-02 核实并裁定）**：asia-southeast1 无 Cloud NAT、默认子网 Private Google Access 关闭；采用「本机经 IAP ssh 隧道访问、gateway 安装包由本机 npm pack 后经隧道 scp」的做法，VM 不需要出网，不建 NAT、不挂外网 IP。gateway 只绑 VM 的 127.0.0.1，防火墙只需现有的 IAP 网段 22 端口规则；`gcp-h3-vm.sh tunnel` 同时转发 8790 与 8188 | GCP asia-southeast1 |
 
 合并顺序：0-A（worktree 分支合入 main）→ 0-B → 0-C → 0-D → 0-E → 0-F → Phase 1 → VCS 侧提交（独立仓库，可先行）。每片经 reviewer 审查、`npm run typecheck && npm test` 全绿后提交。
 

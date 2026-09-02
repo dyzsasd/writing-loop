@@ -23,6 +23,7 @@
 | 7 | `safety_identifier` 的对账用法随 Seedance 后置，不再作为决策项 | §7、§8.4、§9.3 |
 | 8 | 英文译文由写作侧 agent 供给，本版不做 | §4.1、§8.5 |
 | 9 | `availableBudgetMicros` 本版不需要人工维护，先跑通链路 | §4.7、§8.6 |
+| 10 | （2026-09-02）writing-loop 控制面运行在本机，远程服务器 writing-loop-sg 不是必需的；本机经 IAP ssh 隧道访问 GPU VM 上只绑 127.0.0.1 的 gateway；gateway 安装包经隧道 scp，VM 不需要出网 | §8.0、§8.2、§9.4 |
 
 裁决的四处内部一致性修正（2026-08-28）：execution profile 与价目文件由 gateway 的 server-owned registry 持有，worker 侧只引用 `profileId` 与 digest，`plan-shots` 的估算读取 gateway 导出的只读 profile 快照文件（§4.2、§4.7）；Seedance 的 `seed` 在编译层为 error（`seed_rejected`），不再有 warning 语义（§4.1、§5.1）；`ShotRequest.output` 只保留 `aspectRatio` 与 `generateAudio` 作为请求意图并与 execution profile 校验一致，`resolutionClass` 移除，画幅枚举以 ShotRequest 的集合为准（§4.1、§4.2）；三个无触发规则的 Degradation code（`reference-video-dropped`、`reference-audio-dropped`、`native-audio-off-post-dub`）删除，视频 / 音频参考被裁剪统一记 `references-trimmed`（§4.1、§5.2）。
 
@@ -630,34 +631,35 @@ Ark error.code 到类别的具体映射表在 Phase 1 由录制 fixture 填充�
 
 ### 8.0 部署拓扑（全部 Phase 的前提）
 
-约束来源：在 `main@1455194` 上，worker 侧 `production-gateway` backend 必须为 HTTPS 且 `credentialEnv` 非空，loopback 不豁免；`gateway`（ingest）与 `stagingProfiles[]` 只接受「credentialed HTTPS」或「无凭据 literal-loopback HTTP」两种形态（`hub/src/production-runtime-config.ts` 的 `trustedServiceUrl`）。gateway 进程以 `node:http` 监听且只绑定字面私网 IP（`privateBindHost` 接受 127/8、10/8、172.16/12、192.168/16、169.254/16 与 IPv6 `::1` / ULA / 链路本地），不含 TLS 终结（`hub/src/production-gateway-router.ts`）。minimax-h3 workflow 必须 scoped-staging，scoped-staging 禁止绑定 `kind=comfyui` backend；stage kernel 把资产硬链接到 `<root>/objects/<namespace>/<sha256>` 并把 providerObjectKey 写入 `LoadImage.image`（`hub/src/production-stage-gateway.ts`；`production-h3-graph.ts`），ComfyUI 必须能读该目录。
+拓扑裁定（操作者 2026-09-02，决策 10）：writing-loop 的控制面运行在操作者本机，远程服务器 writing-loop-sg 不是必需的。本机不在 GCP 的 VPC 内，与 GPU VM 之间用 IAP 的 ssh 隧道把 gateway 端口映射到本机的 127.0.0.1；gateway 只绑定 VM 上的 127.0.0.1。该做法不需要改代码：worker 侧 `transport: "insecure-private-http"` 本来就接受「127.0.0.1 字面地址 + 非空 credentialEnv」的 http URL（§8.1，已合并的 0-A / 1a）。
 
-传输方式（决策 2）：worker 与 gateway 之间不使用 TLS，走 VPC 私网明文 HTTP + 静态 bearer。为此在 worker runtime config 的 `backends[]`、`gateway`、`stagingProfiles[]` 三处新增 owner-only 的 `transport` 字段，取值 `"tls"`（缺省，行为与现状一致）或 `"insecure-private-http"`。选择 `insecure-private-http` 时的校验规则：
+约束来源：worker 侧 `production-gateway` backend 缺省必须为 HTTPS 且 `credentialEnv` 非空；`gateway`（ingest）与 `stagingProfiles[]` 缺省只接受「credentialed HTTPS」或「无凭据 literal-loopback HTTP」；显式 `transport: "insecure-private-http"` 时接受 http + RFC1918 私网 IPv4 或 127.0.0.1 字面地址 + 非空 credentialEnv（`hub/src/production-runtime-config.ts` 的 `trustedServiceUrl`，装配层三客户端同规则）。gateway 进程以 `node:http` 监听，`listen.host` 只接受字面私网 IPv4 或 127.0.0.1（`production-gateway-runtime-config.ts`），不含 TLS。minimax-h3 workflow 必须 scoped-staging；stage kernel 把资产硬链接到 `<objectsRoot>/objects/<namespace>/<sha256>` 并把 providerObjectKey 写入 `LoadImage.image`，ComfyUI 必须能读该目录，因此 gateway 与 ComfyUI 同机。
+
+传输方式（决策 2 + 决策 10）：worker 与 gateway 之间不使用 TLS。隧道两端都是 loopback：本机侧 `http://127.0.0.1:8790`，VM 侧 gateway 绑定 `127.0.0.1:8790`；ssh 隧道本身经 IAP 加密。`transport` 字段的校验规则不变：
 
 | 项 | 规则 |
 |---|---|
 | protocol | 只接受 `http:`；`https:` 与其他 scheme 拒绝 |
 | host | 只接受字面 IP，且落在 RFC1918 私网 IPv4（10/8、172.16/12、192.168/16）或 127.0.0.1；域名、公网 IP、通配地址一律拒绝 |
-| `credentialEnv` | 必须非空，语义与现状一致（静态 bearer，经 systemd `EnvironmentFile` 0600 注入）；`kind: "comfyui"` 的 direct-dev backend 不接受该 transport |
+| `credentialEnv` | 必须非空，静态 bearer；本机由 shell 环境或 launchd 的 EnvironmentVariables 注入；`kind: "comfyui"` 的 direct-dev backend 不接受该 transport |
 | 其余 | URL 不得含 credential、query、fragment；path 仍按固定安全 segment 序列校验 |
 
 威胁模型与适用条件（写入 `references/config-schema.md`）：
 
-- 两台主机在同一 VPC（GCP asia-southeast1），gateway 只绑定该 VPC 的内网 IP，不监听公网地址；
-- 防火墙不对公网开放 gateway 端口，入站规则只允许来自 writing-loop-sg 内网 IP 的该端口；
+- gateway 只绑定 VM 的 127.0.0.1，VM 没有外网 IP，VPC 内也不暴露 gateway 端口；唯一入口是经 IAP 认证的 ssh 隧道（防火墙只需放行 IAP 网段 35.235.240.0/20 的 22 端口）；
 - GPU VM 按批次启停，非批次期间不存在监听端口；
-- 明文传输下 bearer 与请求体对同 VPC 内的其他工作负载可见。当前该 VPC 内只有 writing-loop-sg 与按需启动的 GPU VM 两台主机，且均由同一操作者控制；
-- 该选项不适用于跨 VPC、跨云或经公网的部署。VPC 内出现第三方工作负载时须改回 `transport: "tls"`。
+- bearer 与请求体只在隧道两端的 loopback 上明文出现；
+- 该选项不适用于把 gateway 直接暴露到 VPC 或公网的部署；若 gateway 改绑 VPC 内网 IP，须重新评估。
 
 拓扑表：
 
 | 主机 | 组件 | 说明 |
 |---|---|---|
-| writing-loop-sg（10.148.0.5，常驻） | control plane workspace（ProductionStore 账本）、调度器、`production-worker` systemd timer、`plan-shots` / `qc` / `handoff` 的 CLI 执行 | 账本只在服务器 workspace 写入；本机 `~/dramas` 为 paused 副本，不并行写入。CLI 经 ssh 在服务器执行。worker 经 VPC 私网 HTTP + bearer 访问 GPU VM 上的 gateway |
-| GPU VM（Spot g4-standard-48，镜像 `wl-comfy-h3-g4-sg`，asia-southeast1，按批次启停） | ComfyUI、gateway 单实例（jobs / stages / ingests 三个 kernel，H3 profile）、CAS `objects` 目录与 ComfyUI 同一文件系统 | 持久化启动盘：job record、CAS `objects` 与 ingest 产物在 Spot 抢占或停机后保留；ingest 经 loopback 访问 ComfyUI `/view`；`handoff --export-dir` 经 gateway 的 `assets` GET 路由取回资产，因此导出时 VM 必须在运行 |
-| 本机 | VCS（scripted-drama 流水线）、Blender 候选图轨道 | handoff 导出目录由服务器 rsync 到本机；本机不直达 VPC 私网 gateway |
+| 本机（macOS） | writing-loop workspace `~/dramas`（ProductionStore：intent、task、事件）、CLI（`plan-shots` / `qc` / `handoff` / `visual approve-candidate`）、`production-worker --once`（批次期间手动或 launchd 定时运行）、Blender 候选图轨道、VCS（scripted-drama 流水线） | 账本只在本机写入；handoff 导出目录即本机路径，不需要 rsync。批次期间保持 `gcp-h3-vm.sh tunnel`（转发 8790 gateway 与 8188 ComfyUI）；`credentialEnv` 由本机环境注入；runtime config 文件权限 0400/0600 |
+| GPU VM（Spot g4-standard-48，镜像 `wl-comfy-h3-g4-sg`，asia-southeast1，按批次启停，无外网 IP） | ComfyUI、gateway 单实例（jobs / stages / ingests 三个 kernel，H3 profile；`listen.host: 127.0.0.1`）、CAS `objects` 目录与 ComfyUI 同一文件系统 | 持久化启动盘：job record、CAS `objects` 与 ingest 产物在 Spot 抢占或停机后保留；gateway 安装包由本机 `npm pack` 后经隧道 scp 到 VM 安装，VM 不需要出网（不需要 Cloud NAT 或外网 IP）；`handoff --export-dir` 经 gateway 的 `assets` GET 路由取回资产，因此导出时 VM 必须在运行 |
+| writing-loop-sg（可选） | 剧本创作阶段的调度器与 Studio；不参与视频生产 | 剧本已完本，服务器上的项目已暂停；如需继续在服务器上写剧本，剧本仓库以 git 同步回本机后再出片。worker 的 systemd 单元模板保留为可选部署方式 |
 
-worker runtime config：`backends[]`、`gateway`（ingest）与 `stagingProfiles[]` 的 baseUrl 全部指向 GPU VM 的私网 IP，`transport: "insecure-private-http"`，`credentialEnv` 由 systemd `EnvironmentFile`（0600）注入；runtime config 文件权限 0400/0600。gateway 侧 `comfyBaseUrl` 为 loopback。接入 Seedance（Phase 3）与 Veo（Phase 4）时在 writing-loop-sg 上增开第二个 gateway 实例承载云 adapter 与云输出 ingest，届时的跨实例 CAS 取回按 §6.4 处理。
+worker runtime config：`backends[]`、`gateway`（ingest）与 `stagingProfiles[]` 的 baseUrl 全部为 `http://127.0.0.1:8790`，`transport: "insecure-private-http"`；gateway 侧 `comfyBaseUrl` 为 `http://127.0.0.1:8188`。接入 Seedance（Phase 3）与 Veo（Phase 4）时，云 adapter 与云输出 ingest 的 gateway 实例可以直接运行在本机（loopback，不需要隧道），届时的跨实例 CAS 取回按 §6.4 处理。
 
 ### 8.1 Phase 0：契约与编译器（零网络）
 
