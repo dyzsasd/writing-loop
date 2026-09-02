@@ -87,8 +87,8 @@ apply_auto_shutdown_metadata() {
 
 cmd_create() {
   require_auth
-  if exists; then fail "实例 $INSTANCE 已存在（$ZONE）。要重建先手动删除，本脚本不覆盖。"; fi
-  say "创建 Spot $MACHINE（$IMAGE_FAMILY，启动盘 ${BOOT_GB}GB 保留，抢占时只停机）"
+  if exists; then fail "实例 $INSTANCE 已存在（${ZONE}）。要重建先手动删除，本脚本不覆盖。"; fi
+  say "创建 Spot ${MACHINE}（${IMAGE_FAMILY}，启动盘 ${BOOT_GB}GB 保留，抢占时只停机）"
   local startup
   startup="$(mktemp)"
   auto_shutdown_script > "$startup"
@@ -134,7 +134,7 @@ cmd_stop() {
     if [ "$state" = "TERMINATED" ]; then say "实例已停机（TERMINATED）。"; cmd_status; return 0; fi
     sleep 5
   done
-  fail "停机后 3 分钟内状态仍为 $state，请手动检查（gcloud compute instances describe $INSTANCE --zone $ZONE）。"
+  fail "停机后 3 分钟内状态仍为 ${state}，请手动检查（gcloud compute instances describe $INSTANCE --zone ${ZONE}）。"
 }
 
 cmd_status() {

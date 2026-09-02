@@ -49,19 +49,19 @@ else
     npm install -g "$WRITING_LOOP_INSTALL_SOURCE" && installed=1
   fi
   if [ "$installed" -eq 0 ]; then
-    say "回退 git 源：$GIT_URL（clone + build，约 8-10 分钟）"
+    say "回退 git 源：${GIT_URL}（clone + build，约 8-10 分钟）"
     tmp="$(mktemp -d)"
     if git clone --depth 1 "$GIT_URL" "$tmp/writing-loop" >/dev/null 2>&1; then
       ( cd "$tmp/writing-loop/hub" && npm install >/dev/null 2>&1 && npm run build >/dev/null 2>&1 \
         && npm install -g . >/dev/null 2>&1 ) && installed=1 || true
     fi
-    [ "$installed" -eq 1 ] || fail "三级安装源全部失败。手动路径：npm i -g $PKG；或设 WRITING_LOOP_INSTALL_SOURCE=<tarball>；或确认 $GIT_URL 可达。"
+    [ "$installed" -eq 1 ] || fail "三级安装源全部失败。手动路径：npm i -g ${PKG}；或设 WRITING_LOOP_INSTALL_SOURCE=<tarball>；或确认 $GIT_URL 可达。"
     say "git 源安装成功"
   fi
   if ! command -v writing-loop >/dev/null 2>&1; then
     NPMBIN="$(npm prefix -g 2>/dev/null)/bin"
     if [ -x "$NPMBIN/writing-loop" ]; then
-      say "已装到 $NPMBIN，但该目录不在 PATH——请把下面这行加进 shell 配置后重开会话："
+      say "已装到 ${NPMBIN}，但该目录不在 PATH——请把下面这行加进 shell 配置后重开会话："
       say "  export PATH=\"$NPMBIN:\$PATH\""
       PATH="$NPMBIN:$PATH"; export PATH
     else
@@ -70,7 +70,7 @@ else
   fi
 fi
 WL="$(command -v writing-loop)"
-say "writing-loop = $WL（$(writing-loop --version 2>/dev/null | head -1 || true)）"
+say "writing-loop = ${WL}（$(writing-loop --version 2>/dev/null | head -1 || true)）"
 
 # ── ④ doctor 收口 ────────────────────────────────────────────────────────────
 say "运行 writing-loop doctor …"
