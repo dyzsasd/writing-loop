@@ -94,7 +94,9 @@ writing-loop production status    # registre local take/QC ; aucun appel distant
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
 writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
-writing-loop production handoff --project demo --input handoff.json  # takes approuvés ; JSON canonique sur stdout
+writing-loop production handoff --project demo --input handoff.json  # takes approuvés ; JSON canonique (contrat v2)
+writing-loop production handoff --project demo --input handoff.json \
+  --export-dir out/handoff --config production-runtime.json          # + répertoire d'actifs <sha256>.<ext>
 writing-loop project plan --input request.json
 writing-loop project create --input request.json --confirm wlplan_…
 writing-loop project verify mon-drame

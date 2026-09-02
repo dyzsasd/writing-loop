@@ -28,14 +28,14 @@ const ok = (condition: boolean, message: string): void => {
   if (!condition) fails++;
 };
 
-function capture(args: string[], cwd: string): { code: number; out: string; err: string } {
+async function capture(args: string[], cwd: string): Promise<{ code: number; out: string; err: string }> {
   const out: string[] = [];
   const err: string[] = [];
   const oldLog = console.log;
   const oldError = console.error;
   console.log = (...values: unknown[]) => { out.push(values.map(String).join(" ")); };
   console.error = (...values: unknown[]) => { err.push(values.map(String).join(" ")); };
-  try { return { code: productionMain(args, cwd), out: out.join("\n"), err: err.join("\n") }; }
+  try { return { code: await productionMain(args, cwd), out: out.join("\n"), err: err.join("\n") }; }
   finally { console.log = oldLog; console.error = oldError; }
 }
 
@@ -425,8 +425,8 @@ function makeWorkspace(options: WorkspaceOptions = {}): Fixture {
 const planArgs = (fixture: Fixture, extra: string[] = []): string[] => [
   "plan-shots", "--project", "demo", "--input", fixture.inputFile, "--config", fixture.configFile, ...extra,
 ];
-const planJson = (fixture: Fixture, extra: string[] = []): Record<string, any> => {
-  const result = capture(planArgs(fixture, ["--plan", "--json", ...extra]), fixture.root);
+const planJson = async (fixture: Fixture, extra: string[] = []): Promise<Record<string, any>> => {
+  const result = await capture(planArgs(fixture, ["--plan", "--json", ...extra]), fixture.root);
   if (!result.out.trim()) throw new Error(`plan-shots --plan 无输出（退出 ${result.code}）：${result.err}`);
   return JSON.parse(result.out) as Record<string, any>;
 };
@@ -517,7 +517,7 @@ const first = makeWorkspace();
 let batchPlanId = "";
 try {
   const before = treeSnapshot(first.root);
-  const planned = capture(planArgs(first, ["--plan", "--json"]), first.root);
+  const planned = await capture(planArgs(first, ["--plan", "--json"]), first.root);
   const after = treeSnapshot(first.root);
   ok(planned.code === 0, `plan-shots --plan 退出 0（实得 ${planned.code}；${planned.err}）`);
   ok(before === after, "plan-shots --plan 严格零写入（workspace 目录树逐文件字节不变）");
@@ -541,7 +541,7 @@ try {
   ok(plan.validation.errors === 0,
     `合并后镜头编译无 error（实得 ${JSON.stringify(plan.validation.shots[0].issues)}）`);
 
-  const again = planJson(first);
+  const again = await planJson(first);
   ok(again.batchPlanId === batchPlanId, "同一输入重复出计划得到同一 batchPlanId");
 
   const repriced = snapshot() as { profiles: Array<Record<string, any>> };
@@ -550,35 +550,36 @@ try {
   body.priceTable = { ...PRICE_TABLE, microsPerOutputSecond: 860_000 };
   repriced.profiles[0] = { ...body, profileDigest: productionCanonicalJsonSha256(body) };
   writeFileSync(join(first.root, "runtime", "profiles", "snapshot.json"), JSON.stringify(repriced, null, 2) + "\n", { mode: 0o600 });
-  ok(planJson(first).batchPlanId !== batchPlanId, "价目变化即 batchPlanId 失效（策略进入 policyDigest）");
+  ok((await planJson(first)).batchPlanId !== batchPlanId, "价目变化即 batchPlanId 失效（策略进入 policyDigest）");
   writeFileSync(join(first.root, "runtime", "profiles", "snapshot.json"), JSON.stringify(snapshot(), null, 2) + "\n", { mode: 0o600 });
 
   const changed = batchRequest() as { script: { mergedPatches: Array<Record<string, any>> } };
   changed.script.mergedPatches[0].prompt.text = "改写后的 prompt 文本，用于验证批次指纹随输入变化。";
   writeFileSync(join(first.root, "batch-2.json"), JSON.stringify(changed, null, 2) + "\n");
-  const changedPlan = JSON.parse(capture([
+  const changedCapture = await capture([
     "plan-shots", "--project", "demo", "--input", join(first.root, "batch-2.json"),
     "--config", first.configFile, "--plan", "--json",
-  ], first.root).out) as Record<string, any>;
+  ], first.root);
+  const changedPlan = JSON.parse(changedCapture.out) as Record<string, any>;
   ok(changedPlan.batchPlanId !== batchPlanId, "镜头输入变化即 batchPlanId 失效");
 
   // 视觉侧的表进入 policyDigest：改一条灯光映射即失效。
   writeFileSync(join(first.repo, "visual", "mappings.v1.json"), JSON.stringify({
     ...MAPPINGS, lighting: [{ sceneId: "S08", timeOfDay: "day", lightingStateId: "LIGHT_DUSK" }],
   }, null, 2) + "\n");
-  ok(planJson(first).batchPlanId !== batchPlanId, "mappings 变化即 batchPlanId 失效（视觉侧表进入 policyDigest）");
+  ok((await planJson(first)).batchPlanId !== batchPlanId, "mappings 变化即 batchPlanId 失效（视觉侧表进入 policyDigest）");
   writeFileSync(join(first.repo, "visual", "mappings.v1.json"), JSON.stringify(MAPPINGS, null, 2) + "\n");
 
   const beforeReject = treeSnapshot(first.root);
-  const rejected = capture(planArgs(first, ["--confirm", "f".repeat(64)]), first.root);
+  const rejected = await capture(planArgs(first, ["--confirm", "f".repeat(64)]), first.root);
   ok(rejected.code === 1 && rejected.err.includes("确认指纹不匹配")
     && treeSnapshot(first.root) === beforeReject,
   "错误 batchPlanId 的 --confirm 被拒且零写入");
 
-  const mismatched = capture(planArgs(first, ["--plan", "--from-script", "2"]), first.root);
+  const mismatched = await capture(planArgs(first, ["--plan", "--from-script", "2"]), first.root);
   ok(mismatched.code === 1 && mismatched.err.includes("script.episode"),
     "--from-script 与 --input 的集号不一致时拒绝");
-  ok(planJson(first, ["--from-script", "1", "--scene", "1"]).batchPlanId === batchPlanId,
+  ok((await planJson(first, ["--from-script", "1", "--scene", "1"])).batchPlanId === batchPlanId,
     "--from-script 1 --scene 1 与文档一致时得到同一计划");
 } finally {
   rmSync(first.root, { recursive: true, force: true });
@@ -592,8 +593,8 @@ try {
   const derivedFixture = makeWorkspace({ request: nullSeed });
   const explicitFixture = makeWorkspace();
   try {
-    const derivedPlan = planJson(derivedFixture);
-    const explicitPlan = planJson(explicitFixture);
+    const derivedPlan = await planJson(derivedFixture);
+    const explicitPlan = await planJson(explicitFixture);
     const seedDegradations = (derivedPlan.degradations as Array<Record<string, unknown>>)
       .filter((entry) => entry.code === "seed-derived");
     ok(derivedPlan.validation.errors === 0 && seedDegradations.length === 1
@@ -603,7 +604,7 @@ try {
     `--from-script 且 output.seed 为 null 时逐镜记一条 seed-derived（实得 ${JSON.stringify(derivedPlan.degradations)}）`);
     ok(derivedPlan.batchPlanId !== explicitPlan.batchPlanId,
       "派生 seed 计入 batchPlanId：与显式 seed 的同一批次指纹不同");
-    const confirmed = capture(
+    const confirmed = await capture(
       planArgs(derivedFixture, ["--confirm", derivedPlan.batchPlanId, "--json"]), derivedFixture.root,
     );
     const shot = (JSON.parse(confirmed.out) as Record<string, any>).shots[0];
@@ -649,7 +650,7 @@ try {
   ];
   const mixedFixture = makeWorkspace({ request: mixed, snapshotDoc: mixedSnapshot });
   try {
-    const plan = planJson(mixedFixture);
+    const plan = await planJson(mixedFixture);
     const byShot = new Map((plan.decisions as Array<Record<string, string>>)
       .map((row) => [row.shotId, row.profileId] as const));
     const derived = (plan.degradations as Array<Record<string, string>>)
@@ -670,10 +671,10 @@ try {
   delete noFirstFrame.script.mergedPatches[0].continuity;
   const fixture = makeWorkspace({ visualCandidate: CANDIDATE(), request: noFirstFrame });
   try {
-    const plan = planJson(fixture);
+    const plan = await planJson(fixture);
     ok(plan.validation.errors === 0 && plan.blocked === false,
       `候选图自动填首帧后编译通过（实得 ${JSON.stringify(plan.validation.shots[0].issues)}）`);
-    const confirmed = capture(planArgs(fixture, ["--confirm", plan.batchPlanId, "--json"]), fixture.root);
+    const confirmed = await capture(planArgs(fixture, ["--confirm", plan.batchPlanId, "--json"]), fixture.root);
     const shot = (JSON.parse(confirmed.out) as Record<string, any>).shots[0];
     const shotRequest = JSON.parse(
       readProductionCasObject(fixture.root, "demo", shot.shotRequestSha256)!.toString("utf8"),
@@ -689,8 +690,8 @@ try {
   // 人工已写死首帧时不覆盖：patch 优先于表查。
   const withOperatorFrame = makeWorkspace({ visualCandidate: CANDIDATE() });
   try {
-    const plan = planJson(withOperatorFrame);
-    const confirmed = capture(planArgs(withOperatorFrame, ["--confirm", plan.batchPlanId, "--json"]), withOperatorFrame.root);
+    const plan = await planJson(withOperatorFrame);
+    const confirmed = await capture(planArgs(withOperatorFrame, ["--confirm", plan.batchPlanId, "--json"]), withOperatorFrame.root);
     const shot = (JSON.parse(confirmed.out) as Record<string, any>).shots[0];
     const shotRequest = JSON.parse(
       readProductionCasObject(withOperatorFrame.root, "demo", shot.shotRequestSha256)!.toString("utf8"),
@@ -707,7 +708,7 @@ try {
     visualCandidate: CANDIDATE({ status: "candidate", reviewedBy: null, reviewedAt: null }),
   });
   try {
-    const plan = planJson(pendingFixture);
+    const plan = await planJson(pendingFixture);
     const issues = plan.validation.shots[0].issues as Array<Record<string, string>>;
     ok(issues.some((issue) => issue.source === "visual" && issue.code === "candidate-not-approved"),
       "候选图尚未批准时记 warning 而不填首帧");
@@ -728,14 +729,14 @@ try {
     visualCandidate: CANDIDATE({ status: "candidate", reviewedBy: null, reviewedAt: null }),
   });
   try {
-    const planned = capture(planArgs(blockedFixture, ["--plan", "--json"]), blockedFixture.root);
+    const planned = await capture(planArgs(blockedFixture, ["--plan", "--json"]), blockedFixture.root);
     const plan = JSON.parse(planned.out) as Record<string, any>;
     const codes = (plan.validation.shots[0].issues as Array<Record<string, string>>).map((issue) => issue.code);
     ok(planned.code === 1 && plan.blocked === true && codes.includes("keyframe_not_approved"),
       `未批准候选图作首帧时 --plan 退出 1 且标 blocked（实得 ${codes.join(",")}）`);
     ok(plan.shots[0].planId === null && plan.shots[0].shotRequestSha256 === null,
       "被阻断的镜头不产出 planId 与 ShotRequest digest");
-    const confirmed = capture(planArgs(blockedFixture, ["--confirm", plan.batchPlanId]), blockedFixture.root);
+    const confirmed = await capture(planArgs(blockedFixture, ["--confirm", plan.batchPlanId]), blockedFixture.root);
     ok(confirmed.code === 1 && confirmed.err.includes("error 级校验问题"),
       "带 error 的批次 --confirm 硬拒");
   } finally { rmSync(blockedFixture.root, { recursive: true, force: true }); }
@@ -750,7 +751,7 @@ try {
   }];
   const fixture = makeWorkspace({ episode: EP001_EARLY_DIALOGUE, request: early });
   try {
-    const plan = planJson(fixture);
+    const plan = await planJson(fixture);
     const issues = plan.validation.shots[0].issues as Array<Record<string, string>>;
     ok(issues.some((issue) => issue.source === "prefill" && issue.code === "dialogue-before-first-action"),
       "首个动作行之前的对白记为 prefill warning 并进入计划");
@@ -771,7 +772,7 @@ try {
   }));
   const fixture2 = makeWorkspace({ request: castConflict });
   try {
-    const plan = planJson(fixture2);
+    const plan = await planJson(fixture2);
     const issues = plan.validation.shots[0].issues as Array<Record<string, string>>;
     ok(issues.some((issue) => issue.source === "merge"),
       `合并丢弃的 cast 差异记为 merge warning（实得 ${issues.map((row) => row.source + "/" + row.code).join(",")}）`);
@@ -800,7 +801,7 @@ try {
     request: batchRequest({ capability: withBoth }),
   });
   try {
-    const plan = planJson(portrait);
+    const plan = await planJson(portrait);
     ok(plan.decisions[0].profileId === PROFILE_ID,
       `9:16 镜头选到 9:16 的档（实得 ${plan.decisions[0].profileId}）`);
   } finally { rmSync(portrait.root, { recursive: true, force: true }); }
@@ -817,7 +818,7 @@ try {
   }));
   const landscapeFixture = makeWorkspace({ snapshotDoc: both, request: landscapeRequest });
   try {
-    const plan = planJson(landscapeFixture);
+    const plan = await planJson(landscapeFixture);
     ok(plan.decisions.every((row: Record<string, unknown>) => row.profileId === LANDSCAPE_PROFILE_ID),
       `16:9 镜头选到 16:9 的档（实得 ${plan.decisions.map((row: Record<string, string>) => row.profileId).join(",")}）`);
     ok(plan.decisions[0].durationSeconds === 5, "选档只在同一输出形状的时长网格内取整");
@@ -833,7 +834,7 @@ try {
     request: batchRequest({ backendInstanceId: null, capability: null }),
   });
   try {
-    const result = capture(planArgs(ambiguous, ["--plan"]), ambiguous.root);
+    const result = await capture(planArgs(ambiguous, ["--plan"]), ambiguous.root);
     ok(result.code === 1 && result.err.includes("必须显式声明目标后端"),
       "快照含多个后端而请求未声明时拒绝出计划");
   } finally { rmSync(ambiguous.root, { recursive: true, force: true }); }
@@ -851,7 +852,7 @@ try {
     ((config.projects as Array<Record<string, unknown>>)[0]!).allowedProcessingRegions = ["CN", "SG"];
     writeFileSync(multi.configFile, JSON.stringify(config, null, 2) + "\n");
     chmodSync(multi.configFile, 0o600);
-    const planned = capture(planArgs(multi, ["--plan", "--json"]), multi.root);
+    const planned = await capture(planArgs(multi, ["--plan", "--json"]), multi.root);
     ok(planned.code === 0,
       `多地域 profile 与顺序不同的 capability 视为一致（实得 ${planned.code}；${planned.err}）`);
   } finally { rmSync(multi.root, { recursive: true, force: true }); }
@@ -861,7 +862,7 @@ try {
     request: batchRequest({ capability: capability({ processingRegions: ["CN"] }) }),
   });
   try {
-    const result = capture(planArgs(disagree, ["--plan"]), disagree.root);
+    const result = await capture(planArgs(disagree, ["--plan"]), disagree.root);
     ok(result.code === 1 && result.err.includes("processingRegions"),
       "快照与 capability 的地域集合真正不同时拒绝出计划");
   } finally { rmSync(disagree.root, { recursive: true, force: true }); }
@@ -872,13 +873,13 @@ try {
     request: batchRequest({ capability: null }),
   });
   try {
-    const planned = capture(planArgs(snapshotLimits, ["--plan", "--json"]), snapshotLimits.root);
+    const planned = await capture(planArgs(snapshotLimits, ["--plan", "--json"]), snapshotLimits.root);
     ok(planned.code === 0, `快照带 limits 时无需批次 capability（实得 ${planned.code}；${planned.err}）`);
   } finally { rmSync(snapshotLimits.root, { recursive: true, force: true }); }
 
   const noLimits = makeWorkspace({ request: batchRequest({ capability: null }) });
   try {
-    const result = capture(planArgs(noLimits, ["--plan"]), noLimits.root);
+    const result = await capture(planArgs(noLimits, ["--plan"]), noLimits.root);
     ok(result.code === 1 && result.err.includes("没有可用的能力上限"),
       "快照不带 limits 且请求不给 capability 时拒绝出计划");
   } finally { rmSync(noLimits.root, { recursive: true, force: true }); }
@@ -888,7 +889,7 @@ try {
     request: batchRequest(),
   });
   try {
-    const result = capture(planArgs(conflicting, ["--plan"]), conflicting.root);
+    const result = await capture(planArgs(conflicting, ["--plan"]), conflicting.root);
     ok(result.code === 1 && result.err.includes("快照 limits 与 capability"),
       "快照 limits 与请求 capability 冲突时拒绝出计划");
   } finally { rmSync(conflicting.root, { recursive: true, force: true }); }
@@ -899,7 +900,7 @@ try {
   const permissive = makeWorkspace();
   try {
     chmodSync(join(permissive.root, "runtime", "profiles", "snapshot.json"), 0o644);
-    const result = capture(planArgs(permissive, ["--plan"]), permissive.root);
+    const result = await capture(planArgs(permissive, ["--plan"]), permissive.root);
     ok(result.code === 1 && result.err.includes("0400/0600"),
       "快照 mode 0644 时拒绝读取（与 runtime config / pinned graph 同一纪律）");
   } finally { rmSync(permissive.root, { recursive: true, force: true }); }
@@ -909,7 +910,7 @@ try {
     const runtime = join(linked.root, "runtime");
     renameSync(join(runtime, "profiles"), join(runtime, "profiles-real"));
     symlinkSync(join(runtime, "profiles-real"), join(runtime, "profiles"));
-    const result = capture(planArgs(linked, ["--plan"]), linked.root);
+    const result = await capture(planArgs(linked, ["--plan"]), linked.root);
     ok(result.code === 1 && result.err.includes("symlink"),
       "快照路径含 symlink component 时拒绝读取");
   } finally { rmSync(linked.root, { recursive: true, force: true }); }
@@ -918,8 +919,8 @@ try {
 // —— confirm：CAS 写入、inputs[0] 一致、幂等重放、损坏恢复 ——
 const second = makeWorkspace();
 try {
-  const plan = planJson(second);
-  const confirmed = capture(planArgs(second, ["--confirm", plan.batchPlanId, "--json"]), second.root);
+  const plan = await planJson(second);
+  const confirmed = await capture(planArgs(second, ["--confirm", plan.batchPlanId, "--json"]), second.root);
   ok(confirmed.code === 0, `--confirm 退出 0（实得 ${confirmed.code}；${confirmed.err}）`);
   const result = JSON.parse(confirmed.out) as Record<string, any>;
   const shot = result.shots[0];
@@ -943,7 +944,7 @@ try {
     .every((name) => /^[a-f0-9]{64}$/.test(name)),
   "发布后 CAS 目录只剩内容寻址对象，无临时文件残留");
 
-  const replay = capture(planArgs(second, ["--confirm", plan.batchPlanId, "--json"]), second.root);
+  const replay = await capture(planArgs(second, ["--confirm", plan.batchPlanId, "--json"]), second.root);
   const replayShot = (JSON.parse(replay.out) as Record<string, any>).shots[0];
   ok(replay.code === 0 && replayShot.casObjectCreated === false && replayShot.intentCreated === false
     && replayShot.taskCreated === false,
@@ -956,24 +957,24 @@ try {
 {
   const casFixture = makeWorkspace();
   try {
-    const plan = planJson(casFixture);
+    const plan = await planJson(casFixture);
     const digest = plan.shots[0].shotRequestSha256 as string;
     const casDir = join(casFixture.root, ".writing-loop", "demo", "production-cas.v1", "sha256");
     mkdirSync(casDir, { recursive: true });
     writeFileSync(join(casDir, digest), "{ truncated", { mode: 0o600 });
-    const result = capture(planArgs(casFixture, ["--confirm", plan.batchPlanId]), casFixture.root);
+    const result = await capture(planArgs(casFixture, ["--confirm", plan.batchPlanId]), casFixture.root);
     ok(result.code === 1 && result.err.includes("与对象名不一致") && result.err.includes("删除该文件再重试"),
       "CAS 最终路径残留截断文件时报可操作错误（不覆盖）");
   } finally { rmSync(casFixture.root, { recursive: true, force: true }); }
 
   const intentFixture = makeWorkspace();
   try {
-    const plan = planJson(intentFixture);
+    const plan = await planJson(intentFixture);
     const taskId = plan.shots[0].taskId as string;
     const intentDir = join(intentFixture.root, ".writing-loop", "demo", "production-intents.v1");
     mkdirSync(intentDir, { recursive: true, mode: 0o700 });
     writeFileSync(join(intentDir, `${taskId}.json`), "{ truncated", { mode: 0o600 });
-    const result = capture(planArgs(intentFixture, ["--confirm", plan.batchPlanId]), intentFixture.root);
+    const result = await capture(planArgs(intentFixture, ["--confirm", plan.batchPlanId]), intentFixture.root);
     ok(result.code === 1 && result.err.includes("删除该文件再重试"),
       "intent companion 残留截断文件时报可操作错误（不覆盖）");
     ok(productionIntentPath(intentFixture.root, "demo", taskId).endsWith(`${taskId}.json`),
@@ -1043,7 +1044,7 @@ try {
   });
   const chainFixture = makeWorkspace({ request: chained });
   try {
-    const plan = planJson(chainFixture);
+    const plan = await planJson(chainFixture);
     ok(plan.waves.length === 2 && plan.waves[0].shotIds.join(",") === "EP001-S1-1"
       && plan.waves[1].shotIds.join(",") === "EP001-S1-2",
     `承接链把依赖镜排到后一波（实得 ${JSON.stringify(plan.waves)}）`);
@@ -1070,7 +1071,7 @@ try {
   });
   const cycleFixture = makeWorkspace({ request: cyclic });
   try {
-    const result = capture(planArgs(cycleFixture, ["--plan"]), cycleFixture.root);
+    const result = await capture(planArgs(cycleFixture, ["--plan"]), cycleFixture.root);
     ok(result.code === 1 && result.err.includes("环形依赖"), "承接链互相依赖时拒绝出计划");
   } finally { rmSync(cycleFixture.root, { recursive: true, force: true }); }
 }
@@ -1084,17 +1085,17 @@ try {
   const bulkArgs = (extra: string[]): string[] => [
     "plan-shots", "--project", "demo", "--input", bulkFile, "--config", third.configFile, ...extra,
   ];
-  const bulkPlan = JSON.parse(capture(bulkArgs(["--plan", "--json"]), third.root).out) as Record<string, any>;
-  const blocked = capture(bulkArgs(["--confirm", bulkPlan.batchPlanId]), third.root);
+  const bulkPlan = JSON.parse((await capture(bulkArgs(["--plan", "--json"]), third.root)).out) as Record<string, any>;
+  const blocked = await capture(bulkArgs(["--confirm", bulkPlan.batchPlanId]), third.root);
   ok(blocked.code === 1 && blocked.err.includes("样片门") && blocked.err.includes("尚未入库")
     && blocked.err.includes("taskIdPrefix"),
   "phase: bulk 在样片 task 尚未入库时拒绝提交，并提示前缀必须一致");
 
-  const samplePlan = planJson(third);
-  capture(planArgs(third, ["--confirm", samplePlan.batchPlanId, "--json"]), third.root);
+  const samplePlan = await planJson(third);
+  await capture(planArgs(third, ["--confirm", samplePlan.batchPlanId, "--json"]), third.root);
   const taskId = samplePlan.shots[0].taskId as string;
 
-  const stillBlocked = capture(bulkArgs(["--confirm", bulkPlan.batchPlanId]), third.root);
+  const stillBlocked = await capture(bulkArgs(["--confirm", bulkPlan.batchPlanId]), third.root);
   ok(stillBlocked.code === 1 && stillBlocked.err.includes("dispatch-pending"),
     "样片 task 尚未 approved 时 bulk 仍被拒（非 approved 与缺失同样阻断）");
 
@@ -1121,18 +1122,18 @@ try {
   }
   ok(task.status === "qc-pending", `样片 fixture 推进到 qc-pending（实得 ${task.status}）`);
 
-  const approved = capture(["qc", "--approve", "--project", "demo", "--task", taskId, "--by", "qc:lead", "--json"], third.root);
+  const approved = await capture(["qc", "--approve", "--project", "demo", "--task", taskId, "--by", "qc:lead", "--json"], third.root);
   ok(approved.code === 0, `production qc --approve 退出 0（实得 ${approved.code}；${approved.err}）`);
   const approvedTask = JSON.parse(approved.out) as Record<string, any>;
   ok(approvedTask.status === "approved" && approvedTask.approval.decidedBy === "qc:lead"
     && approvedTask.approval.taskRevision === approvedTask.revision - 1,
   "approved 事件写入且 approval.taskRevision = revision - 1");
 
-  const again = capture(["qc", "--approve", "--project", "demo", "--task", taskId, "--by", "qc:lead"], third.root);
+  const again = await capture(["qc", "--approve", "--project", "demo", "--task", taskId, "--by", "qc:lead"], third.root);
   ok(again.code === 1 && again.err.includes("只有 qc-pending"),
     "非 qc-pending 的 task 拒绝再次裁决（终态不可追加）");
 
-  const passed = capture(bulkArgs(["--confirm", bulkPlan.batchPlanId, "--json"]), third.root);
+  const passed = await capture(bulkArgs(["--confirm", bulkPlan.batchPlanId, "--json"]), third.root);
   ok(passed.code === 0, `样片 approved 后 bulk 放行（实得 ${passed.code}；${passed.err}）`);
 
   const otherPrefix = batchRequest({
@@ -1140,10 +1141,11 @@ try {
   });
   const otherFile = join(third.root, "bulk-other-prefix.json");
   writeFileSync(otherFile, JSON.stringify(otherPrefix, null, 2) + "\n");
-  const otherPlan = JSON.parse(capture([
+  const otherCapture = await capture([
     "plan-shots", "--project", "demo", "--input", otherFile, "--config", third.configFile, "--plan", "--json",
-  ], third.root).out) as Record<string, any>;
-  const wrongPrefix = capture([
+  ], third.root);
+  const otherPlan = JSON.parse(otherCapture.out) as Record<string, any>;
+  const wrongPrefix = await capture([
     "plan-shots", "--project", "demo", "--input", otherFile, "--config", third.configFile,
     "--confirm", otherPlan.batchPlanId,
   ], third.root);
@@ -1156,12 +1158,12 @@ try {
 // —— QC 拒绝路径与参数校验 ——
 const fourth = makeWorkspace();
 try {
-  const plan = planJson(fourth);
-  capture(planArgs(fourth, ["--confirm", plan.batchPlanId, "--json"]), fourth.root);
+  const plan = await planJson(fourth);
+  await capture(planArgs(fourth, ["--confirm", plan.batchPlanId, "--json"]), fourth.root);
   const taskId = plan.shots[0].taskId as string;
-  const noNote = capture(["qc", "--reject", "--project", "demo", "--task", taskId, "--by", "qc:lead"], fourth.root);
+  const noNote = await capture(["qc", "--reject", "--project", "demo", "--task", taskId, "--by", "qc:lead"], fourth.root);
   ok(noNote.code === 2 && noNote.err.includes("--note"), "--reject 必须给出 --note 原因");
-  const wrongStage = capture([
+  const wrongStage = await capture([
     "qc", "--reject", "--project", "demo", "--task", taskId, "--by", "qc:lead", "--note", "构图不符",
   ], fourth.root);
   ok(wrongStage.code === 1 && wrongStage.err.includes("dispatch-pending"),
@@ -1188,7 +1190,7 @@ try {
       ...event,
     })).task;
   }
-  const rejected = capture([
+  const rejected = await capture([
     "qc", "--reject", "--project", "demo", "--task", taskId, "--by", "qc:lead", "--note", "尾帧穿帮", "--json",
   ], fourth.root);
   const rejectedTask = JSON.parse(rejected.out) as Record<string, any>;
@@ -1212,8 +1214,8 @@ try {
   );
   // pinned graph 与 runtime config 同一读取纪律：owner-only 0600 普通文件。
   chmodSync(join(gateFixture.root, "runtime", "workflows", "h3-fl2va-portrait.json"), 0o600);
-  const plan = planJson(gateFixture);
-  capture(planArgs(gateFixture, ["--confirm", plan.batchPlanId, "--json"]), gateFixture.root);
+  const plan = await planJson(gateFixture);
+  await capture(planArgs(gateFixture, ["--confirm", plan.batchPlanId, "--json"]), gateFixture.root);
   const intent = readProductionIntent(gateFixture.root, "demo", plan.shots[0].taskId as string)!;
 
   // gate context 的 backendProcessingRegions 来自 gateway 的 capabilities 路由（§4.3、§8.6）：
@@ -1314,7 +1316,7 @@ try {
   ((drifted.stagingProfiles as Array<Record<string, unknown>>)[0].execution as Record<string, unknown>).workflowSha256 = "9".repeat(64);
   writeFileSync(fifth.configFile, JSON.stringify(drifted, null, 2) + "\n");
   chmodSync(fifth.configFile, 0o600);
-  const result = capture(planArgs(fifth, ["--plan"]), fifth.root);
+  const result = await capture(planArgs(fifth, ["--plan"]), fifth.root);
   ok(result.code === 1 && result.err.includes("已授权的 workflows"),
     "快照 profile 的 workflowSha256 不在 runtime config 授权集合内时拒绝出计划");
 
@@ -1322,7 +1324,7 @@ try {
   delete noSnapshot.executionProfileSnapshotFile;
   writeFileSync(fifth.configFile, JSON.stringify(noSnapshot, null, 2) + "\n");
   chmodSync(fifth.configFile, 0o600);
-  const missing = capture(planArgs(fifth, ["--plan"]), fifth.root);
+  const missing = await capture(planArgs(fifth, ["--plan"]), fifth.root);
   ok(missing.code === 1 && missing.err.includes("executionProfileSnapshotFile"),
     "runtime config 未声明快照路径时拒绝出计划");
 } finally {

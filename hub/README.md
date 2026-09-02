@@ -38,7 +38,9 @@ writing-loop production plan-shots --plan --project demo --input batch.json --co
 writing-loop production plan-shots --confirm <batchPlanId> --project demo --input batch.json --config production-runtime.json
 writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
 writing-loop production qc --approve --project demo --task take-EP001-S1-1 --by qc:lead
-writing-loop production handoff --project demo --input handoff.json  # approved takes → canonical Studio manifest
+writing-loop production handoff --project demo --input handoff.json  # approved takes → canonical Studio manifest (v2)
+writing-loop production handoff --project demo --input handoff.json \
+  --export-dir out/handoff --config production-runtime.json          # + <sha256>.<ext> asset directory
 writing-loop visual approve-candidate --project demo --candidate K_MAIN --by art:lead
 
 # Deterministic, confirmation-gated project creation
@@ -77,14 +79,16 @@ not require a GPU. See the repository's
 [Harness contract](https://github.com/dyzsasd/writing-loop/blob/main/docs/HARNESS.md).
 
 Minimal approved-take handoff input (`createdAt` is canonical UTC ISO and must not
-predate the production revision being exported):
+predate the production revision being exported). `version: 2` / `pipeline: "scripted-drama"`
+is the default contract; pass `--contract v1` with a `version: 1` input for the four legacy
+pipelines:
 
 ```json
 {
-  "version": 1,
-  "handoffId": "handoff-episode-001-v1",
+  "version": 2,
+  "handoffId": "handoff-episode-001-v2",
   "studioProjectId": "demo-episode-001",
-  "pipeline": "cinematic",
+  "pipeline": "scripted-drama",
   "createdAt": "2026-08-10T12:11:00.000Z",
   "delivery": {
     "version": 1,
@@ -103,6 +107,30 @@ predate the production revision being exported):
 does not contact, import into, or start video-creation-studio. `AssetRef.uri` is an
 opaque identity: only a trusted scheme-and-authority allowlist resolver may open it,
 and consumers must never send an arbitrary `https:` URI directly to `fetch`.
+
+Contract v2 (`citronetic-video-creation-studio-codex-handoff-v2`) carries, per take, the
+immutable `shotRequest` AssetRef, an `execution` summary (operation, model family, backend and
+workflow/model/parameter digests, duration, aspect ratio, remote job id), the ledger `cost`, an
+`assetRoles[]` table (`take` / `last-frame` / `keyframe-first` / `keyframe-last` /
+`reference:<purpose>`, one role per sha256 and exactly one `take`), the `gates[]` the ledger can
+evidence (`qc-approved`, bound to the single-intent plan fingerprint and the ShotRequest digest),
+and a `license` summary. Every field name matches
+`video-creation-studio/schemas/handoff/writing-loop-handoff.v2.schema.json`, which sets
+`additionalProperties: false`.
+
+`--export-dir DIR` additionally writes `handoff.json` (canonical JSON bytes, no whitespace),
+`handoff.digest` (its sha256, for the importer's `--expect-digest`) and every referenced asset as
+`<sha256>.<ext>` (the extension table is a subset of the importer's `EXTENSIONS_BY_MEDIA_TYPE`;
+anything outside it is refused here rather than at import time). It requires `--config RUNTIME`:
+`cas://` objects are read from the local workspace CAS first, and everything else is fetched
+through the GET method of the gateway's `assets/sha256/<digest>` route, using that config's
+`gateway` baseUrl, transport and bearer rules — the same functions the ingest client uses. Each downloaded file is verified against the declared sha256 and byte length; a single
+failure aborts the whole export and removes the staging directory, so a partial export never
+appears at `DIR`. Landing has exactly three outcomes: an absent or empty `DIR` gets the whole
+staging directory in one rename; a `DIR` whose files match this export name-for-name and
+digest-for-digest is an idempotent replay that writes nothing at all; anything else is refused
+and asks for a fresh directory. The command never overwrites an existing directory file by
+file — that is neither atomic nor safe to roll back.
 
 ## Commands
 
@@ -134,7 +162,8 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 | `production plan-shots --plan --project K --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]` | compile a shot batch against the gateway-exported profile snapshot and return a zero-write approval document: per-shot estimate, backend rationale, carry-chain waves, degradations, validation summary and a `batchPlanId` |
 | `production plan-shots --confirm BATCH_PLAN_ID --project K --input FILE --config RUNTIME [--json]` | publish that exact batch: per shot write the immutable ShotRequest into the workspace CAS, then enqueue with the shot's own single-intent planId; `phase: bulk` first requires every named sample task to be approved |
 | `production qc --approve\|--reject --project K --task ID --by WHO [--note TEXT] [--json]` | record the human QC verdict against the qc-pending revision; any other task status is refused |
-| `production handoff --project K --input FILE` | emit a canonical, digest-bound Studio handoff containing only human-approved takes; never contacts Studio |
+| `production handoff --project K --input FILE [--contract v1\|v2] [--json]` | emit a canonical, digest-bound Studio handoff containing only human-approved takes; defaults to the scripted-drama v2 contract (per-take shotRequest, execution summary, cost, assetRoles, gates, license); never contacts Studio |
+| `production handoff --project K --input FILE --export-dir DIR --config RUNTIME [--json]` | also write `handoff.json` + `handoff.digest` + every asset as `<sha256>.<ext>`; `cas://` objects come from the local workspace CAS, the rest through the GET method of the gateway's assets route, each verified by sha256 and byte length; an occupied directory that is not this exact export is refused, never overwritten |
 | `visual approve-candidate --project K --candidate ID --by WHO [--reject] [--json]` | record the keyframe-candidate verdict in `visual/production.v1.json`; only `keyframe-review` scenes are judgeable and a decided candidate is not re-openable |
 | `run [flags]` | run the built-in TS scheduler (`--project` / `--once` / `--dry-run` / `--plan N` / `--agents a,b` / `--for S` / `--cli claude\|codex\|opencode`) |
 | `status [--project K] [--json]` | read-only board summary |

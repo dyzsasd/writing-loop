@@ -93,21 +93,25 @@ writing-loop production status    # local authoritative take/QC ledger; no remot
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
 writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
-writing-loop production handoff --project demo --input handoff.json  # approved takes only; stdout JSON
+writing-loop production handoff --project demo --input handoff.json  # approved takes only; stdout JSON (v2)
+writing-loop production handoff --project demo --input handoff.json \
+  --export-dir out/handoff --config production-runtime.json          # + <sha256>.<ext> asset directory
 writing-loop project plan --input request.json
 writing-loop project create --input request.json --confirm wlplan_…
 writing-loop project verify my-drama
 ```
 
 A minimal `handoff.json` names an existing human-approved shot take; `createdAt`
-must be canonical UTC ISO time and cannot predate the production revision being exported:
+must be canonical UTC ISO time and cannot predate the production revision being exported.
+`version: 2` / `pipeline: "scripted-drama"` is the default contract; the four legacy
+pipelines need a `version: 1` input plus `--contract v1`:
 
 ```json
 {
-  "version": 1,
-  "handoffId": "handoff-episode-001-v1",
+  "version": 2,
+  "handoffId": "handoff-episode-001-v2",
   "studioProjectId": "demo-episode-001",
-  "pipeline": "cinematic",
+  "pipeline": "scripted-drama",
   "createdAt": "2026-08-10T12:11:00.000Z",
   "delivery": {
     "version": 1,

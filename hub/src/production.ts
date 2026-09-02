@@ -11,7 +11,6 @@ import {
   commitProductionTaskEnqueue,
   planProductionTaskEnqueue,
 } from "./production-enqueue.ts";
-import { MAX_PRODUCTION_INTENT_BYTES } from "./production-intent.ts";
 import {
   MAX_PRODUCTION_STATE_BYTES,
   ProductionStore,
@@ -35,7 +34,9 @@ import {
   type ShotBatchRequest,
 } from "./production-shot-plan.ts";
 import {
+  SHOT_REQUEST_MEDIA_TYPE,
   mergeShots,
+  parseShotRequest,
   parseShotRequestDraft,
   shotRequestFromScript,
   type ShotRequestDraft,
@@ -47,8 +48,16 @@ import { readVisualCompileInputs } from "./visual-production.ts";
 import {
   VIDEO_STUDIO_HANDOFF_DIGEST_ALGORITHM,
   buildVideoStudioHandoff,
+  buildVideoStudioHandoffV2,
+  exportVideoStudioHandoffV2,
+  videoStudioGatewayAssetReader,
   videoStudioHandoffDigest,
+  videoStudioWorkspaceAssetReader,
+  type VideoStudioHandoffTakeSource,
 } from "./production-studio-handoff.ts";
+import { MAX_PRODUCTION_CAS_DOCUMENT_BYTES, readProductionCasObject } from "./production-cas.ts";
+import { WorkspaceCasLocalAssetSource } from "./production-local-asset-source.ts";
+import { MAX_PRODUCTION_INTENT_BYTES, readProductionIntent } from "./production-intent.ts";
 import { projectEntries, requireProjectEntry, resolveRepoPath, requireWorkspace, WsError } from "./workspace.ts";
 import { readWorkspaceIdentity } from "./workspace-registry.ts";
 
@@ -61,7 +70,8 @@ function usage(): void {
   writing-loop production plan-shots --plan --project KEY --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]
   writing-loop production plan-shots --confirm BATCH_PLAN_ID --project KEY --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]
   writing-loop production qc --approve|--reject --project KEY --task ID --by WHO [--note TEXT] [--json]
-  writing-loop production handoff --project KEY --input FILE
+  writing-loop production handoff --project KEY --input FILE [--contract v1|v2] [--json]
+  writing-loop production handoff --project KEY --input FILE --export-dir DIR --config RUNTIME [--json]
 
 status/handoff 只读取本地权威账本；包含暂停项目。
 enqueue --plan 严格零写入；只有匹配 --confirm 才按 intent→task→dispatch-requested 顺序写本地账本。
@@ -71,8 +81,12 @@ plan-shots --plan 同样严格零写入：读 runtime config 声明的只读 exe
 phase: bulk 的批次在提交前检查 samplePolicy 指名的样片 task 均为 approved。
 qc 写 approved/rejected 事件（approval 绑定审批前的 qc revision）；非 qc-pending 的 task 一律拒绝。
 暂停项目可生成计划，但拒绝提交 enqueue 与批次。
-handoff 仅向 stdout 输出已人工 approved take 的版本化 Studio 交接清单。
-这些命令都不会连接 ComfyUI、H3 或 video studio，也不会直接启动、取消或重试远端任务。`);
+handoff 仅输出已人工 approved take 的版本化 Studio 交接清单，缺省为 scripted-drama 契约 v2
+（takes 带 shotRequest、execution 摘要、cost、assetRoles、gates 与 license）；--contract v1 输出旧四流水线契约。
+--export-dir 另写 handoff.json（规范 JSON 字节）、handoff.digest 与全部资产（<sha256>.<ext>）：
+cas:// 对象优先读本机 workspace CAS，其余经 gateway 的 assets 路由（GET 方法）取回并逐文件校验 sha256 与字节长度。
+这些命令都不会连接 ComfyUI、H3 或 video studio，也不会直接启动、取消或重试远端任务；
+只有 handoff --export-dir 会访问 gateway 的 assets 路由（GET 方法）取回已入库资产。`);
 }
 
 type Options = { project: string | null; json: boolean };
@@ -97,9 +111,22 @@ function parseStatusArgs(args: string[]): Options {
   return { project, json };
 }
 
-function parseHandoffArgs(args: string[]): { project: string; input: string } {
+type HandoffOptions = {
+  project: string;
+  input: string;
+  contract: "v1" | "v2";
+  exportDir: string | null;
+  config: string | null;
+  json: boolean;
+};
+
+function parseHandoffArgs(args: string[]): HandoffOptions {
   let project: string | null = null;
   let input: string | null = null;
+  let contract: "v1" | "v2" | null = null;
+  let exportDir: string | null = null;
+  let config: string | null = null;
+  let json = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--project") {
@@ -110,6 +137,24 @@ function parseHandoffArgs(args: string[]): { project: string; input: string } {
       if (input !== null) throw new ProductionUsageError("production handoff: --input 只能指定一次");
       input = args[++index] ?? null;
       if (!input) throw new ProductionUsageError("production handoff: --input 需要 JSON 文件路径");
+    } else if (arg === "--contract") {
+      if (contract !== null) throw new ProductionUsageError("production handoff: --contract 只能指定一次");
+      const value = args[++index] ?? null;
+      if (value !== "v1" && value !== "v2") {
+        throw new ProductionUsageError("production handoff: --contract 只接受 v1 或 v2");
+      }
+      contract = value;
+    } else if (arg === "--export-dir") {
+      if (exportDir !== null) throw new ProductionUsageError("production handoff: --export-dir 只能指定一次");
+      exportDir = args[++index] ?? null;
+      if (!exportDir) throw new ProductionUsageError("production handoff: --export-dir 需要目录路径");
+    } else if (arg === "--config") {
+      if (config !== null) throw new ProductionUsageError("production handoff: --config 只能指定一次");
+      config = args[++index] ?? null;
+      if (!config) throw new ProductionUsageError("production handoff: --config 需要 runtime config 文件路径");
+    } else if (arg === "--json") {
+      if (json) throw new ProductionUsageError("production handoff: --json 只能指定一次");
+      json = true;
     } else {
       throw new ProductionUsageError("production handoff: 未知参数");
     }
@@ -117,7 +162,19 @@ function parseHandoffArgs(args: string[]): { project: string; input: string } {
   if (project === null || input === null) {
     throw new ProductionUsageError("production handoff: 必须同时提供 --project 与 --input");
   }
-  return { project, input };
+  const selected = contract ?? "v2";
+  if (exportDir !== null && selected !== "v2") {
+    throw new ProductionUsageError("production handoff: --export-dir 只属于 v2 契约（VCS importer 只读 v2）");
+  }
+  // 资产目录要经 gateway 的 assets GET 路由取回 urn:sha256 对象，baseUrl / transport / 凭据环境变量
+  // 只在 runtime config 里；没有它就只能给出一份缺资产的导出，因此这里直接拒绝。
+  if (exportDir !== null && config === null) {
+    throw new ProductionUsageError("production handoff: --export-dir 必须同时提供 --config（gateway assets 来源）");
+  }
+  if (exportDir === null && config !== null) {
+    throw new ProductionUsageError("production handoff: --config 只在 --export-dir 时使用");
+  }
+  return { project, input, contract: selected, exportDir, config, json };
 }
 
 function parseEnqueueArgs(args: string[]): {
@@ -292,6 +349,42 @@ function readHandoffInput(file: string): unknown {
   }
   try { return JSON.parse(text); }
   catch { throw new WsError("handoff input 不是有效 JSON"); }
+}
+
+/**
+ * handoff v2 逐 take 的不可变伴生事实：immutable intent 与它 `inputs[0]` 指向的 ShotRequest。
+ * 两者都只从本机账本目录读取（零网络）；缺任一项即整份交接失败——execution / license / 输入角色
+ * 没有第二个来源，缺了就只能靠猜，而猜出来的交接文档会被 VCS 当成事实导入。
+ */
+function handoffTakeSourceResolver(root: string, project: string): (taskId: string) => VideoStudioHandoffTakeSource {
+  return (taskId: string): VideoStudioHandoffTakeSource => {
+    const intent = readProductionIntent(root, project, taskId);
+    if (intent === null) {
+      throw new WsError(`task '${taskId}' 的 immutable intent 不存在；handoff v2 需要它提供 execution/license/inputs`);
+    }
+    const shotRequestAsset = intent.inputs[0];
+    if (shotRequestAsset === undefined) {
+      throw new WsError(`task '${taskId}' 的 intent 没有 inputs[0] ShotRequest；本版 handoff v2 只承载 plan-shots 提交的镜头`);
+    }
+    // 先按 mediaType 认出这确实是一份 ShotRequest 文档，再按文档上限读——否则一个指向数百 MB 视频
+    // 的 inputs[0] 会被当成文档整个读进内存，然后才在解析层失败。
+    if (shotRequestAsset.mediaType !== SHOT_REQUEST_MEDIA_TYPE) {
+      throw new WsError(`task '${taskId}' 的 intent.inputs[0] 是 ${shotRequestAsset.mediaType}，`
+        + `不是 ${SHOT_REQUEST_MEDIA_TYPE}；handoff v2 的 shotRequest 只认这一种`);
+    }
+    const bytes = readProductionCasObject(
+      root, project, shotRequestAsset.sha256, MAX_PRODUCTION_CAS_DOCUMENT_BYTES,
+    );
+    if (bytes === null) {
+      throw new WsError(`task '${taskId}' 的 ShotRequest ${shotRequestAsset.sha256} 不在本机 workspace CAS`);
+    }
+    let value: unknown;
+    try { value = JSON.parse(bytes.toString("utf8")); }
+    catch (error) {
+      throw new WsError(`task '${taskId}' 的 ShotRequest 不是有效 JSON：${error instanceof Error ? error.message : String(error)}`);
+    }
+    return { intent, shotRequest: parseShotRequest(value, `ShotRequest ${shotRequestAsset.sha256}`) };
+  };
 }
 
 function readEnqueueInput(file: string): unknown {
@@ -521,7 +614,7 @@ const coordinatorLabel = (model: ProductionCoordinatorReadModel): string => {
   return `control r${model.revision} · ${summary.pendingEvents} pending event · ${summary.tasksWithRetryHistory} retry-history · ${summary.lastObservedNotFound} last-not-found${exposure}`;
 };
 
-export function productionMain(argv = process.argv.slice(2), cwd = process.cwd()): number {
+export async function productionMain(argv = process.argv.slice(2), cwd = process.cwd()): Promise<number> {
   const [action, ...rest] = argv;
   if (action === "--help" || action === "-h" || action === "help") { usage(); return 0; }
   if (!action) { usage(); return 2; }
@@ -654,16 +747,81 @@ export function productionMain(argv = process.argv.slice(2), cwd = process.cwd()
       if (!projectEntries(workspace.config).some(([key]) => key === options.project)) {
         throw new WsError(`没有项目 '${options.project}'`);
       }
-      const handoff = buildVideoStudioHandoff(
-        readProductionState(workspace.root, workspaceId, options.project),
-        readHandoffInput(resolve(cwd, options.input)),
+      const state = readProductionState(workspace.root, workspaceId, options.project);
+      const create = readHandoffInput(resolve(cwd, options.input));
+      if (options.contract === "v1") {
+        const handoff = buildVideoStudioHandoff(state, create);
+        console.log(JSON.stringify({
+          version: 1,
+          digestAlgorithm: VIDEO_STUDIO_HANDOFF_DIGEST_ALGORITHM,
+          digest: videoStudioHandoffDigest(handoff),
+          handoff,
+        }, null, 2));
+        return 0;
+      }
+      const handoff = buildVideoStudioHandoffV2(
+        state, create, handoffTakeSourceResolver(workspace.root, options.project),
       );
-      console.log(JSON.stringify({
-        version: 1,
-        digestAlgorithm: VIDEO_STUDIO_HANDOFF_DIGEST_ALGORITHM,
-        digest: videoStudioHandoffDigest(handoff),
+      const digest = videoStudioHandoffDigest(handoff);
+      if (options.exportDir === null) {
+        console.log(JSON.stringify({
+          version: 2,
+          digestAlgorithm: VIDEO_STUDIO_HANDOFF_DIGEST_ALGORITHM,
+          digest,
+          handoff,
+        }, null, 2));
+        return 0;
+      }
+      const runtime = loadProductionRuntimeConfig(resolve(cwd, options.config as string));
+      if (runtime.workspaceId !== workspaceId) {
+        throw new WsError("runtime config 的 workspaceId 与本 workspace 身份不一致");
+      }
+      const result = await exportVideoStudioHandoffV2({
         handoff,
-      }, null, 2));
+        directory: resolve(cwd, options.exportDir),
+        readAsset: videoStudioWorkspaceAssetReader({
+          // §6.4 的本机对象源：ShotRequest 与操作者上传的首帧正本都在本机 CAS，零网络取回。
+          local: runtime.localAssetSource === null ? null : new WorkspaceCasLocalAssetSource({
+            root: workspace.root,
+            project: options.project,
+            casAuthority: runtime.localAssetSource.casAuthority,
+          }),
+          gateway: videoStudioGatewayAssetReader({
+            baseUrl: runtime.gateway.baseUrl,
+            workspaceId,
+            project: options.project,
+            transport: runtime.gateway.transport,
+            // insecure-private-http 有自己的私网 + bearer 规则，不复用无凭据 loopback 开发豁免。
+            allowInsecureLoopback: runtime.gateway.transport === "tls"
+              && new URL(runtime.gateway.baseUrl).protocol === "http:",
+            credentialResolver: runtime.gateway.credentialEnv === null ? undefined : () => {
+              const secret = process.env[runtime.gateway.credentialEnv as string];
+              if (secret === undefined || secret === "") {
+                throw new WsError(`gateway 凭据环境变量 ${runtime.gateway.credentialEnv} 未设置`);
+              }
+              return secret;
+            },
+          }),
+        }),
+      });
+      if (options.json) {
+        console.log(JSON.stringify({
+          version: 1,
+          digestAlgorithm: result.digestAlgorithm,
+          digest: result.digest,
+          directory: result.directory,
+          handoffId: handoff.handoffId,
+          takes: handoff.takes.length,
+          files: result.files,
+        }, null, 2));
+      } else {
+        console.log(`${handoff.handoffId} → ${result.directory}`);
+        console.log(`  ${handoff.takes.length} take · digest ${result.digest}`);
+        for (const file of result.files) console.log(`  - ${file.name} ${file.byteLength} bytes`);
+        console.log(`  VCS 侧：studio.py import-handoff ${handoff.studioProjectId}`
+          + ` --handoff ${join(result.directory, "handoff.json")} --assets-dir ${result.directory}`
+          + ` --expect-digest ${result.digest}`);
+      }
       return 0;
     }
     const options = parseStatusArgs(rest);
@@ -723,5 +881,5 @@ export function productionMain(argv = process.argv.slice(2), cwd = process.cwd()
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  process.exit(productionMain());
+  process.exit(await productionMain());
 }

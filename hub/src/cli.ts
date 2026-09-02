@@ -113,8 +113,14 @@ const usage = (): void => {
   production qc --approve|--reject --project K --task ID --by WHO [--note TEXT] [--json]
                               人工 QC 裁决：写 approved/rejected 事件并绑定审批前的 qc revision；
                               非 qc-pending 的 task 一律拒绝
-  production handoff --project K --input FILE
-                              输出仅含人工 approved take 的 Studio 交接清单；不连接远端
+  production handoff --project K --input FILE [--contract v1|v2] [--json]
+                              输出仅含人工 approved take 的 Studio 交接清单；缺省 scripted-drama
+                              契约 v2（takes 带 shotRequest / execution / cost / assetRoles /
+                              gates / license），--contract v1 输出旧四流水线契约；不连接远端
+  production handoff --project K --input FILE --export-dir DIR --config RUNTIME [--json]
+                              另写 handoff.json（规范 JSON 字节）、handoff.digest 与全部资产
+                              （<sha256>.<ext>）：cas:// 优先读本机 workspace CAS，其余经 gateway
+                              的 assets GET 路由取回并逐文件校验 sha256 与字节长度
   visual approve-candidate --project K --candidate ID --by WHO [--reject] [--json]
                               候选图批准轨道：更新 visual/production.v1.json 的
                               status/reviewedBy/reviewedAt；只允许 keyframe-review 阶段

@@ -171,6 +171,7 @@ try {
     && help.out.includes("production enqueue --plan --project K --input FILE")
     && help.out.includes("--confirm PLAN_ID")
     && help.out.includes("production handoff --project K --input FILE")
+    && help.out.includes("--export-dir DIR --config RUNTIME")
     && help.out.includes("bundle export --out FILE.tar.gz")
     && help.out.includes("bundle import FILE.tar.gz --dir NEW_ROOT"),
   "编译 cli.js help → 立项、原著登记、story gates、workspace registry、production 与 bundle 命令可发现");
@@ -381,7 +382,7 @@ try {
     taskIds: ["take-installed-001"],
   }, null, 2));
   const instHandoff = run(process.execPath, [
-    instCli, "production", "handoff", "--project", "demo", "--input", installedHandoffInput,
+    instCli, "production", "handoff", "--project", "demo", "--input", installedHandoffInput, "--contract", "v1",
   ], { cwd: ws });
   const installedHandoff = parseJson<{
     digestAlgorithm?: string;
@@ -395,6 +396,11 @@ try {
     && installedHandoff.handoff.requiresAgentOrchestration === true
     && installedHandoff.handoff.takes?.[0]?.taskId === "take-installed-001",
   `装机形 production handoff → 编译包导出 approved take + canonical digest${instHandoff.code !== 0 ? `：${instHandoff.out.slice(-400)}` : ""}`);
+  const instHandoffDefault = run(process.execPath, [
+    instCli, "production", "handoff", "--project", "demo", "--input", installedHandoffInput,
+  ], { cwd: ws });
+  ok(instHandoffDefault.code === 1 && instHandoffDefault.out.includes("version 必须是 2"),
+    "装机形 production handoff 缺省走 scripted-drama 契约 v2，v1 交接输入在缺省下被拒绝");
 
   // 真实 CLI 的 plan → confirm/create → verify；隔离 global/system git config，确保 scaffold
   // commit 只依赖 onboarding 自带的命令级 user.name/user.email，而不偷用测试机身份。

@@ -81,7 +81,9 @@ writing-loop production status    # 本地权威 take/QC 账本；不会连接�
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_… --project demo --input enqueue.json
 writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
-writing-loop production handoff --project demo --input handoff.json  # 仅 approved take；输出 canonical JSON
+writing-loop production handoff --project demo --input handoff.json  # 仅 approved take；输出 canonical JSON（契约 v2）
+writing-loop production handoff --project demo --input handoff.json \
+  --export-dir out/handoff --config production-runtime.json          # 另写 <sha256>.<ext> 资产目录
 writing-loop project plan --input request.json
 writing-loop project create --input request.json --confirm wlplan_…
 writing-loop project verify my-drama

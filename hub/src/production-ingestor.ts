@@ -151,7 +151,8 @@ function exactKeys(row: Record<string, unknown>, keys: readonly string[]): boole
     && keys.every((key) => Object.prototype.hasOwnProperty.call(row, key));
 }
 
-function boundedInteger(
+/** Shared bound check for the gateway clients' timeout / response-size options. */
+export function boundedInteger(
   value: number | undefined,
   fallback: number,
   minimum: number,
@@ -162,7 +163,8 @@ function boundedInteger(
   return result;
 }
 
-function parseScope(workspaceId: unknown, project: unknown): ProductionIngestScope {
+/** Shared scope validation: every gateway client addresses `v1/scopes/<workspaceId>/<project>/…`. */
+export function parseScope(workspaceId: unknown, project: unknown): ProductionIngestScope {
   if (typeof workspaceId !== "string" || !SAFE_WORKSPACE_ID.test(workspaceId)
     || typeof project !== "string" || !SAFE_PROJECT.test(project)) fail("invalid-config");
   return { version: 1, workspaceId, project };
@@ -196,7 +198,12 @@ function isPrivateIpv4Literal(hostname: string): boolean {
     || (first === 192 && second === 168);
 }
 
-function trustedBaseUrl(
+/**
+ * The one gateway baseUrl rule (§8.0), shared by every client that talks to the private gateway:
+ * credentialed HTTPS, or `insecure-private-http` (private-IP literal plus bearer), or an explicitly
+ * declared credential-free literal-loopback development endpoint.
+ */
+export function trustedBaseUrl(
   value: string | URL,
   allowInsecureLoopback: boolean,
   hasCredentialResolver: boolean,
@@ -443,7 +450,8 @@ function contentTypeIsJson(response: Response): boolean {
   return response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() === "application/json";
 }
 
-async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+/** Shared abort race: a caller/deadline abort rejects even when the awaited work never settles. */
+export async function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) throw signal.reason ?? new Error("aborted");
   return await new Promise<T>((resolve, reject) => {
     const onAbort = (): void => reject(signal.reason ?? new Error("aborted"));
@@ -503,7 +511,8 @@ async function readBoundedJson(response: Response, maxBytes: number, signal: Abo
   catch { fail("invalid-response"); }
 }
 
-function authorizationToken(value: unknown): string | null {
+/** Shared bearer shape check: printable ASCII, bounded; null means "no credential configured". */
+export function authorizationToken(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || value.length < 1 || value.length > 8_192 || !/^[\x21-\x7e]+$/.test(value)) {
     fail("credential-unavailable");

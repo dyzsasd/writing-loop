@@ -271,7 +271,17 @@ writing-loop production plan-shots --plan --project yujing-jiushi \
   --input batches/ep001-bulk.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME"
 
 # ⑦ 交接：只输出人工 approved 的 take；导出目录是本机路径
-writing-loop production handoff --project yujing-jiushi --input handoff.json > handoff.out.json
+#    handoff-input.json 是交接输入（version 2 / pipeline scripted-drama / taskIds 列已 approved 的
+#    take）；其中 studioProjectId 必须与 ⑧ 里 import-handoff 的项目 id 逐字相同
+writing-loop production handoff --project yujing-jiushi --input handoff-input.json \
+  --export-dir "$HOME/workspace/citronetic/video-creation-studio/inbox/yujing-ep001-s1" \
+  --config "$WRITING_LOOP_PRODUCTION_RUNTIME"
+
+# ⑧ VCS 侧导入：摘要由上一步的 handoff.digest 提供，导入器逐 take 校验后才落盘
+cd ~/workspace/citronetic/video-creation-studio
+OUT="$HOME/workspace/citronetic/video-creation-studio/inbox/yujing-ep001-s1"
+python skills/video-creation-studio/scripts/studio.py import-handoff yujing-jiushi-ep001 \
+  --handoff "$OUT/handoff.json" --assets-dir "$OUT" --expect-digest "$(cat "$OUT/handoff.digest")"
 ```
 
 纪律：
@@ -284,6 +294,16 @@ writing-loop production handoff --project yujing-jiushi --input handoff.json > h
   本机正本复核 gateway 回执里的逐镜 prompt / seed，手工放进去的对象绕不过这道复核，只会让该镜头
   以 `workflow-invalid` 失败。
 - QC 裁决写的是终态事件，不能改判。改判要重新出镜头、重新走批次。
+- `--export-dir` 缺省走 scripted-drama 契约 v2，逐 take 带 ShotRequest、execution 摘要、成本、
+  资产角色表、`qc-approved` 门与许可摘要；导出目录同时含 `handoff.json`（规范 JSON 字节）、
+  `handoff.digest` 与全部资产（`<sha256>.<ext>`）。旧四条流水线用 `--contract v1`，它不产资产目录。
+- 导出经 gateway 的 assets 路由（GET 方法）取回资产，因此**导出时 GPU VM 与隧道必须在**（§3a 的前提）。
+  逐文件校验 sha256 与字节长度，任一不符整次失败并清理，目标目录不会留半份导出；重复导出幂等。
+- 导入前不要手改导出目录里的任何文件：`--expect-digest` 比对的是 `handoff.json` 的规范字节摘要，
+  改一个字节导入就会被拒；导出命令也会因为「目录已有内容且不一致」而拒绝重跑。
+- `--export-dir` 指向的目录要么不存在、要么是空目录，要么就是上一次同一份导出的结果（此时重跑
+  是零写入的幂等重放）。目录里有别的东西时命令直接拒绝，不会覆盖——换一个新目录即可。
+- 交接输入里的 `studioProjectId` 就是 VCS 侧的项目 id：两边不一致会把镜头导进另一个项目。
 
 ## §4 进展判读（日常监控口径）
 

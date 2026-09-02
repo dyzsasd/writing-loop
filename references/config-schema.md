@@ -981,6 +981,47 @@ error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文�
 样片门按 taskId 查本地权威账本，而 taskId 由 `<taskIdPrefix>-<shotId>` 拼出：**sample 批次与 bulk
 批次必须使用同一个 `taskIdPrefix`**，否则 bulk 会去找一批根本不存在的 task 而永远被阻断。
 
+## 交接输入（`production handoff --input`，不属于 workspace config）
+
+交接文档的输入是一份普通 JSON（非 owner-only），顶层 exact keys：`version`、`handoffId`、
+`studioProjectId`、`pipeline`、`createdAt`、`delivery`、`taskIds`。
+
+- `version` 决定契约：`2` 是缺省的 scripted-drama 契约
+  （`citronetic-video-creation-studio-codex-handoff-v2`），`pipeline` 只接受 `scripted-drama`；
+  `--contract v1` 读 `version: 1` 的输入，`pipeline` 取 `cinematic | character-animation |
+  animation | hybrid` 四条旧流水线之一。两份契约并存，字段互不覆盖。
+- `studioProjectId`：VCS 侧的项目 id，最多 80 位 kebab-case。
+- `createdAt`：规范 UTC ISO，不得早于所绑定 productionRevision 的 `updatedAt`。
+- `taskIds`：1–2048 个 task id，不得重复；只接受 QC 已 approved 的 shot take，全部 take 必须绑定
+  同一 episode revision 且 shotId 唯一。
+
+v2 的每个 take 另带 `shotRequest`（不可变 ShotRequest 的 AssetRef）、`execution` 摘要、账本
+`cost`、`assetRoles[]`、`gates[]` 与 `license` 摘要。这些字段的事实来源是账本外的两份不可变伴生
+文件——`production-intents.v1/<taskId>.json` 与 `production-cas.v1/sha256/<ShotRequest digest>`；
+任一缺失即整份交接失败，不做推断。`gates[]` 只出账本能取证的 `qc-approved`：`approvedBy` /
+`approvedAt` 取 QC 裁决，`bindsTo.requestSha256` 是 ShotRequest 的 digest，`bindsTo.planSha256` 由
+不可变 intent 重算出的单 intent 确认指纹（`plan-shots --confirm` 逐镜提交时用的就是它）。批次审批
+指纹与样片门目前不落账本，因此 `batch-approved` / `sample-approved` 不出现在 gates 中。
+
+`--export-dir DIR` 另写三类文件，写入前先落到同级临时目录、成功后才 rename 到位：
+
+- `handoff.json`：规范 JSON 字节（键按 UTF-16 码元排序、无空白、只接受安全整数）；
+- `handoff.digest`：上面这份字节的 sha256，供 VCS 的 `studio.py import-handoff --expect-digest`；
+- 每个被引用资产一个 `<sha256>.<ext>`（`video/mp4→mp4`、`image/png→png`、`image/jpeg→jpg`、
+  ShotRequest→`json`）。该表是 importer `EXTENSIONS_BY_MEDIA_TYPE` 的子集，只覆盖本版实际会产出的
+  四种类型；表外的 mediaType 直接拒绝导出，扩表要两侧同时改。
+
+资产来源：`cas://` 对象先问本机对象源（runtime config 的 `localAssetSource`，即 workspace CAS；它
+校验 authority、digest 与字节长度），其余（含 ingest 产出的 `urn:sha256:`）经 gateway 的
+`v1/scopes/<workspaceId>/<project>/assets/sha256/<digest>` 路由的 GET 方法取回，baseUrl、transport
+与 bearer 判据与 ingest 客户端共用同一批函数，取自 `--config` 指向的 runtime config 顶层 `gateway`。
+因此 `--export-dir` 必须同时给出 `--config`，且导出期间 gateway 必须在运行。每个文件落盘前逐一
+校验 sha256 与字节长度，任一不符即整次导出失败并清理临时目录——目标目录里不会出现半份导出。
+
+落位只有三种结局：目标目录不存在或是空目录时整个临时目录一次 rename；目标目录已有内容且与本次
+导出逐文件同名同 digest 时判定为幂等重放，一个字节都不写；其余情况一律拒绝并要求换新目录。本命令
+不逐文件覆盖已有目录——那既不原子，回滚时又会删掉目录里本来就有的文件。
+
 ## 校验规则（onboarding plan/create 必须通过）
 - workspace 根已由 `writing-loop init` 确立（`.writing-loop/config.json` 存在，§11/§13）。
 - `repoPath` 的父目录存在，目标路径**尚不存在**，且不能是 workspace 根、其祖先或

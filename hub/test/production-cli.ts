@@ -20,14 +20,14 @@ const ok = (condition: boolean, message: string): void => {
   if (!condition) fails++;
 };
 
-function capture(args: string[], cwd: string): { code: number; out: string; err: string } {
+async function capture(args: string[], cwd: string): Promise<{ code: number; out: string; err: string }> {
   const out: string[] = [];
   const err: string[] = [];
   const oldLog = console.log;
   const oldError = console.error;
   console.log = (...values: unknown[]) => { out.push(values.map(String).join(" ")); };
   console.error = (...values: unknown[]) => { err.push(values.map(String).join(" ")); };
-  try { return { code: productionMain(args, cwd), out: out.join("\n"), err: err.join("\n") }; }
+  try { return { code: await productionMain(args, cwd), out: out.join("\n"), err: err.join("\n") }; }
   finally { console.log = oldLog; console.error = oldError; }
 }
 
@@ -109,14 +109,14 @@ try {
     },
   });
 
-  const text = capture(["status", "--project", "demo"], root);
+  const text = await capture(["status", "--project", "demo"], root);
   ok(text.code === 0 && text.out.includes("demo [paused] 暂停制片剧")
     && text.out.includes("take-cli-001")
     && text.out.includes("1 项实际成本未知；估算 $3.50（1 项）")
     && text.out.includes("control r2") && text.out.includes("敞口 $3.50"),
   "production status 可读取暂停项目，并把 estimated/actual/control exposure 明确分栏");
 
-  const jsonResult = capture(["status", "--json"], root);
+  const jsonResult = await capture(["status", "--json"], root);
   const payload = JSON.parse(jsonResult.out) as {
     version?: number;
     workspace?: { id?: string; root?: string };
@@ -133,13 +133,13 @@ try {
     && payload.projects[0].coordinator?.summary?.budget?.exposedAmountMicros === 3_500_000,
   "--json 输出稳定 ledger + coordinator control read-model envelope");
 
-  const help = capture(["--help"], join(root, "repo"));
+  const help = await capture(["--help"], join(root, "repo"));
   ok(help.code === 0 && help.out.includes("不会连接 ComfyUI、H3"),
     "production help 无需读取 workspace，明确命令是本地只读面");
-  const badArgs = capture(["status", "--remote-url", "http://evil.test"], root);
+  const badArgs = await capture(["status", "--remote-url", "http://evil.test"], root);
   ok(badArgs.code === 2 && badArgs.err.includes("未知参数") && badArgs.out.includes("只读取"),
     "CLI 拒绝让操作者从命令行注入任意 remote endpoint");
-  const missing = capture(["status", "--project", "ghost"], root);
+  const missing = await capture(["status", "--project", "ghost"], root);
   ok(missing.code === 1 && missing.err.includes("没有项目 'ghost'"), "未知项目返回运行错误而非空成功");
 
   const dispatched = spawnSync(process.execPath, [join(import.meta.dirname, "..", "src", "cli.ts"), "production", "status", "--project", "demo", "--json"], {
@@ -235,7 +235,7 @@ try {
     },
     taskIds: ["take-handoff-001"],
   }, null, 2));
-  const handoffResult = capture(["handoff", "--project", "demo", "--input", handoffInput], root);
+  const handoffResult = await capture(["handoff", "--project", "demo", "--input", handoffInput, "--contract", "v1"], root);
   const handoffPayload = JSON.parse(handoffResult.out) as {
     digestAlgorithm?: string;
     digest?: string;
@@ -247,6 +247,22 @@ try {
     && handoffPayload.handoff.requiresAgentOrchestration === true
     && handoffPayload.handoff.takes?.[0]?.taskId === "take-handoff-001",
   "production handoff 只把人工 approved take 输出为带 digest 的 agent-orchestrated Studio 清单");
+
+  // 缺省契约是 v2：v1 的交接输入不会被默默当成 v2 接受，也不会被 v2 builder 悄悄补齐。
+  const defaultContract = await capture(["handoff", "--project", "demo", "--input", handoffInput], root);
+  ok(defaultContract.code === 1 && defaultContract.err.includes("version 必须是 2"),
+    "handoff 缺省走 v2 契约，v1 交接输入在缺省下被拒绝");
+  const exportWithoutConfig = await capture([
+    "handoff", "--project", "demo", "--input", handoffInput, "--export-dir", join(root, "export"),
+  ], root);
+  ok(exportWithoutConfig.code === 2 && exportWithoutConfig.err.includes("必须同时提供 --config"),
+    "--export-dir 缺 --config 时拒绝，而不是给出一份缺资产的导出目录");
+  const exportOnV1 = await capture([
+    "handoff", "--project", "demo", "--input", handoffInput, "--contract", "v1",
+    "--export-dir", join(root, "export"), "--config", join(root, "runtime.json"),
+  ], root);
+  ok(exportOnV1.code === 2 && exportOnV1.err.includes("只属于 v2 契约"),
+    "--export-dir 不接受 v1 契约（VCS importer 只读 v2）");
 
   const largeHandoffInput = join(root, "handoff-large.json");
   const largeTaskIds = Array.from({ length: 2_048 }, (_, index) =>
@@ -269,7 +285,9 @@ try {
     taskIds: largeTaskIds,
   });
   writeFileSync(largeHandoffInput, largeHandoffText);
-  const largeHandoff = capture(["handoff", "--project", "demo", "--input", largeHandoffInput], root);
+  const largeHandoff = await capture([
+    "handoff", "--project", "demo", "--input", largeHandoffInput, "--contract", "v1",
+  ], root);
   ok(Buffer.byteLength(largeHandoffText) > 256 * 1024
     && Buffer.byteLength(largeHandoffText) <= MAX_PRODUCTION_STATE_BYTES
     && largeHandoff.code === 1 && largeHandoff.err.includes("不存在")
@@ -343,7 +361,7 @@ try {
     },
   }, null, 2));
   const stateBeforePlan = readProductionState(root, workspaceId, "demo");
-  const enqueuePlan = capture([
+  const enqueuePlan = await capture([
     "enqueue", "--plan", "--project", "demo", "--input", enqueueInput, "--json",
   ], root);
   const planPayload = JSON.parse(enqueuePlan.out) as { mode?: string; planId?: string; taskId?: string };
@@ -354,19 +372,19 @@ try {
     && stateAfterPlan.revision === stateBeforePlan.revision
     && !stateAfterPlan.tasks.some((task) => task.id === "take-cli-enqueue"),
   "production enqueue --plan 返回 scope-bound 确认指纹且严格零写入");
-  const missingConfirmation = capture([
+  const missingConfirmation = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput,
   ], root);
   ok(missingConfirmation.code === 2 && missingConfirmation.err.includes("--plan 或 --confirm")
     && readProductionState(root, workspaceId, "demo").revision === stateBeforePlan.revision,
   "production enqueue 拒绝未显式选择 plan/confirm 的间接计费写入");
-  const wrongConfirmation = capture([
+  const wrongConfirmation = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput, "--confirm", "0".repeat(64),
   ], root);
   ok(wrongConfirmation.code === 1 && wrongConfirmation.err.includes("确认指纹不匹配")
     && readProductionState(root, workspaceId, "demo").revision === stateBeforePlan.revision,
   "production enqueue 在本地 intent 发布前拒绝错误确认指纹");
-  const enqueueResult = capture([
+  const enqueueResult = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput,
     "--confirm", planPayload.planId ?? "", "--json",
   ], root);
@@ -380,7 +398,7 @@ try {
     && enqueuePayload.task?.id === "take-cli-enqueue"
     && enqueuePayload.task.status === "dispatch-pending" && enqueuePayload.task.remoteJobId === null,
   "production enqueue 只发布本地 immutable intent/task/dispatch，尚无 remote side effect");
-  const enqueueReplay = capture([
+  const enqueueReplay = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput,
     "--confirm", planPayload.planId ?? "", "--json",
   ], root);
@@ -389,7 +407,7 @@ try {
     && replayPayload.taskCreated === false && replayPayload.dispatchApplied === false
     && replayPayload.state?.revision === enqueuePayload.state?.revision,
   "production enqueue 精确重试不增加权威 revision");
-  const enqueueEndpointInjection = capture([
+  const enqueueEndpointInjection = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput,
     "--confirm", planPayload.planId ?? "", "--remote-url", "http://evil.test",
   ], root);
@@ -397,7 +415,7 @@ try {
     "production enqueue 不接受 endpoint/token 注入参数");
   ok(!enqueueEndpointInjection.err.includes("evil.test"),
     "production enqueue usage error 不回显可能携带 token/URL 的原始 argv");
-  const secretAction = capture(["SUPER_SECRET_ACTION_CANARY"], root);
+  const secretAction = await capture(["SUPER_SECRET_ACTION_CANARY"], root);
   ok(secretAction.code === 2 && secretAction.err.includes("未知操作")
     && !secretAction.err.includes("SUPER_SECRET_ACTION_CANARY"),
   "production 未知 action 不向 stderr 回显可能的 credential");
@@ -405,7 +423,7 @@ try {
     version: 1,
     projects: { demo: { title: "暂停制片剧", repoPath: "repo", enabled: false } },
   }, null, 2) + "\n");
-  const pausedEnqueue = capture([
+  const pausedEnqueue = await capture([
     "enqueue", "--project", "demo", "--input", enqueueInput, "--confirm", planPayload.planId ?? "",
   ], root);
   ok(pausedEnqueue.code === 1 && pausedEnqueue.err.includes("已暂停"),
@@ -419,7 +437,7 @@ try {
   "handoff exact reader 拒绝同 inode 在读取决策窗口内被并发改写");
 
   writeFileSync(productionStatePath(root, "demo"), "{broken");
-  const corrupt = capture(["status", "--project", "demo"], root);
+  const corrupt = await capture(["status", "--project", "demo"], root);
   ok(corrupt.code === 1 && /JSON|损坏/.test(corrupt.err),
     "CLI 对损坏的权威 production state 硬错，不显示伪造空状态");
 } finally {
