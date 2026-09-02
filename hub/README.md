@@ -34,8 +34,12 @@ writing-loop project list            # list enabled and paused projects
 writing-loop production status       # inspect the local authoritative render/QC ledger (no remote calls)
 writing-loop production enqueue --plan --project demo --input enqueue.json
 writing-loop production enqueue --confirm wlprodplan_... --project demo --input enqueue.json
+writing-loop production plan-shots --plan --project demo --input batch.json --config production-runtime.json
+writing-loop production plan-shots --confirm <batchPlanId> --project demo --input batch.json --config production-runtime.json
 writing-loop-production-worker --config /etc/writing-loop/production-runtime.json --once --json
+writing-loop production qc --approve --project demo --task take-EP001-S1-1 --by qc:lead
 writing-loop production handoff --project demo --input handoff.json  # approved takes → canonical Studio manifest
+writing-loop visual approve-candidate --project demo --candidate K_MAIN --by art:lead
 
 # Deterministic, confirmation-gated project creation
 writing-loop project plan --input request.json
@@ -127,7 +131,11 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 | `production status [--project K] [--json]` | inspect the scoped, durable render/take/QC ledger, including paused projects; never contacts a backend |
 | `production enqueue --plan --project K --input FILE [--json]` | validate an immutable production intent and return a deterministic zero-write/zero-network plan |
 | `production enqueue --confirm PLAN_ID --project K --input FILE [--json]` | persist that exact intent/task/dispatch request; endpoint/profile/token fields are rejected and no provider is contacted |
+| `production plan-shots --plan --project K --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]` | compile a shot batch against the gateway-exported profile snapshot and return a zero-write approval document: per-shot estimate, backend rationale, carry-chain waves, degradations, validation summary and a `batchPlanId` |
+| `production plan-shots --confirm BATCH_PLAN_ID --project K --input FILE --config RUNTIME [--json]` | publish that exact batch: per shot write the immutable ShotRequest into the workspace CAS, then enqueue with the shot's own single-intent planId; `phase: bulk` first requires every named sample task to be approved |
+| `production qc --approve\|--reject --project K --task ID --by WHO [--note TEXT] [--json]` | record the human QC verdict against the qc-pending revision; any other task status is refused |
 | `production handoff --project K --input FILE` | emit a canonical, digest-bound Studio handoff containing only human-approved takes; never contacts Studio |
+| `visual approve-candidate --project K --candidate ID --by WHO [--reject] [--json]` | record the keyframe-candidate verdict in `visual/production.v1.json`; only `keyframe-review` scenes are judgeable and a decided candidate is not re-openable |
 | `run [flags]` | run the built-in TS scheduler (`--project` / `--once` / `--dry-run` / `--plan N` / `--agents a,b` / `--for S` / `--cli claude\|codex\|opencode`) |
 | `status [--project K] [--json]` | read-only board summary |
 | `doctor` | read-only health check; missing identity/registry are migration warnings, while corrupt identity/registry, unsafe/broken onboarding journals, invalid `WRITING_LOOP_HOME`, or crash-leftover exclusive locks fail without repairing files |

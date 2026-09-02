@@ -528,11 +528,15 @@ function dependencies(
       }),
     },
     gateContextResolver: {
+      // 0-E：`FAMILIES_REQUIRING_PROCESSING_REGIONS` 改为全家族 true 后，generic / H3 的 dispatch
+      // 同样要求项目声明处理地域并与后端一致，缺省即 `processing-region-not-allowed` deny。
       resolve: async () => ({
         version: 1,
         evaluatedAt: at(10),
         deploymentTerritories: ["CN"],
         availableBudgetMicros: 500_000,
+        allowedProcessingRegions: ["CN"],
+        backendProcessingRegions: ["CN"],
       }),
     },
     unstagedGenericInputMode: "static-or-pre-staged",
@@ -587,6 +591,7 @@ try {
           stageOrder.push("gate");
           return {
             version: 1, evaluatedAt: at(10), deploymentTerritories: ["CN"], availableBudgetMicros: 500_000,
+            allowedProcessingRegions: ["CN"], backendProcessingRegions: ["CN"],
           };
         },
       },

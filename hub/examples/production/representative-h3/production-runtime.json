@@ -12,7 +12,17 @@
       "deploymentTerritories": [
         "CN"
       ],
-      "availableBudgetMicros": 5000000
+      "availableBudgetMicros": 5000000,
+      "allowedProcessingRegions": [
+        "CN"
+      ],
+      "licenseCompliance": {
+        "annualRevenueUsdBelow": 1000000,
+        "attributionSurfaces": [
+          "片尾字幕"
+        ]
+      },
+      "usesOutputToImproveModels": false
     }
   ],
   "backends": [

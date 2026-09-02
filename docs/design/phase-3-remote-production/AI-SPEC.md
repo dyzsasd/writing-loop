@@ -542,7 +542,13 @@ artifact digest、workflow digest 与参数 digest 只演示 server-owned identi
       "enabled": true,
       "backendInstanceIds": ["gateway-h3-fl2va"],
       "deploymentTerritories": ["CN"],
-      "availableBudgetMicros": 5000000
+      "availableBudgetMicros": 5000000,
+      "allowedProcessingRegions": ["CN"],
+      "licenseCompliance": {
+        "annualRevenueUsdBelow": 1000000,
+        "attributionSurfaces": ["片尾字幕"]
+      },
+      "usesOutputToImproveModels": false
     }
   ],
   "backends": [

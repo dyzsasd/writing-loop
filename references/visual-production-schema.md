@@ -39,9 +39,12 @@ H3 v1 不直接消费 Blender depth/normal。约束图用于生成稳定关键�
     "renderEngine": "eevee",
     "imageWorkflowProfileId": null
   },
-  "scenes": []
+  "scenes": [],
+  "subjectReferences": []
 }
 ```
+
+`subjectReferences[]` 是纯新增的可选字段：旧清单缺该键时按空数组解析，既有文件不因 schema 增长失效。
 
 ## Scene production
 
@@ -81,6 +84,87 @@ H3 v1 不直接消费 Blender depth/normal。约束图用于生成稳定关键�
 canonical UTC `reviewedAt`，pending candidate 两项必须为 `null`。这样 Blender
 不是一张一次性参考图，而是每次生成都可复验的几何来源。raw prompt、raw workflow、模型路径、任意
 URL、远程凭据和绝对本机路径都不属于 schema。
+
+候选图可选带 `shotIds: []`：该候选图可作首帧的镜头（候选图按机位 × 灯光 × 陈设登记，逐镜首帧按
+shotId 取用）。一个 shotId 只能被一张候选图占用，跨场景亦然——镜头只属于一个场景，重复即配置错误。
+缺该键时按空数组解析。
+
+候选图还可选带 `containsRealFace`：该图是否含真人人脸（§4.7 `provider-likeness-policy`）。缺该键时
+解析为 `true`，与 gate 的 `undeclared` 同一 fail-closed 语义——未声明不等于不含。Blender 约束图生成
+的关键帧显式写 `false`。`plan-shots` 按 `shotIds` 自动填首帧时，把这一位原样带进 ShotRequest。
+
+## 候选图批准轨道
+
+```bash
+writing-loop visual approve-candidate --project KEY --candidate ID --by WHO [--reject] [--json]
+```
+
+命令只更新该候选图的 `status` / `reviewedBy` / `reviewedAt`（canonical UTC，取执行时刻），不渲染、
+不连接 ComfyUI、不 enqueue 任何制片任务。约束两条：
+
+- 只有 `keyframe-review` 阶段的场景可以裁决——`passes-ready` 尚无候选图可评，`approved` 已经定稿。
+- 已有裁决的候选图不接受第二次改判：审批是事实登记，不是可覆盖的字段。确需改判时人工把该候选图的
+  `status` 改回 `candidate` 并把 `reviewedBy` / `reviewedAt` 清为 `null`，再重新裁决。
+
+`compileShotRequest` 的 `approvedCandidates` 由本文件的 `candidates[]` 装配（键为候选图 ID，值为
+`{sha256, status, reviewedBy, reviewedAt}`）；`firstFrame.origin.kind = approved-candidate` 时编译器
+据此校验候选图已批准且 sha256 命中。
+
+## 定妆参考（`subjectReferences[]`）
+
+```json
+{
+  "id": "REF_C01_ARC1",
+  "subject": { "kind": "character", "characterId": "C01", "appearanceStateId": "APPEARANCE_EARLY" },
+  "asset": { "version": 1, "uri": "…", "sha256": "…", "byteLength": 1234, "mediaType": "image/png" },
+  "containsRealFace": false,
+  "approvedBy": "operator:demo",
+  "approvedAt": "2026-08-13T09:00:00.000Z"
+}
+```
+
+`subject` 是判别联合：`{kind: "character", characterId, appearanceStateId}` 或
+`{kind: "prop", objectId, stateId}`。ShotRequest 的 `references[].subjectId` 引用这里的 `id`。
+`approvedBy` 与 `approvedAt` 同生同灭（只有一半即无法追责），两者都为 `null` 表示尚未批准。
+`story/assets.v1.json` 不改：这里只登记不可变 AssetRef 与人工批准事实，不复制剧情设定。
+
+## `visual/mappings.v1.json`
+
+编译器不解析散文。灯光与陈设按两张机读表取值；文件不存在时视为空表，存在但损坏时硬错。
+
+```json
+{
+  "version": 1,
+  "kind": "writing-loop/visual-mappings",
+  "project": "project-key",
+  "lighting": [{ "sceneId": "S01", "timeOfDay": "day", "lightingStateId": "LIGHT_DAY" }],
+  "dressing": [{ "sceneId": "S01", "arcId": "ARC_EARLY", "dressingVariantId": "DRESS_BASE" }]
+}
+```
+
+`timeOfDay` 取 `day | night | dawn | dusk`（与 ShotRequest 同一枚举）。同一 `(sceneId, timeOfDay)`
+或 `(sceneId, arcId)` 只能落一个状态：两条冲突的映射等于没有映射。
+
+## `visual/prop-states.v1.json`
+
+`props[].stateId` 的注册表：每个道具的已登记状态集合，以及 `(episode, sceneId) → stateId` 的排期。
+`compileShotRequest` 的 `propStates` 取每个 `objectId` 的已登记 stateId 集合；镜头引用未登记的状态
+即 `prop_state_missing`。
+
+```json
+{
+  "version": 1,
+  "kind": "writing-loop/visual-prop-states",
+  "project": "project-key",
+  "objects": [{
+    "objectId": "O01",
+    "states": [{ "stateId": "O01_CLOSED", "label": "木匣闭合", "notes": "初始状态" }],
+    "timeline": [{ "episode": 1, "sceneId": "S01", "stateId": "O01_CLOSED" }]
+  }]
+}
+```
+
+`timeline` 只能引用同一道具已登记的 `stateId`，同一 `(episode, sceneId)` 不得出现两条。
 
 ## 《玉京旧事》试点
 

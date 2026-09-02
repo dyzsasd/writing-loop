@@ -4,17 +4,19 @@
 // It binds the exact subject revision, backend configuration digests, stable input assets and the
 // evidence used to authorize one billable request.  Adapters must consume the parsed intent rather
 // than rebuilding a request from mutable configuration.
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
   constants,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
   readSync,
   realpathSync,
+  unlinkSync,
   writeSync,
   type Stats,
 } from "node:fs";
@@ -488,13 +490,13 @@ const FAMILIES_REQUIRING_SHOT_REQUEST_INPUT: Readonly<Record<ProductionModelFami
 };
 
 /**
- * 云后端在 provider 自有地域处理素材，项目必须显式声明允许地域后才能 dispatch；本地 ComfyUI（H3 与
- * generic）在 runtime `projects[]` 供给 `allowedProcessingRegions` 前暂不强制（§4.7）。该表是那次改动的
- * 唯一改动点：四个值一起置 true 即为全家族 deny。
+ * 处理地域是数据被处理的物理位置，四个家族都必须由项目显式声明允许集合后才能 dispatch（§4.7）。
+ * runtime `projects[].allowedProcessingRegions` 已供给该字段（0-E），因此本表四值全为 true——
+ * 本地 ComfyUI 与云后端同判据，未声明即 deny。
  */
 const FAMILIES_REQUIRING_PROCESSING_REGIONS: Readonly<Record<ProductionModelFamily, boolean>> = {
-  generic: false,
-  "minimax-h3": false,
+  generic: true,
+  "minimax-h3": true,
   seedance: true,
   veo: true,
 };
@@ -737,6 +739,17 @@ export function parseProductionLicenseCompliance(
   subject = "ProductionLicenseCompliance",
 ): ProductionLicenseCompliance {
   return parseLicenseCompliance(value, subject);
+}
+
+/**
+ * 处理地域集合的唯一解析器（gate context 与 runtime `projects[]` 共用，§4.7）：只接受 ISO-3166
+ * alpha-2 成员国代码，集合别名 `EU`、非标准码 `UK` 与 `WORLDWIDE` 在解析层拒绝。
+ */
+export function parseProductionProcessingRegions(
+  value: unknown,
+  subject = "processingRegions",
+): string[] {
+  return parseProcessingRegions(value, subject);
 }
 
 /**
@@ -1279,8 +1292,11 @@ function syncDirectory(directory: string): void {
 }
 
 /**
- * Persist one immutable companion with O_EXCL. Exact replay is a no-op; any task/config drift is a
- * hard conflict. A crash-truncated file remains fail-closed for explicit operator audit.
+ * Persist one immutable companion atomically: bytes go to a same-directory temporary file, are
+ * fsynced, and only then appear at the task-named path via `link(2)`. A crash can leave a stray
+ * temporary file but never a half-written companion at the addressed path, and `link` keeps the
+ * same exactly-one-winner semantics O_EXCL had. Exact replay is a no-op; any task/config drift is a
+ * hard conflict reported with the file path so an operator can act on it.
  */
 export function enqueueProductionIntent(
   root: string,
@@ -1295,36 +1311,57 @@ export function enqueueProductionIntent(
   const bytes = Buffer.from(`${JSON.stringify(intent, null, 2)}\n`, "utf8");
   if (bytes.length > limit) fail("ProductionIntent", `canonical intent 超过 ${limit} bytes 安全上限`);
 
+  const temporary = join(directory, `.${intent.taskId}.json.${randomBytes(8).toString("hex")}`);
   let fd: number | undefined;
   try {
     try {
       fd = openSync(
-        file,
+        temporary,
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
         0o600,
       );
     } catch (error) {
-      if (errno(error) !== "EEXIST") {
-        fail("ProductionIntent", `无法 O_EXCL 创建 ${file}：${error instanceof Error ? error.message : String(error)}`);
-      }
-      const existing = readProductionIntent(root, project, intent.taskId, limit);
-      if (existing !== null && JSON.stringify(existing) === JSON.stringify(intent)) {
-        return { created: false, path: file, intent: existing };
-      }
-      fail("ProductionIntent", `${file} 已绑定另一 canonical intent（拒绝覆盖或配置漂移）`);
+      fail("ProductionIntent", `无法创建临时文件 ${temporary}：${error instanceof Error ? error.message : String(error)}`);
     }
     const opened = fstatSync(fd);
     if (!opened.isFile() || opened.nlink !== 1) {
-      fail("ProductionIntent", `${file} 创建后不是单链接普通文件`);
+      fail("ProductionIntent", `${temporary} 创建后不是单链接普通文件`);
     }
     writeAll(fd, bytes);
     const written = fstatSync(fd);
     if (!written.isFile() || written.nlink !== 1 || written.size !== bytes.length) {
-      fail("ProductionIntent", `${file} 写入后 identity/长度异常`);
+      fail("ProductionIntent", `${temporary} 写入后 identity/长度异常`);
     }
     fsyncSync(fd);
+  } catch (error) {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* 保留首个错误 */ } fd = undefined; }
+    try { unlinkSync(temporary); } catch { /* 临时文件清理失败不掩盖原始错误 */ }
+    throw error;
   } finally {
     if (fd !== undefined) closeSync(fd);
+  }
+
+  try {
+    try { linkSync(temporary, file); }
+    catch (error) {
+      if (errno(error) !== "EEXIST") {
+        fail("ProductionIntent", `无法把 ${temporary} 发布为 ${file}：${error instanceof Error ? error.message : String(error)}`);
+      }
+      // 已存在的 companion 必须是同一份 canonical intent。崩溃残留的截断文件在这里以带路径的
+      // 可操作错误暴露，而不是被覆盖，也不是永久卡在无解释的失败上。
+      let existing: ProductionDispatchIntent | null = null;
+      let reason = "已绑定另一 canonical intent";
+      try { existing = readProductionIntent(root, project, intent.taskId, limit); }
+      catch (readError) {
+        reason = `已存在但不可读（${readError instanceof Error ? readError.message : String(readError)}）`;
+      }
+      if (existing !== null && JSON.stringify(existing) === JSON.stringify(intent)) {
+        return { created: false, path: file, intent: existing };
+      }
+      fail("ProductionIntent", `${file} ${reason}（拒绝覆盖；请人工核对后删除该文件再重试）`);
+    }
+  } finally {
+    try { unlinkSync(temporary); } catch { /* 已 link 成功，临时名残留不影响正确性 */ }
   }
   syncDirectory(directory);
   return { created: true, path: file, intent };

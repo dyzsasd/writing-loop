@@ -30,6 +30,7 @@ const ROUTES: Record<string, [string, ...string[]]> = {
   script:                  ["script"],                // 单集正文的确定性预提交 lint（script-format 机器半边）
   system:                  ["system"],                // workspace 级框架改进收件箱（不进项目板）
   production:              ["production"],            // 远程制片的本地权威状态与零网络 enqueue
+  visual:                  ["visual"],                // 视觉制作清单的人工裁决（候选图批准轨道）
   workspace:               ["workspace-registry-cli"], // 本机 workspace ID 索引（不参与根解析）
   doctor:                  ["doctor"],                // 只读体检；末行 WRITING_LOOP_DOCTOR_OK / _FAILED + NEXT:
   "sync-opencode":         ["sync-opencode"],          // providers 注册表 → opencode.json（create-or-merge）
@@ -100,8 +101,23 @@ const usage = (): void => {
                               零写入计划并返回确认指纹
   production enqueue --project K --input FILE --confirm PLAN_ID [--json]
                               以匹配指纹持久化 immutable intent + task + dispatch；零远端网络
+  production plan-shots --plan --project K --input FILE --config RUNTIME
+      [--from-script EP [--scene N]…] [--json]
+                              零写入批次审批文档：读 runtime config 声明的只读 execution profile
+                              快照做估算，输出每镜估算与后端理由、承接链波次、退化与校验汇总、
+                              samplePolicy 与 batchPlanId
+  production plan-shots --confirm BATCH_PLAN_ID --project K --input FILE --config RUNTIME
+      [--from-script EP [--scene N]…] [--json]
+                              以匹配指纹逐镜把 ShotRequest 写入 workspace CAS 并 enqueue；
+                              phase: bulk 先检查 samplePolicy 指名的样片 task 均为 approved
+  production qc --approve|--reject --project K --task ID --by WHO [--note TEXT] [--json]
+                              人工 QC 裁决：写 approved/rejected 事件并绑定审批前的 qc revision；
+                              非 qc-pending 的 task 一律拒绝
   production handoff --project K --input FILE
                               输出仅含人工 approved take 的 Studio 交接清单；不连接远端
+  visual approve-candidate --project K --candidate ID --by WHO [--reject] [--json]
+                              候选图批准轨道：更新 visual/production.v1.json 的
+                              status/reviewedBy/reviewedAt；只允许 keyframe-review 阶段
   workspace list [--json]     列出本机 workspace ID 索引（含 missing/corrupt 状态）
   workspace add [DIR] [--label L]
                               创建/复用稳定 ID，并按 canonical root 注册

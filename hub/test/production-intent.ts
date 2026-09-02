@@ -150,6 +150,7 @@ function draft(overrides: Record<string, unknown> = {}): ProductionIntentDraft {
   } as ProductionIntentDraft;
 }
 
+/** 只有四个必填字段的 gate context：四项策略字段缺省，用于「未声明」形态的判定。 */
 function context(overrides: Record<string, unknown> = {}): ProductionIntentGateContext {
   return {
     version: 1,
@@ -158,6 +159,19 @@ function context(overrides: Record<string, unknown> = {}): ProductionIntentGateC
     availableBudgetMicros: 2_000_000,
     ...overrides,
   } as ProductionIntentGateContext;
+}
+
+/**
+ * runtime `projects[]` 供给地域后的常态 context：处理地域已声明且与后端一致。
+ * `FAMILIES_REQUIRING_PROCESSING_REGIONS` 改为全家族 deny（0-E）后，任何期望 allow 的用例都必须
+ * 走这条形态——未声明地域不再放行任何家族。
+ */
+function regionalContext(overrides: Record<string, unknown> = {}): ProductionIntentGateContext {
+  return context({
+    backendProcessingRegions: ["CN"],
+    allowedProcessingRegions: ["CN"],
+    ...overrides,
+  });
 }
 
 const intent = createProductionDispatchIntent(draft());
@@ -451,7 +465,7 @@ ok(throwsProduction(() => parseProductionIntentDraft({
   ...draft(), inputs: [{ ...asset("signed"), uri: "https://assets.example/x?token=secret" }],
 }), "query/fragment"), "输入继续复用严格 AssetRef parser，拒绝临时签名 URL");
 
-const baseDecision = evaluateProductionIntentGates(intent, context());
+const baseDecision = evaluateProductionIntentGates(intent, regionalContext());
 ok(baseDecision.allowed && baseDecision.failures.length === 0,
   "CN 部署、community evidence 完整且所有门满足时允许 H3 dispatch");
 const frozenBefore = JSON.stringify({ intent, context: context() });
@@ -564,7 +578,7 @@ const writtenLicense = {
 };
 ok(evaluateProductionIntentGates(
   createProductionDispatchIntent(writtenLicense),
-  { ...context(), deploymentTerritories: ["EU"] },
+  { ...regionalContext(), deploymentTerritories: ["EU"] },
 ).allowed, "EU 的明确 verified written-license evidence 可放行 H3");
 ok(decisionCodes({
   ...writtenLicense,
@@ -592,9 +606,25 @@ ok(decisionCodes(cloudDraft(seedanceExecution), context({ realFaceInputs: "absen
   .includes("processing-region-not-allowed")
   && decisionCodes(cloudDraft(veoExecution), context()).includes("processing-region-not-allowed"),
 "项目未声明 allowedProcessingRegions 时云家族 deny");
-ok(!decisionCodes(draft(), context({ backendProcessingRegions: ["SG"] }))
-  .includes("processing-region-not-allowed"),
-"项目未声明 allowedProcessingRegions 时 H3 / generic 暂放行（runtime-config 供给 regions 后改为全家族 deny）");
+// 0-E：runtime `projects[]` 供给 `allowedProcessingRegions` 后 `FAMILIES_REQUIRING_PROCESSING_REGIONS`
+// 改为全家族 true，本地 ComfyUI 与云后端同判据（原用例期望 H3 / generic 暂放行）。
+const genericDraft = (): ProductionIntentDraft => draft({
+  taskId: "take-generic-001",
+  execution: {
+    version: 1,
+    operation: "comfyui-workflow",
+    modelFamily: "generic",
+    backendInstanceId: "h3-private-a",
+    workflowSha256: SHA.c,
+    modelSha256: SHA.d,
+    parametersSha256: SHA.e,
+  },
+});
+ok(decisionCodes(draft(), context({ backendProcessingRegions: ["SG"] }))
+  .includes("processing-region-not-allowed")
+  && decisionCodes(genericDraft(), context({ backendProcessingRegions: ["SG"] }))
+    .includes("processing-region-not-allowed"),
+"项目未声明 allowedProcessingRegions 时 H3 / generic 同样 deny（0-E 起全家族强制）");
 ok(throwsProduction(
   () => parseProductionIntentGateContext(context({ backendProcessingRegions: ["WORLDWIDE"] })),
   "大写二位地域码",
@@ -608,13 +638,16 @@ for (const alias of ["EU", "UK"] as const) {
 ok(parseProductionIntentGateContext(context({ allowedProcessingRegions: ["FR", "DE", "GB"] }))
   .allowedProcessingRegions?.join(",") === "DE,FR,GB",
 "处理地域接受成员国代码并规范化排序");
-ok(evaluateProductionIntentGates(intent, context()).allowed,
-  "缺省四项策略字段时既有 H3 gate 结论不变（runtime projects[] 落地前的兼容路径）");
+// 0-E 前该用例期望「缺省四项策略字段时 H3 仍放行」；地域改为全家族强制后，缺省即 deny 且只 deny 这一项。
+const bareDecision = evaluateProductionIntentGates(intent, context());
+ok(!bareDecision.allowed
+  && bareDecision.failures.map((failure) => failure.code).join(",") === "processing-region-not-allowed",
+"缺省四项策略字段时 H3 只因未声明处理地域 deny（其余门结论不变）");
 
 const obligationCodes = decisionCodes(obligated);
 ok(obligationCodes.filter((code) => code === "license-obligation-unmet").length === 2,
   "项目既未声明年收入也未声明署名面时，两项义务各 deny 一次");
-ok(evaluateProductionIntentGates(createProductionDispatchIntent(obligated), context({
+ok(evaluateProductionIntentGates(createProductionDispatchIntent(obligated), regionalContext({
   licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕", "发布文案"] },
 })).allowed, "声明年收入低于阈值且已落实署名面时放行");
 ok(decisionCodes(obligated, context({
@@ -632,7 +665,7 @@ ok(evaluateProductionIntentGates(createProductionDispatchIntent(draft({
     issuedBy: "MiniMax authorized licensing",
     obligations: { attribution: null, revenueThresholdUsd: 20_000_000, noModelImprovement: true },
   },
-})), context()).allowed,
+})), regionalContext()).allowed,
 "完整 written-license evidence 解除年收入阈值条款");
 // 豁免判据与 H3 受限地域门同一个 hasExplicitWrittenLicense：只改 basis 文本不算数，且该判据不限家族。
 ok(decisionCodes(cloudDraft(seedanceExecution, {

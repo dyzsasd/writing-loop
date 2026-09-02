@@ -299,6 +299,9 @@ function validConfig(): Record<string, unknown> {
         backendInstanceIds: ["comfy-primary"],
         deploymentTerritories: ["CN"],
         availableBudgetMicros: 2_000_000,
+        allowedProcessingRegions: ["CN"],
+        licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+        usesOutputToImproveModels: false,
       },
       {
         version: 1,
@@ -307,6 +310,9 @@ function validConfig(): Record<string, unknown> {
         backendInstanceIds: ["comfy-primary"],
         deploymentTerritories: ["CN"],
         availableBudgetMicros: 0,
+        allowedProcessingRegions: ["CN"],
+        licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+        usesOutputToImproveModels: false,
       },
     ],
     backends: [{
@@ -546,6 +552,9 @@ function matrixConfig(
       backendInstanceIds: ["cloud-gateway"],
       deploymentTerritories: ["SG"],
       availableBudgetMicros: 2_000_000,
+      allowedProcessingRegions: ["SG"],
+      licenseCompliance: { annualRevenueUsdBelow: 1_000_000, attributionSurfaces: ["片尾字幕"] },
+      usesOutputToImproveModels: false,
     }],
     backends: [{
       version: 1,
@@ -904,7 +913,8 @@ try {
     modelSha256: SHA.model,
     parametersSha256: SHA.parameters,
   };
-  const resolverIntent = { execution } as unknown as ProductionDispatchIntent;
+  // gate context resolver 会读 `inputs[0]` 判断 `realFaceInputs`（0-E），fake intent 必须带上 inputs。
+  const resolverIntent = { execution, inputs: [] } as unknown as ProductionDispatchIntent;
   ok((await registry.projects[0]!.inputPipelineResolver.resolve(resolverIntent))?.policy === "static-pre-staged",
     "per-workflow static input policy resolves explicitly instead of enabling a project-wide fallback");
   const descriptor = await registry.workflowResolver.resolve(resolverIntent);
@@ -1579,6 +1589,46 @@ try {
     && JSON.stringify(h3Reparsed.workflows) === JSON.stringify(parsedH3.workflows)
     && h3Reparsed.stagingProfiles[0]!.bindings.kind === "h3-graph-bindings",
   "旧 H3 runtime fixture（数组形 bindings）的解析结果钉字节不变");
+
+  // —— 0-E：projects[] 的地域 / 许可义务声明与 executionProfileSnapshotFile ——
+  {
+    const parsed = parseProductionRuntimeConfig(validConfig());
+    ok(parsed.projects[0]!.allowedProcessingRegions.join(",") === "CN"
+      && parsed.projects[0]!.licenseCompliance.attributionSurfaces.join(",") === "片尾字幕"
+      && parsed.projects[0]!.usesOutputToImproveModels === false,
+    "projects[] 供给 allowedProcessingRegions / licenseCompliance / usesOutputToImproveModels");
+    ok(parsed.executionProfileSnapshotFile === null,
+      "未声明 executionProfileSnapshotFile 时解析为 null（旧配置不因新增字段失效）");
+    ok(parseProductionRuntimeConfig({
+      ...validConfig(), executionProfileSnapshotFile: "profiles/snapshot.json",
+    }).executionProfileSnapshotFile === "profiles/snapshot.json",
+    "executionProfileSnapshotFile 按 workflows[].file 的相对路径规则解析");
+
+    const rejects = (mutate: (config: Record<string, unknown>) => void, needle: string): boolean => {
+      const config = validConfig();
+      mutate(config);
+      try { parseProductionRuntimeConfig(config); return false; }
+      catch (error) { return error instanceof ProductionRuntimeConfigError && error.message.includes(needle); }
+    };
+    for (const [label, region] of [["EU 集合别名", "EU"], ["非标准码 UK", "UK"], ["WORLDWIDE", "WORLDWIDE"]] as const) {
+      ok(rejects((config) => {
+        ((config.projects as Record<string, unknown>[])[0]!).allowedProcessingRegions = [region];
+      }, region === "WORLDWIDE" ? "大写二位地域码" : "集合别名或非标准码"),
+      `projects[].allowedProcessingRegions 拒绝 ${label}`);
+    }
+    ok(rejects((config) => {
+      delete ((config.projects as Record<string, unknown>[])[0]!).licenseCompliance;
+    }, "缺少：licenseCompliance"), "projects[] 缺 licenseCompliance 时 fail-closed");
+    ok(rejects((config) => {
+      ((config.projects as Record<string, unknown>[])[0]!).usesOutputToImproveModels = "false";
+    }, "必须是 boolean"), "usesOutputToImproveModels 必须是 boolean");
+    ok(rejects((config) => {
+      config.executionProfileSnapshotFile = "../snapshot.json";
+    }, "不得包含空段"), "executionProfileSnapshotFile 拒绝父目录穿越");
+    ok(rejects((config) => {
+      config.executionProfileSnapshotFile = "/etc/snapshot.json";
+    }, "相对 POSIX 路径"), "executionProfileSnapshotFile 拒绝绝对路径");
+  }
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

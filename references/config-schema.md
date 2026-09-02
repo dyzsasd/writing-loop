@@ -685,10 +685,25 @@ episodes/   evaluation/   source/（改编立项）
 [`docs/design/phase-3-remote-production/AI-SPEC.md`](https://github.com/dyzsasd/writing-loop/blob/main/docs/design/phase-3-remote-production/AI-SPEC.md#9b-phase-3c-%E9%83%A8%E7%BD%B2%E4%B8%8E-runtime-contract)。
 
 顶层 exact keys：`version`、`workspaceId`、`projects`、`backends`、`gateway`、`workflows`、
-`stagingProfiles`、`runner`。文件必须是当前 euid 所有、单链接普通文件，mode 只能 `0400`/`0600`；
+`stagingProfiles`、`runner`，外加可选的 `executionProfileSnapshotFile`。文件必须是当前 euid 所有、
+单链接普通文件，mode 只能 `0400`/`0600`；
 workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/digest。配置只允许保存 `credentialEnv`
 环境变量名，不允许保存 token、Authorization header、任意请求 URL 或签名资产 URL。
 
+- `projects[]` exact keys：`version`、`project`、`enabled`、`backendInstanceIds`、
+  `deploymentTerritories`、`availableBudgetMicros`、`allowedProcessingRegions`、`licenseCompliance`、
+  `usesOutputToImproveModels`。后三项是 intent gate 与编译器的项目侧声明（§4.7）：
+  - `allowedProcessingRegions`：素材允许被处理的物理地域，ISO-3166 alpha-2；空数组即「未声明」，
+    四个 modelFamily 一律 deny（`processing-region-not-allowed`）。集合别名 `EU`、非标准码 `UK` 与
+    `WORLDWIDE` 在解析层拒绝。
+  - `licenseCompliance{annualRevenueUsdBelow, attributionSurfaces[]}`：与 gate context 同形状、同判据。
+  - `usesOutputToImproveModels`：`obligations.noModelImprovement` 的编译期判据，gate 不判定。
+  `StaticGateContextResolver` 把前两项直接供给 gate context；`backendProcessingRegions` 来自后端
+  capability（`ProductionAdapter.capabilities().processingRegions`），`realFaceInputs` 由 `inputs[0]`
+  的 ShotRequest 正本（workspace CAS）汇总，缺该输入即 `undeclared`。
+- `executionProfileSnapshotFile`（可选）：gateway 导出的只读 execution profile 快照路径，相对本
+  runtime config 文件，解析规则同 `workflows[].file`（无 `..`、无空段、非绝对路径）。缺省为 null，
+  此时 `production plan-shots` 拒绝出计划——没有价目与时长档就无法给出可审批的批次估算。
 - `production-gateway` backend：credentialed HTTPS、固定 safe path、server profile alias；按 project
   构造 scope-bound adapter。
 - direct `comfyui` backend：仅无凭据 literal-loopback HTTP development endpoint；正式远程部署禁止。
@@ -733,9 +748,9 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
   - `backendProcessingRegions` 与 `allowedProcessingRegions`：数据实际被处理的物理位置，取 ISO-3166
     alpha-2 国家/地区代码。集合别名 `EU`、非标准码 `UK` 与 `WORLDWIDE` 一律拒绝——欧盟须逐个写成员国
     代码（`FR`、`DE`……），英国写 `GB`。判定：项目声明了 `allowedProcessingRegions` 而后端地域未声明
-    → deny；后端任一地域不在允许集合内 → deny；项目未声明 `allowedProcessingRegions` 时 seedance / veo
-    家族 deny（云后端在 provider 自有地域处理素材，不能默许），`minimax-h3` / `generic` 在 runtime
-    `projects[]` 供给该字段前暂放行。deny 码为 `processing-region-not-allowed`。
+    → deny；后端任一地域不在允许集合内 → deny；项目未声明 `allowedProcessingRegions` 时四个家族
+    （`generic`、`minimax-h3`、`seedance`、`veo`）一律 deny——runtime `projects[]` 已供给该字段，
+    本地 ComfyUI 与云后端同判据。deny 码为 `processing-region-not-allowed`。
   - `licenseCompliance{annualRevenueUsdBelow, attributionSurfaces[]}`：项目对许可义务的声明。
     `obligations.revenueThresholdUsd` 非 null 而项目未声明年收入低于该阈值、且没有完整的
     written-license evidence（`basis: written-license` 且 status verified、`licenseSha256`、`evidence`、
@@ -858,6 +873,64 @@ parser 执行验证的 v1 fixture 见
 `executionProfileSnapshotFile` 声明该文件路径，`plan-shots` 零网络读取它做估算，并校验
 `execution.workflowSha256` 与自身 `workflows[].workflowSha256` 相等，不等即拒绝出计划。价目只有这
 一处来源，registry 与快照是同一份 profile 内容。
+
+worker 侧解析器（`hub/src/production-profile-snapshot.ts`）与导出端逐字段对齐，并重算每条
+`profileDigest`：快照被就地改过价目、时长档或许可即在此暴露。快照按与 pinned graph 相同的纪律读取
+（相对路径无 `..`、路径段不得是 symlink（读前读后各查一次）、当前 euid 所有、mode `0400`/`0600`、
+单链接普通文件、读取期间不变）。
+
+条目可选带 `limits`（形状同 §4.3 `VideoBackendLimits`）：Phase 1b 起由 gateway 导出，导出时它进入
+`profileDigest` 的计算体。worker 侧按「有就算、没有就不算」处理，两种形态都能与导出端的 digest 对上。
+`processingRegions` 两侧都规范化为升序去重后再参与 digest 与比对，顺序差异不构成不一致。
+
+## 批次审批输入（`production plan-shots --input`，不属于 workspace config）
+
+批次审批文档的输入是一份普通 JSON（非 owner-only），顶层 exact keys：`version`、`kind`
+（`writing-loop/shot-batch-request`）、`phase`、`capability`、`anchorPreference`、`compiler`、
+`taskIdPrefix`、`createdAt`、`useTerritories`、`rights`、`moderation`、`license`、`profileId`、
+`samplePolicy`、`gpuEstimate`、`shots`、`script`。
+
+- `phase`：`sample` 或 `bulk`。`bulk` 必须显式声明 `samplePolicy.sampleShotIds`——样片门检查的是
+  先前批次的样片，不能由本批次自证。`sample` 的 `samplePolicy` 可为 null，缺省取每个被选 profile
+  在批次顺序里的第一镜。
+- `capability`：后端能力描述（§4.3 `BackendCapabilities` 全字段），可为 `null`。快照条目带
+  `limits` 时由快照推导，本字段可省；快照不带 `limits` 时必填——编译器需要 `limitsByModelId` 才能
+  判定模式、时长网格与参考上限。两者同时给出时逐项交叉校验（`backendInstanceId`、modelFamily、
+  `processingRegions`、时长网格、`limits` 本身），任一不一致即拒绝出计划。
+- `backendInstanceId`：本批次的目标后端；`null` 时取快照中唯一的 `backendInstanceId`，快照含多个
+  后端而未声明即拒绝（选错后端会把镜头发到另一台机器上）。
+- `arcId`：`visual/mappings.v1.json` 的陈设映射键（`(sceneId, arcId)`）；`null` = 不自动填陈设。
+- `profileId` 为 `null` 时的选档顺序：先按 `(backendInstanceId, output.aspectRatio,
+  output.generateAudio)` 收敛候选档，再在这个集合内按时长网格上取整。镜头合并的时长上界也取该集合的
+  最大档——跨画幅或跨音频意图选档等于选错档。
+- `shots[]` 与 `script` 二选一。`script{episodeFile, episode, sceneIndexes, options, patches,
+  mergedPatches}` 走剧本预填路径：`patches` 在合并**前**补齐分镜字段（`camera` 必须在这一步落位，
+  否则合并条件 3 恒不成立），`mergedPatches` 在合并**后**按存活 shotId 补齐 prompt 与连续性输入。
+  两份 patch 都只允许替换 `camera`、`scene`、`cast`、`props`、`crowd`、`output`、`continuity`、
+  `prompt` 八个成员。其中 `scene` 与 `continuity` 是字段级合并：`scene` 只接受
+  `lightingStateId` / `dressingVariantId`，`continuity` 只接受
+  `firstFrame` / `lastFrame` / `references` / `spatialPasses`；`sceneId`、时段、内外、
+  `stageGroup`、`prevShotId` 是剧本与合并结果的事实，不接受改写。
+- 预填与合并的 warnings（首个动作行之前的对白、合并时被丢弃的字段）不丢弃：它们按 shotId 进入计划的
+  `validation.shots[].issues`（`source: prefill | merge`）并计入 `validation.warnings`。
+- 视觉侧默认值在最后一步补空位，人工 patch 已写死的值不覆盖：`scene.lightingStateId` 取
+  `visual/mappings.v1.json` 的 `(sceneId, timeOfDay)`，`scene.dressingVariantId` 取
+  `(sceneId, arcId)`，`continuity.firstFrame` 取候选图 `shotIds` 排到该镜且已批准的那一张
+  （origin `approved-candidate`，`containsRealFace` 原样带入）。排到该镜但尚未批准的候选图不填，
+  只记一条 `source: visual` 的 warning。这四张视觉侧表全部纳入 `policyDigest`。
+- `taskIdPrefix`：每镜 `taskId = <taskIdPrefix>-<shotId>`。确定性 taskId 让同一批次的精确重放成为
+  幂等操作（CAS 对象、intent 与 task 都不重复写）。
+- `gpuEstimate{spotUsdPerHour, estimatedHours}`：plan 文档的 GPU 小时附注，不构成阻断条件（§4.7）。
+
+`--plan` 严格零写入，输出 `ShotBatchPlan`：`batchPlanId`、`policyDigest`、每镜 `decisions` 与
+`estimates`、承接链 `waves[]`、`droppedReferences`、`degradations`、`validation` 汇总与总估算。
+`batchPlanId = sha256(canonicalJson({workspace, project, intents[], policyDigest, degradations[]}))`；
+策略（价目、capability、项目声明、samplePolicy、intent 脚手架、视觉侧表）或任一镜头输入变化即失效。
+`--confirm <batchPlanId>` 重算同一计划后逐镜按 CAS → intent → task → dispatch-requested 发布；带
+error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文档，但退出码为 1）。
+
+样片门按 taskId 查本地权威账本，而 taskId 由 `<taskIdPrefix>-<shotId>` 拼出：**sample 批次与 bulk
+批次必须使用同一个 `taskIdPrefix`**，否则 bulk 会去找一批根本不存在的 task 而永远被阻断。
 
 ## 校验规则（onboarding plan/create 必须通过）
 - workspace 根已由 `writing-loop init` 确立（`.writing-loop/config.json` 存在，§11/§13）。

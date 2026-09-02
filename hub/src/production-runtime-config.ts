@@ -35,11 +35,15 @@ import {
   PRODUCTION_MODEL_FAMILIES,
   REQUIRES_SCOPED_STAGING,
   parseProductionIntentExecution,
+  parseProductionLicenseCompliance,
+  parseProductionProcessingRegions,
   readProductionIntent,
   type ProductionDispatchIntent,
   type ProductionIntentExecution,
   type ProductionIntentGateContext,
+  type ProductionIntentRealFaceDeclaration,
   type ProductionIntentResolver,
+  type ProductionLicenseCompliance,
   type ProductionModelFamily,
 } from "./production-intent.ts";
 import {
@@ -48,6 +52,13 @@ import {
   providerSlotSequenceViolation,
   type ProviderInputSlot,
 } from "./production-provider-adapter.ts";
+import { readProductionCasObject } from "./production-cas.ts";
+import { ProductionError } from "./production-domain.ts";
+import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  parseShotRequest,
+  type ShotRequest,
+} from "./production-shot-request.ts";
 import {
   hasSymlinkComponent,
   readRegularTextExact,
@@ -186,6 +197,18 @@ export type ProductionRuntimeProjectConfig = Readonly<{
   backendInstanceIds: readonly string[];
   deploymentTerritories: readonly string[];
   availableBudgetMicros: number;
+  /**
+   * 素材允许被处理的物理地域（ISO-3166 alpha-2，§4.7）。空数组是显式「未声明」，四个家族一律
+   * deny——集合别名 `EU`、非标准码 `UK` 与 `WORLDWIDE` 在解析层拒绝。
+   */
+  allowedProcessingRegions: readonly string[];
+  /** 项目对许可义务的声明；与 intent gate context 同形状、同判据（§4.7）。 */
+  licenseCompliance: ProductionLicenseCompliance;
+  /**
+   * 输出是否会用于改进其他模型。该条款只在编译期按项目声明判定（`ShotCompilePolicy.project`），
+   * gate 不判定：dispatch 前拿不到可取证的事实（§4.7）。
+   */
+  usesOutputToImproveModels: boolean;
 }>;
 
 export type ProductionRuntimeRunnerConfig = Readonly<{
@@ -204,6 +227,11 @@ export type ProductionRuntimeConfig = Readonly<{
   workflows: readonly ProductionRuntimeWorkflowConfig[];
   stagingProfiles: readonly ProductionRuntimeStagingProfileConfig[];
   runner: ProductionRuntimeRunnerConfig;
+  /**
+   * gateway 导出的只读 execution profile 快照（§4.2），相对本 runtime config 文件，解析规则同
+   * `workflows[].file`。`plan-shots` 零网络读取它做估算；未声明时该命令拒绝出计划。
+   */
+  executionProfileSnapshotFile: string | null;
 }>;
 
 export type ProductionRuntimeConfigErrorCode =
@@ -654,6 +682,7 @@ function parseProject(value: unknown, index: number): ProductionRuntimeProjectCo
   const row = record(value, subject);
   exactKeys(row, [
     "version", "project", "enabled", "backendInstanceIds", "deploymentTerritories", "availableBudgetMicros",
+    "allowedProcessingRegions", "licenseCompliance", "usesOutputToImproveModels",
   ], subject);
   version(row.version, subject);
   if (typeof row.enabled !== "boolean") schemaError(`${subject}.enabled`, "必须是 boolean");
@@ -666,6 +695,22 @@ function parseProject(value: unknown, index: number): ProductionRuntimeProjectCo
   if (new Set(backendInstanceIds).size !== backendInstanceIds.length) {
     schemaError(`${subject}.backendInstanceIds`, "不得重复");
   }
+  if (typeof row.usesOutputToImproveModels !== "boolean") {
+    schemaError(`${subject}.usesOutputToImproveModels`, "必须是 boolean");
+  }
+  // 地域与许可义务两项复用 production-intent 的解析器：gate 与 runtime 配置不得存在第二份判据。
+  let allowedProcessingRegions: readonly string[];
+  let licenseCompliance: ProductionLicenseCompliance;
+  try {
+    allowedProcessingRegions = parseProductionProcessingRegions(
+      row.allowedProcessingRegions, `${subject}.allowedProcessingRegions`,
+    );
+    licenseCompliance = parseProductionLicenseCompliance(
+      row.licenseCompliance, `${subject}.licenseCompliance`,
+    );
+  } catch (error) {
+    schemaError(subject, error instanceof Error ? error.message : String(error));
+  }
   return Object.freeze({
     version: 1,
     project: safeString(row.project, SAFE_PROJECT, `${subject}.project`),
@@ -675,6 +720,12 @@ function parseProject(value: unknown, index: number): ProductionRuntimeProjectCo
     availableBudgetMicros: boundedInteger(
       row.availableBudgetMicros, 0, Number.MAX_SAFE_INTEGER, `${subject}.availableBudgetMicros`,
     ),
+    allowedProcessingRegions: Object.freeze(allowedProcessingRegions),
+    licenseCompliance: Object.freeze({
+      annualRevenueUsdBelow: licenseCompliance.annualRevenueUsdBelow,
+      attributionSurfaces: Object.freeze([...licenseCompliance.attributionSurfaces]) as string[],
+    }),
+    usesOutputToImproveModels: row.usesOutputToImproveModels,
   });
 }
 
@@ -716,7 +767,7 @@ export function parseProductionRuntimeConfig(value: unknown): ProductionRuntimeC
   const row = record(value, subject);
   exactKeys(row, [
     "version", "workspaceId", "projects", "backends", "gateway", "workflows", "stagingProfiles", "runner",
-  ], subject);
+  ], subject, ["executionProfileSnapshotFile"]);
   version(row.version, subject);
   if (!Array.isArray(row.projects) || row.projects.length > MAX_PRODUCTION_RUNTIME_PROJECTS) {
     schemaError(`${subject}.projects`, `最多包含 ${MAX_PRODUCTION_RUNTIME_PROJECTS} 项`);
@@ -811,6 +862,10 @@ export function parseProductionRuntimeConfig(value: unknown): ProductionRuntimeC
     workflows: Object.freeze(workflows),
     stagingProfiles: Object.freeze(stagingProfiles),
     runner: parseRunner(row.runner),
+    executionProfileSnapshotFile: row.executionProfileSnapshotFile === undefined
+      || row.executionProfileSnapshotFile === null
+      ? null
+      : relativeWorkflowFile(row.executionProfileSnapshotFile, `${subject}.executionProfileSnapshotFile`),
   });
 }
 
@@ -870,7 +925,12 @@ function samePrivateIdentity(left: PrivateFileIdentity, right: PrivateFileIdenti
 }
 
 /** Add owner/euid and 0400-or-0600 requirements around the shared exact descriptor/path reader. */
-function readPrivateRegularTextExact(file: string, maxBytes: number, hooks: ExactReadHooks = {}): string | null {
+/**
+ * Owner-only bounded exact read (0400/0600, current euid, single link, unchanged across the read).
+ * Exported so every worker-side trusted artifact — runtime config, pinned graph, execution profile
+ * snapshot — is read through one discipline instead of three near-copies.
+ */
+export function readPrivateRegularTextExact(file: string, maxBytes: number, hooks: ExactReadHooks = {}): string | null {
   const before = privateIdentity(file);
   if (before === null) return null;
   const text = readRegularTextExact(file, maxBytes, hooks);
@@ -1186,26 +1246,76 @@ class ConfiguredInputPipelineResolver implements ProductionInputPipelineResolver
   }
 }
 
+/**
+ * `realFaceInputs` 的唯一来源是本次 dispatch 的 ShotRequest（§4.7）：intent 的 `inputs[]` 只有
+ * AssetRef，不携带 `containsRealFace`。inputs[0] 是 shot-request media type 时按 sha256 从 workspace
+ * CAS 取回正本并汇总首帧 / 尾帧 / 参考的声明；没有 ShotRequest（H3 契约 v1、generic）即 `undeclared`。
+ */
+function realFaceInputsFromIntent(
+  root: string,
+  project: string,
+  intent: ProductionDispatchIntent,
+): ProductionIntentRealFaceDeclaration {
+  const head = intent.inputs[0];
+  if (head === undefined || head.mediaType !== SHOT_REQUEST_MEDIA_TYPE) return "undeclared";
+  const bytes = readProductionCasObject(root, project, head.sha256);
+  if (bytes === null) return "undeclared";
+  let shotRequest: ShotRequest;
+  // 这是运行期的账本内容，不是配置：CAS 里的 ShotRequest 坏掉属于该次 dispatch 的事实缺失，
+  // 报成 config-invalid-schema 会把「这条 intent 有问题」误指为「部署配置有问题」。
+  try { shotRequest = parseShotRequest(JSON.parse(bytes.toString("utf8"))); }
+  catch (error) {
+    throw new ProductionError(
+      `intent ${intent.taskId} 的 inputs[0] ShotRequest 正本无法解析：${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const declarations = [
+    shotRequest.continuity.firstFrame?.containsRealFace,
+    shotRequest.continuity.lastFrame?.containsRealFace,
+    ...shotRequest.continuity.references.map((reference) => reference.containsRealFace),
+  ].filter((entry): entry is boolean => entry !== undefined);
+  return declarations.some((entry) => entry) ? "present" : "absent";
+}
+
 class StaticGateContextResolver implements ProductionGateContextResolver {
   readonly #project: ProductionRuntimeProjectConfig;
   readonly #now: () => Date | string;
+  readonly #root: string;
+  readonly #adapters: ProductionAdapterRegistry;
 
-  constructor(project: ProductionRuntimeProjectConfig, now: () => Date | string) {
+  constructor(
+    project: ProductionRuntimeProjectConfig,
+    now: () => Date | string,
+    options: { root: string; adapters: ProductionAdapterRegistry },
+  ) {
     this.#project = project;
     this.#now = now;
+    this.#root = options.root;
+    this.#adapters = options.adapters;
   }
 
   async resolve(
-    _intent: ProductionDispatchIntent,
+    intent: ProductionDispatchIntent,
     _task: Parameters<ProductionGateContextResolver["resolve"]>[1],
     signal?: AbortSignal,
   ): Promise<ProductionIntentGateContext> {
+    throwIfAborted(signal);
+    // 后端处理地域由 backend capability 供给（§4.3）；未声明即空集合，gate 按 fail-closed 判定。
+    const adapter = this.#adapters.resolve(intent.execution.backendInstanceId);
+    const capabilities = adapter === null ? null : await adapter.capabilities(signal);
     throwIfAborted(signal);
     return {
       version: 1,
       evaluatedAt: canonicalNow(this.#now),
       deploymentTerritories: [...this.#project.deploymentTerritories],
       availableBudgetMicros: this.#project.availableBudgetMicros,
+      backendProcessingRegions: [...(capabilities?.processingRegions ?? [])],
+      allowedProcessingRegions: [...this.#project.allowedProcessingRegions],
+      licenseCompliance: {
+        annualRevenueUsdBelow: this.#project.licenseCompliance.annualRevenueUsdBelow,
+        attributionSurfaces: [...this.#project.licenseCompliance.attributionSurfaces],
+      },
+      realFaceInputs: realFaceInputsFromIntent(this.#root, this.#project.project, intent),
     };
   }
 }
@@ -1363,7 +1473,10 @@ export function createProductionRuntimeRegistry(
       const intentResolver = new LocalIntentResolver(root, project.project);
       const authorizedWorkflows = config.workflows.filter((workflow) => workflow.projects.includes(project.project));
       const scopedWorkflowResolver = new ScopedWorkflowResolver(workflowResolver, authorizedWorkflows);
-      const gateContextResolver = new StaticGateContextResolver(project, now);
+      const gateContextResolver = new StaticGateContextResolver(project, now, {
+        root,
+        adapters: scopedAdapterRegistry,
+      });
       const scope = Object.freeze({
         workspaceId: config.workspaceId,
         project: project.project,
