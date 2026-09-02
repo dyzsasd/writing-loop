@@ -22,6 +22,8 @@
 # 环境变量（都有默认值）：
 #   WL_GPU_PROJECT WL_GPU_ZONE WL_GPU_INSTANCE WL_GPU_IMAGE_FAMILY WL_GPU_IMAGE_PROJECT
 #   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_SUBNET WL_GATEWAY_PORT WL_COMFY_PORT
+#   WL_GPU_MAX_UPTIME_MINUTES（开机自动关机硬上限，默认 300；0 关闭）
+# 停机纪律：不需要 GPU 时必须 `stop`，该命令会轮询确认 TERMINATED；即使忘记，startup-script 也会到点自动关机。
 set -euo pipefail
 
 PROJECT="${WL_GPU_PROJECT:-jinko-vibe-coding}"
@@ -34,6 +36,9 @@ BOOT_GB="${WL_GPU_BOOT_GB:-200}"
 SUBNET="${WL_GPU_SUBNET:-default}"
 GATEWAY_PORT="${WL_GATEWAY_PORT:-8790}"
 COMFY_PORT="${WL_COMFY_PORT:-8188}"
+# 开机自动关机硬上限（分钟）。每次 create/start 都会重新写入 startup-script，
+# 到点由 VM 自己 shutdown，防止忘记停机（按时计费）。0 表示不设上限。
+MAX_UPTIME_MINUTES="${WL_GPU_MAX_UPTIME_MINUTES:-300}"
 
 say()  { printf '[gcp-h3-vm] %s\n' "$*"; }
 fail() { printf '[gcp-h3-vm] FAIL: %s\n' "$*" >&2; exit 1; }
@@ -61,10 +66,32 @@ exists() {
   esac
 }
 
+# 开机自动关机保险：startup-script 在每次开机时登记 `shutdown -h +N`。
+auto_shutdown_script() {
+  if [ "$MAX_UPTIME_MINUTES" -gt 0 ] 2>/dev/null; then
+    printf '#!/bin/sh\n# writing-loop: 开机 %s 分钟后自动关机（防止忘记停机）\nshutdown -h +%s "writing-loop auto-shutdown after %s minutes"\n' "$MAX_UPTIME_MINUTES" "$MAX_UPTIME_MINUTES" "$MAX_UPTIME_MINUTES"
+  else
+    printf '#!/bin/sh\n# writing-loop: 未设置自动关机上限\n'
+  fi
+}
+apply_auto_shutdown_metadata() {
+  local tmp
+  tmp="$(mktemp)"
+  auto_shutdown_script > "$tmp"
+  gc compute instances add-metadata "$INSTANCE" --zone "$ZONE" --metadata-from-file "startup-script=$tmp" >/dev/null
+  rm -f "$tmp"
+  if [ "$MAX_UPTIME_MINUTES" -gt 0 ] 2>/dev/null; then
+    say "已登记开机自动关机：${MAX_UPTIME_MINUTES} 分钟（WL_GPU_MAX_UPTIME_MINUTES 可调，0 关闭）"
+  fi
+}
+
 cmd_create() {
   require_auth
   if exists; then fail "实例 $INSTANCE 已存在（$ZONE）。要重建先手动删除，本脚本不覆盖。"; fi
   say "创建 Spot $MACHINE（$IMAGE_FAMILY，启动盘 ${BOOT_GB}GB 保留，抢占时只停机）"
+  local startup
+  startup="$(mktemp)"
+  auto_shutdown_script > "$startup"
   gc compute instances create "$INSTANCE" \
     --zone "$ZONE" \
     --machine-type "$MACHINE" \
@@ -79,13 +106,19 @@ cmd_create() {
     --no-address \
     --no-service-account \
     --no-scopes \
-    --metadata=enable-oslogin=TRUE
+    --metadata=enable-oslogin=TRUE \
+    --metadata-from-file "startup-script=$startup"
+  rm -f "$startup"
+  if [ "$MAX_UPTIME_MINUTES" -gt 0 ] 2>/dev/null; then
+    say "已登记开机自动关机：${MAX_UPTIME_MINUTES} 分钟（WL_GPU_MAX_UPTIME_MINUTES 可调，0 关闭）"
+  fi
   cmd_status
 }
 
 cmd_start() {
   require_auth
   exists || fail "实例 $INSTANCE 不存在，先跑 create。"
+  apply_auto_shutdown_metadata
   gc compute instances start "$INSTANCE" --zone "$ZONE"
   cmd_status
 }
@@ -94,14 +127,21 @@ cmd_stop() {
   require_auth
   exists || fail "实例 $INSTANCE 不存在。"
   gc compute instances stop "$INSTANCE" --zone "$ZONE"
-  cmd_status
+  # 停机必须确认到位：轮询到 TERMINATED 为止（最多 3 分钟），否则报错，绝不静默返回。
+  local i state
+  for i in $(seq 1 36); do
+    state="$(gc compute instances describe "$INSTANCE" --zone "$ZONE" --format='value(status)')"
+    if [ "$state" = "TERMINATED" ]; then say "实例已停机（TERMINATED）。"; cmd_status; return 0; fi
+    sleep 5
+  done
+  fail "停机后 3 分钟内状态仍为 $state，请手动检查（gcloud compute instances describe $INSTANCE --zone $ZONE）。"
 }
 
 cmd_status() {
   require_auth
   exists || fail "实例 $INSTANCE 不存在。"
   gc compute instances describe "$INSTANCE" --zone "$ZONE" \
-    --format='table[box](name, status, machineType.basename(), scheduling.provisioningModel, scheduling.instanceTerminationAction, networkInterfaces[0].networkIP:label=INTERNAL_IP, networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP, disks[0].diskSizeGb:label=BOOT_GB, disks[0].autoDelete:label=BOOT_AUTODELETE)'
+    --format='table[box](name, status, machineType.basename(), scheduling.provisioningModel, scheduling.instanceTerminationAction, networkInterfaces[0].networkIP:label=INTERNAL_IP, networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP, disks[0].diskSizeGb:label=BOOT_GB, disks[0].autoDelete:label=BOOT_AUTODELETE, lastStartTimestamp:label=LAST_START, metadata.items.filter("key:startup-script").len():label=AUTO_SHUTDOWN_SCRIPT)'
 }
 
 cmd_ssh() {
