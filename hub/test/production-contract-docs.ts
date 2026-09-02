@@ -97,8 +97,8 @@ if (runtimeFixtureMatch) {
       && graph.pipeline.sampler.classType === "SamplerCustomAdvanced"
       && graph.pipeline.saveVideo.classType === "SaveVideo"
       && graph.parameterManifest.sha256 === workflow.parametersSha256
-      && binding?.source.classType === "LoadImage" && binding.source.inputName === "image"
-      && binding.source.outputIndex === 0 && binding.consumer.nodeId === graph.generator.nodeId
+      && binding?.source?.classType === "LoadImage" && binding.source.inputName === "image"
+      && binding.source.outputIndex === 0 && binding.consumer?.nodeId === graph.generator.nodeId
       && binding.consumer.inputName === "first_frame",
     "AI-SPEC runtime fixture 通过真实 strict parser，并冻结 H3 四模型、active pipeline 与 source→consumer binding");
   } catch (error) {

@@ -131,7 +131,9 @@ const observation = parseCoordinatorRemoteObservation({
   errorSummary: null,
   responseDigest: SHA,
 });
-ok(observation.outputs[0]?.filename === "take.mp4", "lastObservation 保存有界、相对的远端 output locator");
+const firstOutput = observation.outputs[0];
+ok(firstOutput?.source === "comfy-view" && firstOutput.filename === "take.mp4",
+  "lastObservation 保存有界、相对的远端 output locator，并归一化写出 source");
 ok(throwsProduction(() => parseCoordinatorRemoteObservation({
   ...observation, state: "running",
 }), "不得持有 outputs"), "非 succeeded observation 不能伪造 outputs");
@@ -149,14 +151,21 @@ const comfyLocator = {
 const withSource = parseCoordinatorRemoteObservation({
   ...observation, outputs: [{ source: "comfy-view", ...comfyLocator }],
 });
-ok(JSON.stringify(withSource.outputs) === JSON.stringify(observation.outputs)
-  && !Object.prototype.hasOwnProperty.call(withSource.outputs[0]!, "source"),
-"source: comfy-view 与缺省读法一致，归一化后 durable 字节逐字不变");
+const withoutSource = parseCoordinatorRemoteObservation(observation);
+ok(JSON.stringify(withSource.outputs) === JSON.stringify(withoutSource.outputs)
+  && withSource.outputs[0]?.source === "comfy-view",
+"source: comfy-view 与缺省读法一致，归一化后 durable 记录总带 source");
+const durableProviderOutput = parseCoordinatorRemoteObservation({
+  ...observation,
+  outputs: [{ source: "provider-output", remoteJobId: "job-1", outputIndex: 0, role: "last-frame", kind: "image" }],
+});
+ok(JSON.stringify(durableProviderOutput.outputs) === JSON.stringify([{
+  source: "provider-output", remoteJobId: "job-1", outputIndex: 0, role: "last-frame", kind: "image",
+}]), "provider-output locator 经 openOutput 取回路径装配后可进入 durable observation");
 ok(throwsProduction(() => parseCoordinatorRemoteObservation({
   ...observation,
-  outputs: [{ source: "provider-output", remoteJobId: "job-1", outputIndex: 0, role: "primary", kind: "video" }],
-}), "openOutput 取回路径尚未装配"),
-"provider-output locator 在 ingest kernel 装配前 fail-closed 拒绝进入 durable observation");
+  outputs: [{ source: "provider-output", remoteJobId: "job-1", outputIndex: 0, role: "primary", kind: "audio" }],
+}), "只支持 video 或 image"), "provider-output 的 kind 只接受 video / image");
 ok(throwsProduction(() => parseCoordinatorRemoteObservation({
   ...observation, outputs: [{ source: "gcs", ...comfyLocator }],
 }), "必须是 comfy-view 或 provider-output"), "未知 locator source 被拒绝");

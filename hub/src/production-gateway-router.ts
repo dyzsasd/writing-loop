@@ -36,6 +36,8 @@ const METHODS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   stages: new Set(["PUT"]),
   ingests: new Set(["PUT"]),
   assets: new Set(["GET"]),
+  // §8.6: the scope-level capability resource has no per-object segment.
+  capabilities: new Set(["GET"]),
 });
 
 function fixedJson(status: number, error: "not-found" | "service-unavailable" | "internal"): Response {
@@ -85,11 +87,14 @@ function route(request: Request): RouteTarget | null {
   const url = new URL(request.url);
   if (url.search || url.hash || url.pathname.startsWith("//")) return null;
   const parts = url.pathname.split("/");
-  if (parts.length < 7 || parts[0] !== "" || parts[1] !== "v1" || parts[2] !== "scopes"
-    || parts[3] === "" || parts[4] === "" || parts[5] === "" || parts[6] === "") return null;
+  if (parts.length < 6 || parts[0] !== "" || parts[1] !== "v1" || parts[2] !== "scopes"
+    || parts[3] === "" || parts[4] === "" || parts[5] === "") return null;
   const resource = parts[5]!;
   const methods = METHODS[resource];
   if (methods === undefined || !methods.has(request.method)) return null;
+  // Only `capabilities` is a scope-level resource; every other one addresses exactly one object.
+  if (resource === "capabilities") return parts.length === 6 ? "jobs" : null;
+  if (parts.length < 7 || parts[6] === "") return null;
   if (resource === "jobs") return "jobs";
   if (resource === "stages") return "stages";
   return "artifacts";

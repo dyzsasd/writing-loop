@@ -711,12 +711,15 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
   可选，缺省等价于 `tls`，即上述 HTTPS 规则不变）：取 `insecure-private-http` 时 `baseUrl` 必须是
   `http://` 且 host 为 RFC1918 私网 IPv4（10/8、172.16/12、192.168/16）或 `127.0.0.1` 的字面地址，
   `credentialEnv` 必须非空；域名、公网 IP、`https:`、IPv6 与 `kind: comfyui` 一律拒绝。该选项以 VPC
-  隔离与防火墙规则替代 TLS，威胁模型与适用条件如下，任一条不成立时必须改回 `transport: "tls"`：
-  - worker 与 gateway 两台主机在同一 VPC，gateway 只绑定该 VPC 的内网 IP，不监听公网地址；
-  - 防火墙不对公网开放 gateway 端口，入站规则只允许来自 writing-loop-sg 内网 IP 的该端口；
+  隔离或 ssh 隧道替代 TLS，威胁模型与适用条件如下，任一条不成立时必须改回 `transport: "tls"`：
+  - 当前拓扑（操作者 2026-09-02 裁定）：worker 与全部 writing-loop 控制面运行在操作者本机，经 IAP
+    ssh 隧道 `-L 8790:127.0.0.1:8790` 访问 GPU VM 上的 gateway，因此 `baseUrl` 为
+    `http://127.0.0.1:8790`，明文段只存在于本机 loopback，跨主机段由 ssh 加密；
+  - GPU VM 上的 gateway 只绑 `127.0.0.1`，不监听任何对外地址，ComfyUI 同样只在 loopback；
+  - 备选拓扑（worker 与 gateway 同 VPC、gateway 绑 VPC 内网 IP）仍然成立，此时额外要求防火墙不对
+    公网开放 gateway 端口、且入站只允许该 worker 主机的内网 IP；明文段对同 VPC 内的其他工作负载可见，
+    VPC 内出现第三方工作负载时该前提失效；
   - GPU VM 按批次启停，非批次期间不存在监听端口；
-  - 明文传输下 bearer 与请求体对同 VPC 内的其他工作负载可见。当前该 VPC 内只有 writing-loop-sg 与
-    按需启动的 GPU VM 两台主机，且均由同一操作者控制；VPC 内出现第三方工作负载时该前提失效；
   - 不适用于跨 VPC、跨云或经公网的部署。
 - workflow：完整 backend/model/workflow/parameters tuple、显式 projects allowlist、必填
   `inputPolicy: static-pre-staged | scoped-staging` 与 `h3GraphContract`。两项按 modelFamily 家族表判定：
@@ -725,11 +728,19 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
   H3 contract 固定 native generator、768 short-edge canvas、24fps 对应的
   `17k+5` length、diffusion/text encoder/video VAE/audio VAE 四组件 bundle digest、active
   SigmaShift→guider/scheduler→sampler→双 decode→CreateVideo→SaveVideo pipeline，以及实际参数投影 digest。
+  `h3GraphContract.version` 取 1 或 2（两版并存）：v1 把 `generator.prompt` 与 `RandomNoise.noise_seed`
+  钉成字面量，一份 graph 只承载一个镜头；v2 把两者换成 sentinel
+  `writing-loop://shot-request/<profileId>/prompt|seed`，参数投影按 sentinel 计算（因此同一 profile 的
+  每个镜头共用一份 `parametersSha256`），materialize 时从 stage 出的 ShotRequest 填入实际值并重新断言
+  整图。v2 要求 `output.seed` 非空：pinned graph 的 `noise_seed` 必须是具体整数。
 - staging profile：完整 execution 与按家族判别的 `bindings`。`minimax-h3` 用有序
   `index/slot/source/consumer` 的 LoadImage 绑定契约（数组形）：v1 source 只能是 `LoadImage.image`
   output 0；consumer 必须是 contract 中真实 H3 generator 的 `first_frame`、`last_frame` 或
   `ref_images.ref_image_N`。source→consumer exact edge、无 fanout、无 decoy node 与 provider key 唯一性
-  都在 graph verifier 中证明。`seedance` / `veo` 没有可绑定的图节点，`bindings` 改用
+  都在 graph verifier 中证明。graph 契约 v2 的绑定数组以 `{index: 0, slot: "shot-request", source: null,
+  consumer: null}` 开头（该 slot 只 stage、不绑定图节点），其后的 LoadImage 绑定 index 顺延一位，
+  consumer 的 `ref_image_N` 仍按 LoadImage 位置编号（N = index − 1）。
+  `seedance` / `veo` 没有可绑定的图节点，`bindings` 改用
   `{version: 1, kind: "provider-slot-policy", slots: [{slot, minCount, maxCount}]}`（§6.5）：`slot` 取
   `shot-request | first_frame | last_frame | reference_image | reference_video | reference_audio`，顺序由数组
   位置隐含，必须按 `shot-request`、首帧、尾帧、图片参考、视频参考、音频参考 严格升序且每个 slot 只出现
@@ -799,13 +810,17 @@ parser 执行验证的 v1 fixture 见
 `admission`、`reconcilePolicy`。
 
 - `listen{host, port}`：`host` 只接受 RFC1918 私网 IPv4（10/8、172.16/12、192.168/16）或 `127.0.0.1`
-  字面地址；`0.0.0.0`、公网 IP 与域名在监听前被拒。`port` 为 0–65535，`0` 表示取临时端口（测试用），
-  部署固定端口。
+  字面地址；`0.0.0.0`、公网 IP 与域名在监听前被拒。当前拓扑推荐 `127.0.0.1`：worker 在操作者本机，
+  经 IAP ssh 隧道 `-L 8790:127.0.0.1:8790` 连到 VM 上的 gateway，VM 上没有对外监听面。
+  `port` 为 0–65535，`0` 表示取临时端口（测试用），部署固定端口。
 - `auth{bearerEnv}`：静态 bearer 的环境变量名，由 systemd `EnvironmentFile`（0600）注入。全部路由
   要求 `Authorization: Bearer <该变量的值>`，缺失或错误一律 401。bearer 短于 16 字符时进程拒绝启动。
 - `backends[]`：v1 只支持 `kind: "comfyui"`，字段为 `backendInstanceId`、`comfyBaseUrl`（只接受
-  literal loopback HTTP，ComfyUI 与 gateway 同机）、`profileIds[]`。数组长度必须为 1：jobs 内核只
-  绑一个 raw adapter，第二个 backend 需要独立实例，解析层直接拒绝。
+  literal loopback HTTP，ComfyUI 与 gateway 同机）、`maxInputImageBytes`、`profileIds[]`。数组长度
+  必须为 1：jobs 内核只绑一个 raw adapter，第二个 backend 需要独立实例，解析层直接拒绝。
+  `maxInputImageBytes`（1 KiB–4 GiB）是自托管后端的输入图片上限声明：ComfyUI 没有 provider 侧上限
+  可引用，adapter 不猜数字，该值经 capability 的 `limitsByModelId[profileId].maxInputImageBytes`
+  与只读快照的 `limits` 一起对外。
 - `executionProfiles[]`：`execution` 是 §4.2 execution profile 正本
   （`kind: "writing-loop/execution-profile"`，含 profileId、modelFamily、operation、backendInstanceId、
   workflowSha256 / modelSha256 / parametersSha256、variant、shortEdge、durationSeconds、aspectRatio、
@@ -819,9 +834,13 @@ parser 执行验证的 v1 fixture 见
   execution 由 profile 推导，不二次配置。
 - `stageProfiles[]`：`providerCasNamespace`（以 `/sha256` 结尾）、有序 `inputs[]{index, slot, mediaTypes}`
   与 H3 `bindings[]`；两者逐位按 index/slot 对齐，否则拒绝。`mediaTypes` 必须落在 stage 内核的允许
-  集合内（`audio/flac|mpeg|ogg|wav`、`image/gif|jpeg|png|webp`、`video/mp4|webm`）、去重且按字典序
-  升序、至多 32 项——与内核请求期的 `parseProfileInput` 同一规则，避免「启动成功但每个 stages 请求
-  500」。
+  集合内（`application/vnd.writing-loop.shot-request+json`、`audio/flac|mpeg|ogg|wav`、
+  `image/gif|jpeg|png|webp`、`video/mp4|webm`）、去重且按字典序升序、至多 32 项——与内核请求期的
+  `parseProfileInput` 同一规则，避免「启动成功但每个 stages 请求 500」。
+  H3 graph 契约 v2 的 profile 在 `inputs[0]` 声明 `slot: "shot-request"`、
+  `mediaTypes: ["application/vnd.writing-loop.shot-request+json"]`，对应的 `bindings[0]` 的
+  `source` 与 `consumer` 同为 `null`（该 slot 不绑定 LoadImage），其余 LoadImage 绑定 index 顺延一位。
+  `shot-request` 这个 slot 名与该 mediaType 一一对应：任何一边单独出现都被拒。
 - `casAuthority`：stage 资产只接受 `cas://<casAuthority>/sha256/<digest>`，解析到本机 ingest CAS
   （承接链的尾帧因此不需要跨主机取回）。
 - `objectsRoot` / `ingestRoot` / `jobStateRoot`：持久化启动盘上的三个独立绝对路径。stage 内核把资产
@@ -854,6 +873,7 @@ parser 执行验证的 v1 fixture 见
       "profileDigest": "<sha256 of the canonical entry without this field>",
       "execution": { "...": "§4.2 execution profile 正本" },
       "durationGrid": [8],
+      "limits": { "...": "§4.3 VideoBackendLimits，与 capabilities 路由同源" },
       "priceTable": { "version": 1, "basis": "tariff", "currency": "USD", "microsPerOutputSecond": 430,
                       "priceAsOf": "2026-08-28T00:00:00.000Z", "source": "..." },
       "license": { "version": 1, "status": "verified", "basis": "community", "territories": ["SG"],
@@ -867,9 +887,15 @@ parser 执行验证的 v1 fixture 见
 }
 ```
 
-`profileDigest` 是去掉该字段后条目的 canonical JSON sha256；`durationGrid` 是同一输出形状
+`profileDigest` 是去掉该字段后条目的 canonical JSON sha256——`execution`、`durationGrid`、`limits`、
+`priceTable`、`license`、`processingRegions` 全部计入，任一项变化 digest 即变化。
+
+`limits` 是 §4.3 的 `VideoBackendLimits`，导出前经 `parseVideoBackendLimits` 复算一次形状；它与
+`capabilities` 路由返回的 `limitsByModelId[profileId]` 取自同一份推导，因此
+`durationGrid === limits.durationSeconds.grid` 恒成立（不等时导出直接失败）。`durationGrid` 是同一输出形状
 （backendInstanceId + modelFamily + variant + aspectRatio + resolution + generateAudio）下已配置 profile
-的时长集合升序去重（§5.3：H3 每档时长一份 profile）。worker 侧 runtime config 的
+的时长集合升序去重（§5.3：H3 每档时长一份 profile）。`processingRegions` 与 worker 侧共用同一份地域
+解析：去重、升序、拒绝 `EU` / `UK` 这类集合别名——配置里的书写顺序不影响 digest。worker 侧 runtime config 的
 `executionProfileSnapshotFile` 声明该文件路径，`plan-shots` 零网络读取它做估算，并校验
 `execution.workflowSha256` 与自身 `workflows[].workflowSha256` 相等，不等即拒绝出计划。价目只有这
 一处来源，registry 与快照是同一份 profile 内容。
@@ -879,9 +905,10 @@ worker 侧解析器（`hub/src/production-profile-snapshot.ts`）与导出端逐
 （相对路径无 `..`、路径段不得是 symlink（读前读后各查一次）、当前 euid 所有、mode `0400`/`0600`、
 单链接普通文件、读取期间不变）。
 
-条目可选带 `limits`（形状同 §4.3 `VideoBackendLimits`）：Phase 1b 起由 gateway 导出，导出时它进入
-`profileDigest` 的计算体。worker 侧按「有就算、没有就不算」处理，两种形态都能与导出端的 digest 对上。
-`processingRegions` 两侧都规范化为升序去重后再参与 digest 与比对，顺序差异不构成不一致。
+`limits` 在读取侧是可选字段：存在即计入 `profileDigest` 的计算体，缺省即不计，两种形态都能与导出端
+的 digest 对上。当前 gateway 的导出恒含 `limits`（与 `capabilities` 路由同源，见上），可选只是为了读入
+更早版本导出的快照。`processingRegions` 两侧都规范化为升序去重后再参与 digest 与比对，顺序差异不构成
+不一致。
 
 ## 批次审批输入（`production plan-shots --input`，不属于 workspace config）
 
@@ -893,9 +920,9 @@ worker 侧解析器（`hub/src/production-profile-snapshot.ts`）与导出端逐
 - `phase`：`sample` 或 `bulk`。`bulk` 必须显式声明 `samplePolicy.sampleShotIds`——样片门检查的是
   先前批次的样片，不能由本批次自证。`sample` 的 `samplePolicy` 可为 null，缺省取每个被选 profile
   在批次顺序里的第一镜。
-- `capability`：后端能力描述（§4.3 `BackendCapabilities` 全字段），可为 `null`。快照条目带
-  `limits` 时由快照推导，本字段可省；快照不带 `limits` 时必填——编译器需要 `limitsByModelId` 才能
-  判定模式、时长网格与参考上限。两者同时给出时逐项交叉校验（`backendInstanceId`、modelFamily、
+- `capability`：后端能力描述（§4.3 `BackendCapabilities` 全字段），可为 `null`。当前 gateway 导出的
+  快照恒带 `limits`，因此本字段可省，由快照推导；读入不带 `limits` 的旧快照时必填——编译器需要
+  `limitsByModelId` 才能判定模式、时长网格与参考上限。两者同时给出时逐项交叉校验（`backendInstanceId`、modelFamily、
   `processingRegions`、时长网格、`limits` 本身），任一不一致即拒绝出计划。
 - `backendInstanceId`：本批次的目标后端；`null` 时取快照中唯一的 `backendInstanceId`，快照含多个
   后端而未声明即拒绝（选错后端会把镜头发到另一台机器上）。

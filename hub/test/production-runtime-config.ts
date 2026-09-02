@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { productionCanonicalJsonSha256 } from "../src/production-canonical-json.ts";
 import { productionWorkflowSha256 } from "../src/production-coordinator.ts";
 import {
+  ProductionInputStagerError,
   productionInputBindingsDigest,
   type ProductionInputStageResult,
   type ProductionWorkflowBindingVerification,
@@ -40,6 +41,7 @@ import {
   parseProductionH3GraphContract,
   productionH3ModelBundleSha256,
   productionH3ParameterManifestSha256,
+  productionH3ShotRequestSentinel,
   productionH3StageInputSentinel,
   type ProductionH3GraphContract,
   type ProductionH3ModelBundleContract,
@@ -117,14 +119,26 @@ const h3Ids = (offset: number): H3Ids => ({
 const H3_FL_IDS = h3Ids(10);
 const H3_REF_IDS = h3Ids(30);
 
-function h3Workflow(ids: H3Ids, variant: "fl2va" | "ref2va", sources: readonly string[]): Record<string, unknown> {
-  const profileId = variant === "fl2va" ? "h3-fl-profile" : "h3-ref-profile";
+function h3Workflow(
+  ids: H3Ids,
+  variant: "fl2va" | "ref2va",
+  sources: readonly string[],
+  options: { graphVersion?: 1 | 2; profileId?: string } = {},
+): Record<string, unknown> {
+  const graphVersion = options.graphVersion ?? 1;
+  const profileId = options.profileId ?? (variant === "fl2va" ? "h3-fl-profile" : "h3-ref-profile");
+  // 契约 v2 的 index 0 是 shot-request，不绑定 LoadImage，因此图输入 sentinel 的 index 顺延一位。
+  const sentinelOffset = graphVersion === 2 ? 1 : 0;
   const slots = variant === "fl2va" ? ["first_frame", "last_frame"] : ["reference.0", "reference.1"];
   const consumerNames = variant === "fl2va"
     ? ["first_frame", "last_frame"]
     : ["ref_images.ref_image_0", "ref_images.ref_image_1"];
   const generatorInputs: Record<string, unknown> = {
-    clip: [ids.textEncoder, 0], vae: [ids.videoVae, 0], prompt: "cinematic short-drama shot",
+    clip: [ids.textEncoder, 0],
+    vae: [ids.videoVae, 0],
+    prompt: graphVersion === 2
+      ? productionH3ShotRequestSentinel(profileId, "prompt")
+      : "cinematic short-drama shot",
     width: 768, height: 1_344, length: 192,
   };
   if (variant === "ref2va") {
@@ -142,7 +156,14 @@ function h3Workflow(ids: H3Ids, variant: "fl2va" | "ref2va", sources: readonly s
     [ids.guider]: { class_type: "BasicGuider", inputs: { model: [ids.sigmaShift, 0], conditioning: [ids.generator, 0] } },
     [ids.scheduler]: { class_type: "BasicScheduler", inputs: { model: [ids.sigmaShift, 0], scheduler: "simple", steps: 30, denoise: 1 } },
     [ids.samplerSelect]: { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
-    [ids.noise]: { class_type: "RandomNoise", inputs: { noise_seed: variant === "fl2va" ? 42 : 43 } },
+    [ids.noise]: {
+      class_type: "RandomNoise",
+      inputs: {
+        noise_seed: graphVersion === 2
+          ? productionH3ShotRequestSentinel(profileId, "seed")
+          : variant === "fl2va" ? 42 : 43,
+      },
+    },
     [ids.sampler]: { class_type: "SamplerCustomAdvanced", inputs: { noise: [ids.noise, 0], guider: [ids.guider, 0], sampler: [ids.samplerSelect, 0], sigmas: [ids.scheduler, 0], latent_image: [ids.generator, 1] } },
     [ids.videoDecode]: { class_type: "VAEDecode", inputs: { samples: [ids.sampler, 0], vae: [ids.videoVae, 0] } },
     [ids.audioDecode]: { class_type: "VAEDecodeAudio", inputs: { samples: [ids.sampler, 0], vae: [ids.audioVae, 0] } },
@@ -150,7 +171,10 @@ function h3Workflow(ids: H3Ids, variant: "fl2va" | "ref2va", sources: readonly s
     [ids.saveVideo]: { class_type: "SaveVideo", inputs: { video: [ids.createVideo, 0], filename_prefix: "video/writing-loop-h3", format: "auto", codec: "auto" } },
   };
   for (let index = 0; index < sources.length; index++) {
-    workflow[sources[index]!] = { class_type: "LoadImage", inputs: { image: productionH3StageInputSentinel(profileId, index, slots[index]!) } };
+    workflow[sources[index]!] = {
+      class_type: "LoadImage",
+      inputs: { image: productionH3StageInputSentinel(profileId, index + sentinelOffset, slots[index]!) },
+    };
   }
   return workflow;
 }
@@ -162,9 +186,10 @@ function h3GraphContract(
   ids: H3Ids,
   generatorClassType: "MiniMaxH3ImageToVideo" | "MiniMaxH3ReferenceToVideo",
   parametersSha256: string,
+  graphVersion: 1 | 2 = 1,
 ): ProductionH3GraphContract {
   return parseProductionH3GraphContract({
-    version: 1,
+    version: graphVersion,
     generator: {
       version: 1, nodeId: ids.generator, classType: generatorClassType, width: 768, height: 1_344, length: 192,
     },
@@ -223,6 +248,43 @@ const H3_REF_CONTRACT = h3GraphContract(H3_REF_IDS, "MiniMaxH3ReferenceToVideo",
 const H3_FL_EXECUTION: ProductionIntentExecution = {
   ...H3_FL_EXECUTION_BASE, parametersSha256: H3_FL_PARAMETERS_SHA,
 };
+
+// 契约 v2 的一档：同一 fl2va 骨架，prompt / seed 是 sentinel，stage 绑定前置 shot-request。
+const H3_V2_IDS = h3Ids(50);
+const H3_V2_PROFILE_ID = "h3-v2-profile";
+const H3_V2_WORKFLOW = h3Workflow(H3_V2_IDS, "fl2va", ["120", "121"], {
+  graphVersion: 2, profileId: H3_V2_PROFILE_ID,
+});
+const H3_V2_CONTRACT_BASE = h3GraphContract(H3_V2_IDS, "MiniMaxH3ImageToVideo", "0".repeat(64), 2);
+const H3_V2_EXECUTION_BASE = h3ExecutionBase(
+  "h3-v2-gateway", H3_V2_WORKFLOW, H3_V2_CONTRACT_BASE.modelBundle.sha256, "fl2va",
+);
+const H3_V2_PARAMETERS_SHA = productionH3ParameterManifestSha256(
+  H3_V2_WORKFLOW, H3_V2_CONTRACT_BASE, H3_V2_EXECUTION_BASE,
+);
+const H3_V2_CONTRACT = h3GraphContract(
+  H3_V2_IDS, "MiniMaxH3ImageToVideo", H3_V2_PARAMETERS_SHA, 2,
+);
+const H3_V2_EXECUTION: ProductionIntentExecution = {
+  ...H3_V2_EXECUTION_BASE, parametersSha256: H3_V2_PARAMETERS_SHA,
+};
+const H3_V2_BINDINGS = [
+  { version: 1, index: 0, slot: "shot-request", source: null, consumer: null },
+  {
+    version: 1,
+    index: 1,
+    slot: "first_frame",
+    source: { version: 1, nodeId: "120", classType: "LoadImage", inputName: "image", outputIndex: 0 },
+    consumer: { version: 1, nodeId: H3_V2_IDS.generator, inputName: "first_frame" },
+  },
+  {
+    version: 1,
+    index: 2,
+    slot: "last_frame",
+    source: { version: 1, nodeId: "121", classType: "LoadImage", inputName: "image", outputIndex: 0 },
+    consumer: { version: 1, nodeId: H3_V2_IDS.generator, inputName: "last_frame" },
+  },
+];
 const H3_REF_EXECUTION: ProductionIntentExecution = {
   ...H3_REF_EXECUTION_BASE, parametersSha256: H3_REF_PARAMETERS_SHA,
 };
@@ -353,7 +415,9 @@ function validConfig(): Record<string, unknown> {
 
 function h3Config(): Record<string, unknown> {
   const project = structuredClone((validConfig().projects as unknown[])[0]);
-  (project as Record<string, unknown>).backendInstanceIds = ["h3-fl-gateway", "h3-ref-gateway"];
+  (project as Record<string, unknown>).backendInstanceIds = [
+    "h3-fl-gateway", "h3-ref-gateway", "h3-v2-gateway",
+  ];
   return {
     version: 1,
     workspaceId: WORKSPACE_ID,
@@ -374,6 +438,14 @@ function h3Config(): Record<string, unknown> {
         baseUrl: "https://jobs.internal.example/h3",
         credentialEnv: "PRODUCTION_JOB_GATEWAY_TOKEN",
         profileId: "h3-ref-profile",
+      },
+      {
+        version: 1,
+        backendInstanceId: "h3-v2-gateway",
+        kind: "production-gateway",
+        baseUrl: "https://jobs.internal.example/h3",
+        credentialEnv: "PRODUCTION_JOB_GATEWAY_TOKEN",
+        profileId: H3_V2_PROFILE_ID,
       },
     ],
     gateway: structuredClone(validConfig().gateway),
@@ -403,6 +475,19 @@ function h3Config(): Record<string, unknown> {
         stagingProfileId: "h3-ref-profile",
         h3GraphContract: structuredClone(H3_REF_CONTRACT),
         file: "workflows/h3-ref.json",
+      },
+      {
+        version: 1,
+        backendInstanceId: H3_V2_EXECUTION.backendInstanceId,
+        workflowSha256: H3_V2_EXECUTION.workflowSha256,
+        modelFamily: H3_V2_EXECUTION.modelFamily,
+        modelSha256: H3_V2_EXECUTION.modelSha256,
+        parametersSha256: H3_V2_EXECUTION.parametersSha256,
+        projects: ["demo"],
+        inputPolicy: "scoped-staging",
+        stagingProfileId: H3_V2_PROFILE_ID,
+        h3GraphContract: structuredClone(H3_V2_CONTRACT),
+        file: "workflows/h3-v2.json",
       },
     ],
     stagingProfiles: [
@@ -451,6 +536,14 @@ function h3Config(): Record<string, unknown> {
             consumer: { version: 1, nodeId: H3_REF_IDS.generator, inputName: "ref_images.ref_image_1" },
           },
         ],
+      },
+      {
+        version: 1,
+        profileId: H3_V2_PROFILE_ID,
+        baseUrl: "https://stages.internal.example/h3",
+        credentialEnv: "PRODUCTION_STAGE_TOKEN",
+        execution: structuredClone(H3_V2_EXECUTION),
+        bindings: structuredClone(H3_V2_BINDINGS),
       },
     ],
     runner: structuredClone(validConfig().runner),
@@ -516,7 +609,7 @@ const CLOUD_SLOT_POLICY = {
     { slot: "shot-request", minCount: 1, maxCount: 1 },
     { slot: "first_frame", minCount: 1, maxCount: 1 },
     { slot: "last_frame", minCount: 0, maxCount: 1 },
-    { slot: "reference_image", minCount: 0, maxCount: 1 },
+    { slot: "reference_image", minCount: 0, maxCount: 3 },
   ],
 };
 
@@ -599,6 +692,7 @@ const configFile = join(runtimeDirectory, "production-runtime.v1.json");
 const workflowFile = join(workflowDirectory, "static-t2v.json");
 const h3FlWorkflowFile = join(workflowDirectory, "h3-fl.json");
 const h3RefWorkflowFile = join(workflowDirectory, "h3-ref.json");
+const h3V2WorkflowFile = join(workflowDirectory, "h3-v2.json");
 mkdirSync(join(root, ".writing-loop", "demo"), { recursive: true });
 mkdirSync(join(root, ".writing-loop", "disabled"), { recursive: true });
 mkdirSync(join(root, ".writing-loop", "rogue-not-registered"), { recursive: true });
@@ -614,6 +708,7 @@ writeFileSync(configFile, configText, { mode: 0o600 });
 writeFileSync(workflowFile, workflowText, { mode: 0o600 });
 writeFileSync(h3FlWorkflowFile, `${JSON.stringify(H3_FL_WORKFLOW, null, 2)}\n`, { mode: 0o600 });
 writeFileSync(h3RefWorkflowFile, `${JSON.stringify(H3_REF_WORKFLOW, null, 2)}\n`, { mode: 0o600 });
+writeFileSync(h3V2WorkflowFile, `${JSON.stringify(H3_V2_WORKFLOW, null, 2)}\n`, { mode: 0o600 });
 
 try {
   const loaded = loadProductionRuntimeConfig(configFile);
@@ -847,7 +942,27 @@ try {
   })}\n`);
 
   let backendRequests = 0;
+  let capabilityRequests = 0;
   let backendAuthorization: string | null = null;
+  // 后端声明的处理地域：默认空（未声明），个别用例改成 ["SG"] 观察地域门的另一侧。
+  let backendProcessingRegions: readonly string[] = [];
+  const backendCapabilities = (): Record<string, unknown> => ({
+    backendKind: "comfyui",
+    backendInstanceId: "comfy-primary",
+    modelFamilies: ["generic"],
+    processingRegions: [...backendProcessingRegions],
+    asynchronous: true,
+    clientAssignedJobId: true,
+    providerJobIdMapping: "none",
+    inspectById: true,
+    progressHints: "optional-websocket",
+    pendingCancellation: "best-effort",
+    runningCancellation: "version-gated-best-effort",
+    providerIdempotency: false,
+    inputModes: ["image-upload"],
+    outputModes: ["download"],
+    limitsByModelId: {},
+  });
   const registry = createProductionRuntimeRegistry({
     root,
     configFile,
@@ -857,6 +972,15 @@ try {
     },
     fetchByBackend: {
       "comfy-primary": async (input, init) => {
+        // capability 转发（§8.6）：gate context 每轮按 backendInstanceId 取一次，不计入提交计数。
+        if (new URL(input.toString()).pathname.endsWith("/capabilities")) {
+          capabilityRequests++;
+          return new Response(JSON.stringify({
+            version: 1,
+            scope: { version: 1, workspaceId: WORKSPACE_ID, project: "demo" },
+            capabilities: backendCapabilities(),
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
         backendRequests++;
         backendAuthorization = new Headers(init?.headers).get("authorization");
         const body = JSON.parse(String(init?.body)) as {
@@ -1201,9 +1325,12 @@ try {
     "providerObjectKey traversal is rejected before any bound graph is returned or template is mutated");
   let stageMode: "valid" | "reordered" = "valid";
   let stageRequests = 0;
+  // 契约 v2 的回执投影：由每个用例设置，模拟 stage kernel 从 inputs[0] 读出的 prompt / seed。
+  let v2ShotRequestProjection: { prompt: string; seed: number | null } | null = null;
   const stageFetch = (
     slots: readonly string[],
     providerKeys: readonly string[],
+    projection?: () => { prompt: string; seed: number | null } | null,
   ) => async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     stageRequests++;
     const headers = new Headers(init?.headers);
@@ -1223,11 +1350,18 @@ try {
       providerObjectKey: providerKeys[index]!,
     }));
     if (stageMode === "reordered") bindings = [...bindings].reverse();
+    const shot = projection?.() ?? null;
     return new Response(JSON.stringify({
       version: 1,
       stageKey: request.stageKey,
       bindingsDigest: productionInputBindingsDigest(bindings),
       bindings,
+      shotRequest: shot === null ? null : {
+        version: 1,
+        assetSha256: bindings[0]!.assetSha256,
+        prompt: shot.prompt,
+        seed: shot.seed,
+      },
     }), { status: 200, headers: { "content-type": "application/json" } });
   };
   const h3Registry = createProductionRuntimeRegistry({
@@ -1244,6 +1378,11 @@ try {
       ),
       "h3-ref-profile": stageFetch(
         ["reference.0", "reference.1"], ["staged/ref-0.png", "staged/ref-1.png"],
+      ),
+      [H3_V2_PROFILE_ID]: stageFetch(
+        ["shot-request", "first_frame", "last_frame"],
+        ["staged/v2-shot-request.json", "staged/v2-first.png", "staged/v2-last.png"],
+        () => v2ShotRequestProjection,
       ),
     },
     gatewayFetch: async () => { throw new Error("assembly must not ingest"); },
@@ -1329,6 +1468,43 @@ try {
   const refProof = await refPipeline.workflowBindingVerifier.verify(refIntent, refDescriptor.workflow, refStaged);
   ok(refProof.verified && refStaged.bindings.map((binding) => binding.slot).join(",") === "reference.0,reference.1",
     "concrete ref2va profile preserves and verifies ordered reference slots");
+
+  // —— 契约 v2：worker 侧 verifier 从 stage 回执的投影材料化逐镜 prompt / seed ——
+  const v2Intent = h3Intent("take-h3-v2", H3_V2_EXECUTION, [
+    { ...asset("shot-request.json", "7".repeat(64)), mediaType: "application/vnd.writing-loop.shot-request+json" },
+    asset("v2-first.png", "8".repeat(64)),
+    asset("v2-last.png", "9".repeat(64)),
+  ]);
+  const v2Pipeline = await h3Registry.projects[0]!.inputPipelineResolver.resolve(v2Intent);
+  const v2Descriptor = await h3Registry.projects[0]!.workflowResolver.resolve(v2Intent);
+  if (v2Pipeline?.policy !== "scoped-staging" || v2Descriptor === null) throw new Error("v2 fixture did not resolve");
+  const verifyV2 = async (
+    projection: { prompt: string; seed: number | null } | null,
+  ): Promise<ProductionWorkflowBindingVerification | string> => {
+    v2ShotRequestProjection = projection;
+    try {
+      const staged = await v2Pipeline.inputStager.stage(v2Intent);
+      return await v2Pipeline.workflowBindingVerifier.verify(v2Intent, v2Descriptor.workflow, staged);
+    } catch (error) {
+      if (error instanceof ProductionRuntimeConfigError) return error.code;
+      if (error instanceof ProductionInputStagerError) return `stager:${error.code}`;
+      return "other";
+    }
+  };
+  const v2Proof = await verifyV2({ prompt: "夜色中的天台，人物背对镜头", seed: 4_242 });
+  const v2Bound = typeof v2Proof === "string" ? null : v2Proof.workflow;
+  ok(typeof v2Proof !== "string" && v2Proof.verified
+    && ((v2Bound![H3_V2_IDS.generator] as Record<string, unknown>).inputs as Record<string, unknown>).prompt
+      === "夜色中的天台，人物背对镜头"
+    && ((v2Bound![H3_V2_IDS.noise] as Record<string, unknown>).inputs as Record<string, unknown>).noise_seed
+      === 4_242
+    && v2Proof.boundWorkflowSha256 !== v2Proof.templateWorkflowSha256,
+  "契约 v2：verifier 把回执投影里的 prompt 与 seed 材料化进 bound graph");
+  ok(await verifyV2({ prompt: "无 seed 的镜头", seed: null }) === "workflow-invalid",
+    "契约 v2：ShotRequest 的 seed 为 null 时 worker verifier 以 workflow-invalid 拒绝");
+  ok(await verifyV2(null) === "stager:invalid-response",
+    "契约 v2：stage 回执带 shot-request slot 却缺 shotRequest 投影时，worker 在解析回执时就拒绝");
+  v2ShotRequestProjection = null;
 
   stageMode = "reordered";
   let reorderedRejected = false;
@@ -1438,7 +1614,7 @@ try {
   const seedanceBindings = parsedSeedanceConfig.stagingProfiles[0]!.bindings;
   ok(seedanceBindings.kind === "provider-slot-policy"
     && seedanceBindings.slots.map((slot) => `${slot.slot}:${slot.minCount}-${slot.maxCount}`).join(",")
-      === "shot-request:1-1,first_frame:1-1,last_frame:0-1,reference_image:0-1",
+      === "shot-request:1-1,first_frame:1-1,last_frame:0-1,reference_image:0-3",
   "云家族 staging profile 解析为 slotPolicy 判别分支（slot + 计数区间，顺序即输入顺序）");
   const brokenSlots = (mutate: (slots: Record<string, unknown>[]) => unknown): Record<string, unknown> => {
     const config = matrixConfig("seedance", false, true);
@@ -1508,6 +1684,14 @@ try {
           stageKey: request.stageKey,
           bindingsDigest: productionInputBindingsDigest(bindings),
           bindings,
+          shotRequest: bindings[0]?.slot === "shot-request"
+            ? {
+              version: 1,
+              assetSha256: bindings[0].assetSha256,
+              prompt: "云家族 stage 回执携带 inputs[0] ShotRequest 的逐镜投影",
+              seed: 7,
+            }
+            : null,
         }), { status: 200, headers: { "content-type": "application/json" } });
       },
     },
@@ -1546,10 +1730,18 @@ try {
   const fl2vProof = await verifyStaged(3, ["shot-request", "first_frame", "last_frame"]);
   ok(fl2vProof.verified && fl2vProof.boundWorkflowSha256 === fl2vProof.templateWorkflowSha256,
   "fl2v 镜头（带尾帧）通过同一 seedance staging profile，无需另建 profile 档");
+  const multiRefProof = await verifyStaged(
+    3, ["shot-request", "first_frame", "reference_image.0"],
+  );
+  const twoRefProof = await verifyStaged(
+    4, ["shot-request", "first_frame", "reference_image.0", "reference_image.1"],
+  );
+  ok(multiRefProof.verified && twoRefProof.verified,
+  "maxCount > 1 的 slot 以带序号实例（reference_image.N）经真实 stager 回执并通过 verifier");
   cloudStagedSlots = ["shot-request", "first_frame"];
 
-  // 拒绝路径直接构造 stage receipt：重复 slot 名在 stage 契约 v1 里取不到（receipt 要求 slot 唯一，
-  // 带序号的 slot 名随 1b 的 stage 契约 v2 落地），因此这里只驱动 verifier 自身的顺序与计数判据。
+  // 拒绝路径直接构造 stage receipt：真实 stager 的回执由 gateway 的 profile 决定，这里只驱动
+  // verifier 自身的顺序与计数判据（slot 基名取自带序号实例）。
   const handStaged = (slots: readonly string[]): ProductionInputStageResult => {
     const bindings = slots.map((slot, index) => ({
       index,
@@ -1562,6 +1754,7 @@ try {
       stageKey: "b".repeat(64),
       bindingsDigest: productionInputBindingsDigest(bindings),
       bindings,
+      shotRequest: null,
     };
   };
   const verifierRejects = async (slots: readonly string[]): Promise<boolean> => {
@@ -1570,7 +1763,10 @@ try {
       return false;
     } catch (error) { return error instanceof ProductionRuntimeConfigError; }
   };
-  ok(await verifierRejects(["shot-request", "first_frame", "reference_image", "reference_image"]),
+  ok(await verifierRejects([
+    "shot-request", "first_frame",
+    "reference_image.0", "reference_image.1", "reference_image.2", "reference_image.3",
+  ]),
   "staged slot 超过 slotPolicy 的 maxCount 时 verifier 拒绝");
   ok(await verifierRejects(["shot-request", "last_frame"]),
   "staged slot 缺 minCount 要求的 first_frame 时 verifier 拒绝");
@@ -1580,11 +1776,11 @@ try {
   // —— 既有 H3 fixture 的解析结果钉字节 ——
   // 两个常量取自本 fixture 当次解析结果的 canonical JSON sha256（h3Config() → parseProductionRuntimeConfig
   // 后对 workflows 与 stagingProfiles[0].execution 取值）。解析层改动只要动到旧 H3 配置的读出结果，
-  // 这两条就会失败。
+  // 这两条就会失败。契约 v2 的第三档是后加的，钉的仍是原来两档（前两项）。
   const H3_WORKFLOWS_DIGEST = "b18bee6a93c6c9ce4271dfd3ec638ad083bbab9051f2f2d3958d9d70dd797c19";
   const H3_EXECUTION_DIGEST = "bddd0f0b5bdebe83a43e085c1a7bc77f12f0f5ccd80d1acafe9076e9879ceff3";
   const h3Reparsed = parseProductionRuntimeConfig(h3Config());
-  ok(productionCanonicalJsonSha256(h3Reparsed.workflows) === H3_WORKFLOWS_DIGEST
+  ok(productionCanonicalJsonSha256(h3Reparsed.workflows.slice(0, 2)) === H3_WORKFLOWS_DIGEST
     && productionCanonicalJsonSha256(h3Reparsed.stagingProfiles[0]!.execution) === H3_EXECUTION_DIGEST
     && JSON.stringify(h3Reparsed.workflows) === JSON.stringify(parsedH3.workflows)
     && h3Reparsed.stagingProfiles[0]!.bindings.kind === "h3-graph-bindings",

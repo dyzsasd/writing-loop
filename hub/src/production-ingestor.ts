@@ -251,9 +251,28 @@ function safeRemotePath(value: unknown, allowEmpty: boolean): value is string {
 }
 
 function parseLocator(value: unknown): RemoteOutputLocator {
-  if (!isRecord(value) || !exactKeys(value, ["nodeId", "kind", "filename", "subfolder", "folderType"])) {
-    fail("invalid-input");
+  if (!isRecord(value)) fail("invalid-input");
+  // §4.5 判别联合：缺少 source 时按 comfy-view 读取；写入侧总带 source。
+  const source = Object.prototype.hasOwnProperty.call(value, "source") ? value.source : "comfy-view";
+  if (source === "provider-output") {
+    if (!exactKeys(value, ["source", "remoteJobId", "outputIndex", "role", "kind"])
+      || typeof value.remoteJobId !== "string" || !IDENTIFIER.test(value.remoteJobId)
+      || !Number.isSafeInteger(value.outputIndex) || (value.outputIndex as number) < 0
+      || (value.outputIndex as number) > 127
+      || (value.role !== "primary" && value.role !== "last-frame")
+      || (value.kind !== "video" && value.kind !== "image")) fail("invalid-input");
+    return {
+      source: "provider-output",
+      remoteJobId: value.remoteJobId,
+      outputIndex: value.outputIndex as number,
+      role: value.role,
+      kind: value.kind,
+    };
   }
+  if (source !== "comfy-view") fail("invalid-input");
+  const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
+  if (!exactKeys(value, Object.prototype.hasOwnProperty.call(value, "source")
+    ? ["source", ...comfyKeys] : comfyKeys)) fail("invalid-input");
   if (typeof value.nodeId !== "string" || !IDENTIFIER.test(value.nodeId)
     || typeof value.kind !== "string" || !LOCATOR_KINDS.has(value.kind)
     || !safeRemotePath(value.filename, false) || !safeRemotePath(value.subfolder, true)
@@ -261,26 +280,50 @@ function parseLocator(value: unknown): RemoteOutputLocator {
     fail("invalid-input");
   }
   return {
+    source: "comfy-view",
     nodeId: value.nodeId,
-    kind: value.kind as RemoteOutputLocator["kind"],
+    kind: value.kind as "image" | "video" | "audio" | "file",
     filename: value.filename,
     subfolder: value.subfolder,
     folderType: value.folderType as "output" | "temp",
   };
 }
 
+/**
+ * Total order over the §4.5 union: `source` first, then each branch's own identity. Both ends sort
+ * the same way, so the ingest kernel can re-derive and re-check the canonical order it was sent.
+ */
+export function compareProductionOutputLocator(
+  left: RemoteOutputLocator,
+  right: RemoteOutputLocator,
+): number {
+  // Locale collation can vary by host. Canonical wire identity uses raw Unicode code-unit order.
+  const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+  const leftSource = left.source ?? "comfy-view";
+  const rightSource = right.source ?? "comfy-view";
+  if (leftSource !== rightSource) return compare(leftSource, rightSource);
+  if (leftSource === "provider-output") {
+    const a = left as Extract<RemoteOutputLocator, { source: "provider-output" }>;
+    const b = right as Extract<RemoteOutputLocator, { source: "provider-output" }>;
+    return compare(a.remoteJobId, b.remoteJobId)
+      || (a.outputIndex - b.outputIndex)
+      || compare(a.role, b.role)
+      || compare(a.kind, b.kind);
+  }
+  const a = left as Extract<RemoteOutputLocator, { nodeId: string }>;
+  const b = right as Extract<RemoteOutputLocator, { nodeId: string }>;
+  return compare(a.nodeId, b.nodeId)
+    || compare(a.kind, b.kind)
+    || compare(a.folderType, b.folderType)
+    || compare(a.subfolder, b.subfolder)
+    || compare(a.filename, b.filename);
+}
+
 function canonicalLocators(value: unknown): RemoteOutputLocator[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PRODUCTION_INGEST_LOCATORS) {
     fail("invalid-input");
   }
-  // Locale collation can vary by host. Canonical wire identity uses raw Unicode code-unit order.
-  const compare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
-  const rows = value.map(parseLocator).sort((left, right) =>
-    compare(left.nodeId, right.nodeId)
-      || compare(left.kind, right.kind)
-      || compare(left.folderType, right.folderType)
-      || compare(left.subfolder, right.subfolder)
-      || compare(left.filename, right.filename));
+  const rows = value.map(parseLocator).sort(compareProductionOutputLocator);
   const identities = rows.map((row) => JSON.stringify(row));
   if (new Set(identities).size !== identities.length) fail("invalid-input");
   return rows;

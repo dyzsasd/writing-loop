@@ -4,8 +4,10 @@
 # 机型与镜像由规格固定：Spot g4-standard-48、image-family wl-comfy-h3-g4-sg、asia-southeast1。
 # 持久化启动盘 200 GB 承载 job record、CAS objects 与 ingest 产物，且**不随实例删除**
 # （--no-boot-disk-auto-delete）；`--instance-termination-action=STOP` 让 Spot 抢占只停机不删盘。
-# 实例默认无外网 IP、不加 http-server / https-server 标签：gateway 只绑 VPC 内网 IP，入站由
-# VPC 内部规则承载，不对公网开放任何端口。装包等需要出网时用 `egress on` 临时挂外网 IP，装完 off。
+# 实例默认无外网 IP、不加 http-server / https-server 标签。当前拓扑（操作者 2026-09-02 裁定）：
+# worker 与全部 writing-loop 控制面在操作者本机，经 IAP ssh 隧道访问 VM 上的 gateway，因此 gateway 与
+# ComfyUI 都只绑 127.0.0.1，VM 上不存在任何对外监听面；安装包在本机 `npm pack` 后经隧道 scp 上机，
+# VM 不需要出网。装包等确需出网时用 `egress on` 临时挂外网 IP，装完 off。
 #
 # 用法：
 #   gcp-h3-vm.sh create            # 首次创建（已存在则报错退出，不覆盖）
@@ -13,13 +15,13 @@
 #   gcp-h3-vm.sh status            # 状态、内网 IP、启动盘与 autoDelete
 #   gcp-h3-vm.sh ssh [-- CMD...]   # 登录或远程执行
 #   gcp-h3-vm.sh egress on|off     # 临时挂/摘外网 IP（只在装包、拉模型时 on）
-#   gcp-h3-vm.sh tunnel [PORT]     # 把 gateway 端口经 IAP 转到本机（默认 8790，仅调试）
+#   gcp-h3-vm.sh tunnel [PORT...]  # 把端口经 IAP 转到本机（默认同时转 gateway 8790 与 ComfyUI 8188）
 #
 # 删除实例前先对启动盘做快照：`gcloud compute disks snapshot <INSTANCE> --zone <ZONE>`。
 #
 # 环境变量（都有默认值）：
 #   WL_GPU_PROJECT WL_GPU_ZONE WL_GPU_INSTANCE WL_GPU_IMAGE_FAMILY WL_GPU_IMAGE_PROJECT
-#   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_SUBNET WL_GATEWAY_PORT
+#   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_SUBNET WL_GATEWAY_PORT WL_COMFY_PORT
 set -euo pipefail
 
 PROJECT="${WL_GPU_PROJECT:-jinko-vibe-coding}"
@@ -31,6 +33,7 @@ MACHINE="${WL_GPU_MACHINE:-g4-standard-48}"
 BOOT_GB="${WL_GPU_BOOT_GB:-200}"
 SUBNET="${WL_GPU_SUBNET:-default}"
 GATEWAY_PORT="${WL_GATEWAY_PORT:-8790}"
+COMFY_PORT="${WL_COMFY_PORT:-8188}"
 
 say()  { printf '[gcp-h3-vm] %s\n' "$*"; }
 fail() { printf '[gcp-h3-vm] FAIL: %s\n' "$*" >&2; exit 1; }
@@ -131,12 +134,39 @@ cmd_egress() {
   cmd_status
 }
 
+# 本机 worker 经隧道访问 VM：默认同时转 gateway 与 ComfyUI 两个端口，各起一个 IAP 隧道子进程，
+# 任一子进程退出后一并收敛，避免留下半条隧道。
 cmd_tunnel() {
   require_auth
   exists || fail "实例 $INSTANCE 不存在。"
-  local port="${1:-$GATEWAY_PORT}"
-  say "IAP 隧道 localhost:${port} → ${INSTANCE}:${port}（仅调试；worker 走 VPC 私网直连）"
-  gc compute start-iap-tunnel "$INSTANCE" "$port" --zone "$ZONE" --local-host-port="localhost:${port}"
+  local ports=()
+  if [ "$#" -gt 0 ]; then
+    ports=("$@")
+  else
+    ports=("$GATEWAY_PORT" "$COMFY_PORT")
+  fi
+  local pids=()
+  local pid
+  trap 'for pid in ${pids[*]:-}; do kill "$pid" 2>/dev/null || true; done' EXIT INT TERM
+  local port
+  for port in "${ports[@]}"; do
+    case "$port" in
+      ''|*[!0-9]*) fail "端口必须是十进制数字：$port" ;;
+    esac
+    say "IAP 隧道 127.0.0.1:${port} → ${INSTANCE}:${port}"
+    gc compute start-iap-tunnel "$INSTANCE" "$port" --zone "$ZONE" --local-host-port="localhost:${port}" &
+    pids+=("$!")
+  done
+  say "隧道已建立（Ctrl-C 结束）。worker 的 baseUrl 用 http://127.0.0.1:${GATEWAY_PORT}。"
+  # 轮询而非 wait：任一隧道退出就整体收敛（EXIT trap 杀掉其余），避免只剩半条隧道时 worker 静默失败。
+  while :; do
+    for pid in "${pids[@]}"; do
+      if ! kill -0 "$pid" 2>/dev/null; then
+        fail "IAP 隧道子进程已退出，收敛其余隧道；重新执行 tunnel 重建。"
+      fi
+    done
+    sleep 2
+  done
 }
 
 action="${1:-}"
@@ -148,6 +178,6 @@ case "$action" in
   status) cmd_status ;;
   ssh)    if [ "${1:-}" = "--" ]; then shift; fi; cmd_ssh "$@" ;;
   egress) cmd_egress "${1:-}" ;;
-  tunnel) cmd_tunnel "${1:-}" ;;
-  *) sed -n '2,25p' "$0" >&2; exit 2 ;;
+  tunnel) cmd_tunnel "$@" ;;
+  *) sed -n '2,24p' "$0" >&2; exit 2 ;;
 esac

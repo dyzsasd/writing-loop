@@ -89,22 +89,23 @@ writing-loop project disable <KEY>    # 不再起新 fire，在飞 fire 自然�
 writing-loop project enable <KEY> && systemctl --user restart writing-loop@<KEY>   # 恢复
 ```
 
-## §3a 视频生产 gateway 部署（两台主机）
+## §3a 视频生产 gateway 部署（本机 + GPU VM，经 ssh 隧道）
 
-远端制片分两台主机，配置文件与凭据不互通。规格见仓库
+远端制片分本机与 GPU VM 两台主机（writing-loop-sg 只是备选形态），配置文件与凭据不互通。规格见仓库
 `docs/design/2026-08-video-provider-interface/DESIGN.md` §8.0（拓扑与威胁模型）/ §8.2。
 
 | 主机 | 放什么 | 单元 |
 |---|---|---|
 | GPU VM（Spot `g4-standard-48`，镜像 `wl-comfy-h3-g4-sg`，asia-southeast1，按批次启停） | ComfyUI；gateway 单进程（jobs / stages / ingests 三个内核）；registry 配置 `/etc/writing-loop/production-gateway.json`（0400/0600）与 bearer `/etc/writing-loop/production-gateway.env`（0600）；持久化启动盘上的 `objectsRoot` / `ingestRoot` / `jobStateRoot` | `comfyui.service`、`writing-loop-production-gateway.service`（**system 单元**，`/etc/systemd/system/`） |
 | 本机（macOS） | 全部控制面：workspace 与账本、`plan-shots` / `qc` / `handoff`、`production-worker`、VCS 合成与 Blender 候选图；worker runtime config `production-runtime.json`（0400/0600）与凭据环境变量 | 无常驻单元；worker 按批次手动跑 `--once` |
+| writing-loop-sg（可选） | 备选方案：worker 作为常驻 systemd user 单元跑在服务器上，此时三处 `baseUrl` 改指 GPU VM 内网 IP，并按下文「网络与磁盘纪律」补 VPC 入站规则 | `writing-loop-production-worker.service` + `.timer`（**user 单元**，`~/.config/systemd/user/`） |
 
-本机不在 GPU VM 的 VPC 里，gateway 只绑 VM 上的 `127.0.0.1`，经 IAP 隧道映射到本机同端口
-（每个端口一条隧道，各占一个前台窗口）：
+本机不在 GPU VM 的 VPC 里，gateway 只绑 VM 上的 `127.0.0.1`，经 IAP 隧道映射到本机同端口。
+一条命令起两个端口的隧道，占一个前台窗口；任一条隧道退出会整体收敛，不留半条：
 
 ```bash
-bash scripts/gcp-h3-vm.sh tunnel 8790   # gateway
-bash scripts/gcp-h3-vm.sh tunnel 8188   # ComfyUI（只在需要本机看队列时开）
+bash scripts/gcp-h3-vm.sh tunnel        # 默认同时转 gateway 8790 与 ComfyUI 8188
+bash scripts/gcp-h3-vm.sh tunnel 8790   # 只要 gateway 时给端口
 ```
 
 隧道开着时 worker 的 `baseUrl` 就是 `http://127.0.0.1:8790`，配 `transport: "insecure-private-http"`
@@ -128,6 +129,10 @@ systemctl cat comfyui.service
 sudo npm i -g ~/dyzsasd-writing-loop-*.tgz   # 提供 /usr/local/bin/writing-loop-production-gateway
 sudo cp templates/systemd/writing-loop-production-gateway.service /etc/systemd/system/
 sudo systemctl daemon-reload
+# writing-loop-sg（可选备选方案）：worker 作为 user 单元跑在服务器上时才需要这三行
+#   cp templates/systemd/writing-loop-production-worker.service \
+#      templates/systemd/writing-loop-production-worker.timer ~/.config/systemd/user/
+#   systemctl --user daemon-reload && loginctl enable-linger "$USER"
 ```
 
 本机的 worker 环境变量（写进 shell profile 或每次 export，**不要写进 runtime config**）：
@@ -147,6 +152,8 @@ bash scripts/gcp-h3-vm.sh start && bash scripts/gcp-h3-vm.sh status
 # ② GPU VM：ComfyUI 先起，gateway 后起（unit 已声明 Requires/After）
 sudo systemctl start comfyui writing-loop-production-gateway
 sudo systemctl status writing-loop-production-gateway --no-pager
+# 启动日志末尾会报告抢占扫描结果（rewritten/scanned、unresolved），重启后的 pending/running 任务
+# 在此被改写为 provider_failed:preempted。
 
 # ③ GPU VM：导出只读 execution profile 快照
 writing-loop-production-gateway --config /etc/writing-loop/production-gateway.json \
@@ -157,7 +164,7 @@ gcloud compute scp --tunnel-through-iap --zone asia-southeast1-b \
   wl-comfy-h3-g4:~/export/execution-profiles.json \
   "$HOME/.config/writing-loop/profiles/execution-profiles.json"
 chmod 600 "$HOME/.config/writing-loop/profiles/execution-profiles.json"
-bash scripts/gcp-h3-vm.sh tunnel 8790
+bash scripts/gcp-h3-vm.sh tunnel        # 默认同时转 8790 与 8188
 
 # ⑤ 批次结束：先关隧道窗口（Ctrl-C），再停 VM（job record 与 CAS 在启动盘上保留）
 bash scripts/gcp-h3-vm.sh stop
@@ -178,6 +185,8 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8188/queue            
 # 本机：隧道通了（同样打 127.0.0.1:8790，走的是 IAP 转发）
 curl -s -o /dev/null -w '%{http_code}\n' \
   "http://127.0.0.1:8790/v1/scopes/<WS>/<PROJECT>/jobs/00000000-0000-4000-8000-000000000000"       # 期望 401
+curl -s -H "Authorization: Bearer $WRITING_LOOP_GATEWAY_TOKEN" \
+  "http://127.0.0.1:8790/v1/scopes/<WS>/<PROJECT>/capabilities"                                    # 期望 200 + 能力 JSON
 
 # 本机：worker 单轮
 writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --once --json
@@ -189,6 +198,16 @@ writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --onc
   `127.0.0.1`，隧道把它转发到本机同端口。不要为它开防火墙。
 - gateway 只绑 registry 配置里的字面地址，进程拒绝 `0.0.0.0` 与公网地址；不给实例加
   `http-server` / `https-server` 标签，端口不对公网开放。
+- 只有改用「worker 在 writing-loop-sg」的备选方案时才涉及 VPC 入站：依赖 `default-allow-internal`
+  （10.128.0.0/9），或按下面这条收紧到只放行 worker 到 gateway 端口：
+
+  ```bash
+  gcloud compute firewall-rules create wl-h3-gateway-in \
+    --network default --direction INGRESS --action ALLOW --rules tcp:8790 \
+    --source-ranges 10.148.0.5/32 --target-tags wl-h3-gateway
+  gcloud compute instances add-tags wl-comfy-h3-g4 --zone asia-southeast1-b --tags wl-h3-gateway
+  ```
+
 - 实例默认 `--no-address`，无 Cloud NAT 时不能出网；只在装包/拉权重时 `egress on`，完成后立刻
   `egress off`。
 - 启动盘 `--no-boot-disk-auto-delete`，删除实例不会连带删盘。**删除实例前先做快照**：
@@ -197,6 +216,9 @@ writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --onc
   `sudo systemctl restart`，同步改本机的 `WRITING_LOOP_GATEWAY_TOKEN`。
 - 明文 HTTP 的适用条件见 `references/config-schema.md`；本机形态下明文只存在于 loopback 与 IAP
   加密隧道内，隧道不在时 worker 直接连不上，不会退化成公网明文。
+- GPU VM 上必须有可用的 `ffmpeg`：ingest 内核入库主视频后由它派生尾帧并登记为第二个 AssetRef。
+  gateway 在装配期跑一次 `ffmpeg -version` 探针，缺失即拒绝启动并写明原因；入库后没有唯一主视频，
+  或提取失败，该次 ingest 以 `derivation-failed` 失败，不会登记缺尾帧的 take。
 - `handoff --export-dir` 要经 gateway 的 assets 路由取资产，**导出时 GPU VM 与隧道都必须在**。
 
 ## §3b 出片流程（本机执行：plan → confirm → worker → qc → handoff）

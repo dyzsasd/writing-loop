@@ -16,14 +16,20 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { FetchLike, RemoteOutputLocator } from "../src/production-adapter.ts";
+import type {
+  ComfyViewOutputLocator,
+  FetchLike,
+  RemoteOutputLocator,
+} from "../src/production-adapter.ts";
 import type {
   ProductionGatewayIngestRequest,
   ProductionIngestScope,
 } from "../src/production-ingestor.ts";
+import { execFileSync } from "node:child_process";
 import {
   ProductionGateway,
   ProductionGatewayError,
+  productionFfmpegLastFrameExtractor,
   startProductionGateway,
   staticProductionGatewayCredential,
   type ProductionGatewayOptions,
@@ -78,7 +84,7 @@ const PNG = Buffer.concat([
 
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
-const LOCATORS: RemoteOutputLocator[] = [
+const LOCATORS: ComfyViewOutputLocator[] = [
   { nodeId: "7", kind: "video", filename: "take.mp4", subfolder: "video/final", folderType: "output" },
   { nodeId: "9", kind: "audio", filename: "take.wav", subfolder: "audio", folderType: "output" },
 ];
@@ -889,7 +895,135 @@ try {
     await httpServer.close();
   }
 
+  // —— §4.5 provider-output locator：经 adapter 的 openOutput 取回，不经 comfyBaseUrl/view ——
+  const providerLocator = {
+    source: "provider-output" as const,
+    remoteJobId: "11111111-1111-4111-8111-111111111111",
+    outputIndex: 0,
+    role: "primary" as const,
+    kind: "video" as const,
+  };
+  const openedOutputs: Array<Record<string, unknown>> = [];
+  const providerGateway = await gateway({
+    fetch: async () => { throw new Error("provider-output 不得走 comfyBaseUrl/view"); },
+    providerOutputOpener: async (output) => {
+      openedOutputs.push({ ...output });
+      return { body: new Response(MP4).body!, declaredLength: MP4.byteLength };
+    },
+  });
+  const providerResponse = await providerGateway.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [providerLocator] }),
+  }));
+  const providerResult = await bodyJson(providerResponse);
+  ok(providerResponse.status === 200
+    && (providerResult.assets as Array<Record<string, unknown>>)[0]?.sha256 === digest(MP4)
+    && openedOutputs.length === 1 && openedOutputs[0]?.role === "primary",
+  "provider-output locator 经 adapter openOutput 取回并按内容寻址入库");
+
+  const noOpener = await gateway({
+    fetch: async () => { throw new Error("provider-output 不得走 comfyBaseUrl/view"); },
+  });
+  ok((await noOpener.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [providerLocator] }),
+  }))).status === 502,
+  "未装配 openOutput 的实例对 provider-output locator fail-closed");
+
+  // —— §5.3 尾帧派生：可注入的帧提取器把主视频的尾帧登记为第二个 AssetRef ——
+  const derivedFrame = Buffer.concat([PNG, Buffer.from("last-frame")]);
+  const extractorCalls: Array<Record<string, unknown>> = [];
+  const withFrame = await gateway({
+    lastFrameExtractor: async (input) => {
+      extractorCalls.push({ ...input });
+      return derivedFrame;
+    },
+  });
+  const withFrameResponse = await withFrame.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [LOCATORS[0]!] }),
+  }));
+  const withFrameResult = await bodyJson(withFrameResponse);
+  const withFrameAssets = withFrameResult.assets as Array<Record<string, unknown>>;
+  ok(withFrameResponse.status === 200 && withFrameAssets.length === 2
+    && withFrameAssets[0]?.sha256 === digest(MP4)
+    && withFrameAssets[1]?.sha256 === digest(derivedFrame)
+    && withFrameAssets[1]?.mediaType === "image/png"
+    && extractorCalls.length === 1
+    && String(extractorCalls[0]?.videoPath).endsWith(digest(MP4)),
+  "入库后按主视频派生尾帧，作为第二个 AssetRef 登记");
+  ok(existsSync(join(withFrame.storeRoot, "blobs", "sha256", digest(derivedFrame).slice(0, 2), digest(derivedFrame))),
+    "派生尾帧写进同一 CAS 目录，可被 cas:// resolver 再登记为下一镜首帧");
+  const replayFrame = await bodyJson(await withFrame.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [LOCATORS[0]!] }),
+  })));
+  ok(JSON.stringify(replayFrame) === JSON.stringify(withFrameResult) && extractorCalls.length === 1,
+    "receipt replay 返回同一对资产，不再重复派生");
+
+  const providerLastFrame = await gateway({
+    fetch: async () => { throw new Error("provider-output 不得走 comfyBaseUrl/view"); },
+    providerOutputOpener: async (output) => ({
+      body: new Response(output.role === "last-frame" ? PNG : MP4).body!,
+      declaredLength: (output.role === "last-frame" ? PNG : MP4).byteLength,
+    }),
+    lastFrameExtractor: async () => { throw new Error("provider 已回传尾帧时不得再派生"); },
+  });
+  const providerPair = await bodyJson(await providerLastFrame.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, {
+      locators: [providerLocator, {
+        ...providerLocator, outputIndex: 1, role: "last-frame" as const, kind: "image" as const,
+      }],
+    }),
+  })));
+  ok((providerPair.assets as unknown[]).length === 2,
+    "provider 自带 role: last-frame 时不再调用 ffmpeg 派生");
+
+  const noPrimaryVideo = await gateway({
+    lastFrameExtractor: async () => derivedFrame,
+  });
+  ok((await noPrimaryVideo.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [LOCATORS[1]!] }),
+  }))).status === 500,
+  "配置了帧提取器但没有唯一主视频时 ingest 以 derivation-failed 失败，不静默少登记一个资产");
+
+  const failingExtractor = await gateway({
+    lastFrameExtractor: async () => { throw new Error("ffmpeg 失败"); },
+  });
+  ok((await failingExtractor.gateway.handle(ingestRequest({
+    body: requestBody(SHA_A, { locators: [LOCATORS[0]!] }),
+  }))).status === 500,
+  "帧提取失败向上传递为稳定的 derivation-failed，而不是静默少登记一个资产");
+
+  // 真实 ffmpeg 集成：只在 WL_FFMPEG_TEST=1 时执行（默认不执行也不打印）。
+  const ffmpegHarnesses: Array<{ gateway: ProductionGateway }> = [];
+  if (process.env.WL_FFMPEG_TEST === "1") {
+    const sample = join(root(), "sample.mp4");
+    execFileSync("ffmpeg", [
+      "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+      "-f", "lavfi", "-i", "testsrc=size=64x64:rate=8:duration=1",
+      "-pix_fmt", "yuv420p", sample,
+    ]);
+    const sampleBytes = readFileSync(sample);
+    const ffmpegGateway = await gateway({
+      fetch: async () => response(sampleBytes),
+      maxAssetBytes: 8 * 1024 * 1024,
+      lastFrameExtractor: productionFfmpegLastFrameExtractor(),
+    });
+    ffmpegHarnesses.push(ffmpegGateway);
+    const ffmpegResult = await bodyJson(await ffmpegGateway.gateway.handle(ingestRequest({
+      body: requestBody(SHA_A, { locators: [LOCATORS[0]!] }),
+    })));
+    const ffmpegAssets = ffmpegResult.assets as Array<Record<string, unknown>>;
+    ok(ffmpegAssets.length === 2 && ffmpegAssets[1]?.mediaType === "image/png"
+      && Number(ffmpegAssets[1]?.byteLength) > 0,
+    "系统 ffmpeg 从真实 mp4 提取尾帧并登记为 image/png 资产（WL_FFMPEG_TEST=1）");
+  }
+
   happy.gateway.close();
+  providerGateway.gateway.close();
+  noOpener.gateway.close();
+  withFrame.gateway.close();
+  noPrimaryVideo.gateway.close();
+  providerLastFrame.gateway.close();
+  failingExtractor.gateway.close();
+  for (const instance of ffmpegHarnesses) instance.gateway.close();
   authGateway.gateway.close();
   brokenCredential.gateway.close();
   strictGateway.gateway.close();

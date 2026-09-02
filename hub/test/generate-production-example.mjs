@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   assertProductionH3Template,
   productionH3ParameterManifestSha256,
+  productionH3ShotRequestSentinel,
   productionH3StageInputSentinel,
   productionH3WorkflowSha256,
 } from "../dist/production-h3-graph.js";
@@ -16,6 +17,11 @@ const specFile = join(hubRoot, "..", "docs", "design", "phase-3-remote-productio
 const exampleRoot = join(hubRoot, "examples", "production", "representative-h3");
 const runtimeFile = join(exampleRoot, "production-runtime.json");
 const workflowFile = join(exampleRoot, "workflows", "h3-fl2va-portrait.json");
+// 契约 v2 示例（§5.3）：与 v1 同一份 graph 骨架，prompt / seed 改为 sentinel，stage 绑定前置
+// index 0 的 shot-request slot。v2 runtime 同时登记 v1 与 v2 两档，钉住「两个契约版本并存」。
+const V2_PROFILE_ID = "h3-fl2va-portrait-v2";
+const runtimeV2File = join(exampleRoot, "production-runtime-v2.json");
+const workflowV2File = join(exampleRoot, "workflows", `${V2_PROFILE_ID}.json`);
 const marker = /<!-- writing-loop-production-runtime-v1-fixture:start -->\s*```json\s*([\s\S]*?)\s*```\s*<!-- writing-loop-production-runtime-v1-fixture:end -->/;
 
 function requireObject(value, subject) {
@@ -28,10 +34,13 @@ function requireObject(value, subject) {
 function buildTemplate(contract, execution, profile) {
   const bundle = contract.modelBundle;
   const pipeline = contract.pipeline;
+  const v2 = contract.version === 2;
   const generatorInputs = {
     clip: [bundle.textEncoder.nodeId, 0],
     vae: [bundle.videoVae.nodeId, 0],
-    prompt: "cinematic short-drama shot",
+    prompt: v2
+      ? productionH3ShotRequestSentinel(profile.profileId, "prompt")
+      : "cinematic short-drama shot",
     width: contract.generator.width,
     height: contract.generator.height,
     length: contract.generator.length,
@@ -41,6 +50,8 @@ function buildTemplate(contract, execution, profile) {
     generatorInputs.ref_image_size = "match";
   }
   for (const binding of profile.bindings) {
+    // 契约 v2 的 index 0 是 shot-request：只 stage、不绑定图节点。
+    if (binding.source === null || binding.consumer === null) continue;
     generatorInputs[binding.consumer.inputName] = [binding.source.nodeId, binding.source.outputIndex];
   }
 
@@ -80,7 +91,7 @@ function buildTemplate(contract, execution, profile) {
     },
     [pipeline.noise.nodeId]: {
       class_type: pipeline.noise.classType,
-      inputs: { noise_seed: 42 },
+      inputs: { noise_seed: v2 ? productionH3ShotRequestSentinel(profile.profileId, "seed") : 42 },
     },
     [pipeline.sampler.nodeId]: {
       class_type: pipeline.sampler.classType,
@@ -116,6 +127,7 @@ function buildTemplate(contract, execution, profile) {
     },
   };
   for (const binding of profile.bindings) {
+    if (binding.source === null) continue;
     template[binding.source.nodeId] = {
       class_type: binding.source.classType,
       inputs: {
@@ -165,10 +177,62 @@ function deriveExample() {
     template, parsedWorkflow.h3GraphContract, parsedProfile.execution,
     parsedProfile.bindings.bindings, parsedProfile.profileId,
   );
+  const v2 = deriveV2Example(runtime, workflow, profile);
   return {
     runtime: `${JSON.stringify(runtime, null, 2)}\n`,
     workflow: `${JSON.stringify(template, null, 2)}\n`,
+    runtimeV2: `${JSON.stringify(v2.runtime, null, 2)}\n`,
+    workflowV2: `${JSON.stringify(v2.template, null, 2)}\n`,
   };
+}
+
+/**
+ * 契约 v2 示例：与 v1 同一 graph 骨架，只把 prompt / seed 换成 sentinel、在 stage 绑定前置 index 0 的
+ * shot-request slot（LoadImage 绑定顺延一位），再按同一套 canonical 实现重算两个 digest。
+ */
+function deriveV2Example(runtime, v1Workflow, v1Profile) {
+  const workflow = structuredClone(v1Workflow);
+  const profile = structuredClone(v1Profile);
+  profile.profileId = V2_PROFILE_ID;
+  workflow.stagingProfileId = V2_PROFILE_ID;
+  workflow.file = `workflows/${V2_PROFILE_ID}.json`;
+  workflow.h3GraphContract.version = 2;
+  profile.bindings = [
+    { version: 1, index: 0, slot: "shot-request", source: null, consumer: null },
+    ...v1Profile.bindings.map((binding, index) => ({
+      ...structuredClone(binding), index: index + 1,
+    })),
+  ];
+  const contract = workflow.h3GraphContract;
+  const template = buildTemplate(contract, profile.execution, profile);
+  const workflowSha256 = productionH3WorkflowSha256(template);
+  const parametersSha256 = productionH3ParameterManifestSha256(template, contract, profile.execution);
+  workflow.workflowSha256 = workflowSha256;
+  workflow.parametersSha256 = parametersSha256;
+  contract.parameterManifest.sha256 = parametersSha256;
+  profile.execution.workflowSha256 = workflowSha256;
+  profile.execution.parametersSha256 = parametersSha256;
+
+  // worker 侧的一个 production-gateway backend 恰好绑一个 profileId，因此 v2 示例是一份独立的
+  // worker runtime config；同时跑两档时按 profile 各写一个 backend 条目。
+  const v2Runtime = structuredClone(runtime);
+  v2Runtime.backends = v2Runtime.backends.map((entry) => entry.kind === "production-gateway"
+    ? { ...entry, profileId: V2_PROFILE_ID }
+    : entry);
+  v2Runtime.workflows = [workflow];
+  v2Runtime.stagingProfiles = [profile];
+  const parsed = parseProductionRuntimeConfig(v2Runtime);
+  const parsedWorkflow = parsed.workflows[0];
+  const parsedProfile = parsed.stagingProfiles[0];
+  if (parsedWorkflow?.h3GraphContract?.version !== 2
+    || parsedProfile?.bindings?.kind !== "h3-graph-bindings") {
+    throw new Error("derived v2 example did not preserve its contract v2 graph/profile");
+  }
+  assertProductionH3Template(
+    template, parsedWorkflow.h3GraphContract, parsedProfile.execution,
+    parsedProfile.bindings.bindings, parsedProfile.profileId,
+  );
+  return { runtime: v2Runtime, template };
 }
 
 const mode = process.argv[2] ?? "--check";
@@ -180,10 +244,14 @@ if (mode === "--write") {
   mkdirSync(join(exampleRoot, "workflows"), { recursive: true });
   writeFileSync(runtimeFile, derived.runtime);
   writeFileSync(workflowFile, derived.workflow);
+  writeFileSync(runtimeV2File, derived.runtimeV2);
+  writeFileSync(workflowV2File, derived.workflowV2);
   console.log("PRODUCTION_PACKAGE_EXAMPLE_WRITTEN");
 } else {
   if (readFileSync(runtimeFile, "utf8") !== derived.runtime
-    || readFileSync(workflowFile, "utf8") !== derived.workflow) {
+    || readFileSync(workflowFile, "utf8") !== derived.workflow
+    || readFileSync(runtimeV2File, "utf8") !== derived.runtimeV2
+    || readFileSync(workflowV2File, "utf8") !== derived.workflowV2) {
     throw new Error("packaged production example drifted; run generator with --write");
   }
   // Keep npm pack's stdout machine-readable: prepack forwards build stdout into command

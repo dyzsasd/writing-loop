@@ -31,8 +31,12 @@ export const MAX_PRODUCTION_PROFILE_SNAPSHOT_PROFILES = 256;
  * request instead. Present or absent, the entry digest is computed over exactly the keys that are
  * there, so both shapes verify against the digest the exporter wrote.
  */
+/**
+ * gateway 的导出恒含 `limits`（与 `capabilities` 路由同源，§4.3）；读取侧把它当可选，以便读入更早
+ * 版本导出的快照。存在时它计入 `profileDigest`，因此不会出现「有 limits 但不被校验」的形态。
+ */
 export type ProductionExecutionProfileSnapshotReadEntry =
-  ProductionExecutionProfileSnapshotEntry & { limits?: VideoBackendLimits };
+  Readonly<Omit<ProductionExecutionProfileSnapshotEntry, "limits"> & { limits?: VideoBackendLimits }>;
 
 export type ProductionExecutionProfileSnapshotRead = Readonly<{
   version: 1;

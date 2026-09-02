@@ -25,10 +25,22 @@ import {
 import {
   parseProductionIntentExecution,
   parseProductionLicenseEvidence,
+  parseProductionProcessingRegions,
   type ProductionIntentExecution,
   type ProductionLicenseEvidence,
 } from "./production-intent.ts";
-import { PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES } from "./production-stage-gateway.ts";
+import {
+  PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES,
+  productionStageSlotPairingViolation,
+} from "./production-stage-gateway.ts";
+import { PRODUCTION_SHOT_REQUEST_SLOT } from "./production-input-stager.ts";
+import { SHOT_REQUEST_MEDIA_TYPE } from "./production-shot-request.ts";
+import {
+  h3LimitsByProfileId,
+  type ComfyUiH3ProfileCapability,
+  type VideoBackendLimits,
+} from "./production-adapter.ts";
+import { parseVideoBackendLimits } from "./production-provider-adapter.ts";
 import {
   parseShotExecutionProfile,
   type ShotExecutionProfile,
@@ -81,6 +93,11 @@ export type ProductionGatewayBackendConfig = Readonly<{
   kind: "comfyui";
   /** Loopback plaintext only: ComfyUI runs on the same host as the gateway process (§8.0). */
   comfyBaseUrl: string;
+  /**
+   * §4.3 `maxInputImageBytes`. A self-hosted backend has no provider-side image ceiling to quote,
+   * only a deployment declaration, so the registry owns it and the adapter never invents one.
+   */
+  maxInputImageBytes: number;
   profileIds: readonly string[];
 }>;
 
@@ -183,6 +200,11 @@ export type ProductionExecutionProfileSnapshotEntry = Readonly<{
   execution: ShotExecutionProfile;
   /** H3 duration grid = the configured profile set for one output shape (§5.3). */
   durationGrid: readonly number[];
+  /**
+   * §4.3 limits for this profile, derived from the same function the backend adapter's
+   * `capabilities()` uses, so `limits.durationSeconds.grid` and `durationGrid` cannot drift apart.
+   */
+  limits: VideoBackendLimits;
   priceTable: ProductionGatewayPriceTable;
   license: ProductionGatewayLicenseConfig;
   processingRegions: readonly string[];
@@ -208,7 +230,6 @@ const SAFE_SLOT = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,127}$/;
 const SAFE_NAMESPACE = /^[a-z0-9][a-z0-9._-]{0,63}(?:\/[a-z0-9][a-z0-9._-]{0,63}){1,7}$/;
 const CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const TERRITORY = /^[A-Z]{2}$/;
 const SAFE_TEXT = /^[^\u0000-\u001f\u007f]{1,256}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -343,7 +364,9 @@ function loopbackComfyUrl(value: unknown, subject: string): string {
 function parseBackend(value: unknown, index: number): ProductionGatewayBackendConfig {
   const subject = `ProductionGatewayRuntimeConfig.backends[${index}]`;
   const row = record(value, subject);
-  exactKeys(row, ["version", "backendInstanceId", "kind", "comfyBaseUrl", "profileIds"], subject);
+  exactKeys(row, [
+    "version", "backendInstanceId", "kind", "comfyBaseUrl", "maxInputImageBytes", "profileIds",
+  ], subject);
   version(row.version, subject);
   if (row.kind !== "comfyui") {
     // 云 backend kind 随 Ark / Vertex adapter 进入（Phase 3 / Phase 4）。
@@ -359,6 +382,9 @@ function parseBackend(value: unknown, index: number): ProductionGatewayBackendCo
     backendInstanceId: safeString(row.backendInstanceId, SAFE_ID, `${subject}.backendInstanceId`),
     kind: "comfyui" as const,
     comfyBaseUrl: loopbackComfyUrl(row.comfyBaseUrl, `${subject}.comfyBaseUrl`),
+    maxInputImageBytes: boundedInteger(
+      row.maxInputImageBytes, 1_024, 4 * 1024 * 1024 * 1024, `${subject}.maxInputImageBytes`,
+    ),
     profileIds: Object.freeze(profileIds),
   });
 }
@@ -462,10 +488,13 @@ function parseExecutionProfile(value: unknown, index: number): ProductionGateway
     if (error instanceof ProductionH3GraphError) schemaError(`${subject}.h3GraphContract`, error.message);
     throw error;
   }
-  const regions = boundedArray(row.processingRegions, 1, 64, `${subject}.processingRegions`)
-    .map((entry, position) => safeString(entry, TERRITORY, `${subject}.processingRegions[${position}]`));
-  if (new Set(regions).size !== regions.length) {
-    schemaError(`${subject}.processingRegions`, "不得包含重复地域码");
+  // 与 worker 侧同一份解析：去重、升序、拒绝 EU / UK 这类集合别名。排序一致才使两边算出的
+  // profile digest 相等（§4.2），因此不能在这里保留配置里的原始顺序。
+  boundedArray(row.processingRegions, 1, 64, `${subject}.processingRegions`);
+  let regions: string[];
+  try { regions = parseProductionProcessingRegions(row.processingRegions, `${subject}.processingRegions`); }
+  catch (error) {
+    schemaError(`${subject}.processingRegions`, error instanceof Error ? error.message : "处理地域无效");
   }
   return Object.freeze({
     version: 1 as const,
@@ -506,10 +535,19 @@ function parseStageProfileInput(
   if (mediaTypes.some((mediaType, position) => mediaType !== sorted[position])) {
     schemaError(`${subject}.mediaTypes`, "必须按字典序升序排列");
   }
+  const slot = safeString(row.slot, SAFE_SLOT, `${subject}.slot`);
+  // Same `shot-request` slot ⇔ media type pairing the stage kernel enforces per request, so a
+  // profile that would be refused at request time is refused while the process is still assembling.
+  const pairing = productionStageSlotPairingViolation(slot, mediaTypes);
+  if (pairing !== null) schemaError(subject, pairing);
+  if ((slot === PRODUCTION_SHOT_REQUEST_SLOT) !== (index === 0 && mediaTypes.length === 1
+    && mediaTypes[0] === SHOT_REQUEST_MEDIA_TYPE)) {
+    schemaError(subject, `${PRODUCTION_SHOT_REQUEST_SLOT} 只能是 inputs[0]（§6.5 固定输入顺序）`);
+  }
   return Object.freeze({
     version: 1 as const,
     index,
-    slot: safeString(row.slot, SAFE_SLOT, `${subject}.slot`),
+    slot,
     mediaTypes: Object.freeze(mediaTypes),
   });
 }
@@ -844,6 +882,37 @@ function durationGridFor(
   return Object.freeze([...new Set(durations)].sort((left, right) => left - right));
 }
 
+/**
+ * The configured H3 profile set, in the exact shape `ComfyUiAdapter` takes. The gateway process
+ * injects this into the adapter and the snapshot derives its limits from it, so the capability the
+ * coordinator reads and the price/duration snapshot the planner reads have one source (§4.3, §5.3).
+ */
+export function productionGatewayH3Profiles(
+  config: ProductionGatewayRuntimeConfig,
+): readonly ComfyUiH3ProfileCapability[] {
+  return Object.freeze(config.executionProfiles.map((profile) => {
+    if (profile.execution.modelFamily !== "minimax-h3") {
+      schemaError("ProductionGatewayRuntimeConfig.executionProfiles", "v1 registry 只承载 minimax-h3 profile");
+    }
+    return Object.freeze({
+      profileId: profile.execution.profileId,
+      variant: profile.execution.variant,
+      durationSeconds: profile.execution.durationSeconds,
+      aspectRatio: profile.execution.aspectRatio as ComfyUiH3ProfileCapability["aspectRatio"],
+      graphContractVersion: profile.h3GraphContract.version,
+    });
+  }));
+}
+
+/** The union of every configured profile's processing regions (§4.3); ISO-3166 alpha-2, sorted. */
+export function productionGatewayProcessingRegions(
+  config: ProductionGatewayRuntimeConfig,
+): readonly string[] {
+  return Object.freeze([...new Set(
+    config.executionProfiles.flatMap((profile) => [...profile.processingRegions]),
+  )].sort());
+}
+
 export function productionExecutionProfileSnapshotEntryDigest(
   entry: Omit<ProductionExecutionProfileSnapshotEntry, "profileDigest">,
 ): string {
@@ -858,12 +927,38 @@ export function productionExecutionProfileSnapshotEntryDigest(
 export function exportExecutionProfileSnapshot(
   config: ProductionGatewayRuntimeConfig,
 ): ProductionExecutionProfileSnapshot {
+  const limitsByProfileId = h3LimitsByProfileId(
+    productionGatewayH3Profiles(config), config.backends[0]!.maxInputImageBytes,
+  );
   const profiles = config.executionProfiles.map((profile) => {
+    const durationGrid = durationGridFor(config, profile);
+    const derivedLimits = limitsByProfileId[profile.execution.profileId];
+    if (derivedLimits === undefined) {
+      schemaError("ProductionGatewayRuntimeConfig.executionProfiles", "profile 未推导出 capability limits");
+    }
+    // 快照里的 limits 是跨主机契约：按 §4.3 的严格读取器复算一次，导出的 JSON 一定能被 worker 解析。
+    let limits: VideoBackendLimits;
+    try { limits = parseVideoBackendLimits(derivedLimits, `${profile.execution.profileId}.limits`); }
+    catch (error) {
+      schemaError(
+        "ProductionGatewayRuntimeConfig.executionProfiles",
+        error instanceof Error ? error.message : "capability limits 无效",
+      );
+    }
+    // 两处推导（按 execution 形状分组 / 按 (variant, aspectRatio) 分组）必须给出同一条时长网格；
+    // 不一致说明配置里出现了同形状不同 generateAudio / resolution 的档，fail-closed 而不是二选一。
+    if (JSON.stringify(limits.durationSeconds.grid) !== JSON.stringify([...durationGrid])) {
+      schemaError(
+        "ProductionGatewayRuntimeConfig.executionProfiles",
+        `execution profile '${profile.execution.profileId}' 的时长网格与 capability limits 不一致`,
+      );
+    }
     const body = {
       version: 1 as const,
       profileId: profile.execution.profileId,
       execution: profile.execution,
-      durationGrid: durationGridFor(config, profile),
+      durationGrid,
+      limits,
       priceTable: profile.priceTable,
       license: profile.license,
       processingRegions: profile.processingRegions,

@@ -1,0 +1,216 @@
+{
+  "version": 1,
+  "workspaceId": "ws_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "projects": [
+    {
+      "version": 1,
+      "project": "drama-a",
+      "enabled": true,
+      "backendInstanceIds": [
+        "gateway-h3-fl2va"
+      ],
+      "deploymentTerritories": [
+        "CN"
+      ],
+      "availableBudgetMicros": 5000000,
+      "allowedProcessingRegions": [
+        "CN"
+      ],
+      "licenseCompliance": {
+        "annualRevenueUsdBelow": 1000000,
+        "attributionSurfaces": [
+          "片尾字幕"
+        ]
+      },
+      "usesOutputToImproveModels": false
+    }
+  ],
+  "backends": [
+    {
+      "version": 1,
+      "backendInstanceId": "gateway-h3-fl2va",
+      "kind": "production-gateway",
+      "baseUrl": "https://production-gateway.internal.example/",
+      "credentialEnv": "WRITING_LOOP_GATEWAY_TOKEN",
+      "profileId": "h3-fl2va-portrait-v2"
+    }
+  ],
+  "gateway": {
+    "version": 1,
+    "baseUrl": "https://production-gateway.internal.example/",
+    "credentialEnv": "WRITING_LOOP_GATEWAY_TOKEN"
+  },
+  "workflows": [
+    {
+      "version": 1,
+      "backendInstanceId": "gateway-h3-fl2va",
+      "workflowSha256": "298ab6c47647b09c03aaac2b3cde1a91623e24b7de8d7318d8cc6a065c02ce21",
+      "modelFamily": "minimax-h3",
+      "modelSha256": "d153e5de740ec05a573d03497225a9bdb144666816cec2d4ba7ab5e0c8239a9a",
+      "parametersSha256": "e19b7e12350848c556825c1c7ad5b5373efbe272cfba29850a5523792690fc1c",
+      "projects": [
+        "drama-a"
+      ],
+      "inputPolicy": "scoped-staging",
+      "stagingProfileId": "h3-fl2va-portrait-v2",
+      "h3GraphContract": {
+        "version": 2,
+        "generator": {
+          "version": 1,
+          "nodeId": "10",
+          "classType": "MiniMaxH3ImageToVideo",
+          "width": 768,
+          "height": 1344,
+          "length": 192
+        },
+        "modelBundle": {
+          "version": 1,
+          "diffusion": {
+            "version": 1,
+            "nodeId": "11",
+            "classType": "UNETLoader",
+            "inputName": "unet_name",
+            "modelAlias": "minimax/MiniMax-H3.safetensors",
+            "artifactSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "textEncoder": {
+            "version": 1,
+            "nodeId": "12",
+            "classType": "CLIPLoader",
+            "inputName": "clip_name",
+            "modelAlias": "minimax/Qwen3-VL-32B.safetensors",
+            "artifactSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          "videoVae": {
+            "version": 1,
+            "nodeId": "13",
+            "classType": "VAELoader",
+            "inputName": "vae_name",
+            "modelAlias": "minimax/MiniMax-H3-video-vae.safetensors",
+            "artifactSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "audioVae": {
+            "version": 1,
+            "nodeId": "14",
+            "classType": "VAELoader",
+            "inputName": "vae_name",
+            "modelAlias": "minimax/MiniMax-H3-audio-vae.safetensors",
+            "artifactSha256": "9999999999999999999999999999999999999999999999999999999999999999"
+          },
+          "sha256": "d153e5de740ec05a573d03497225a9bdb144666816cec2d4ba7ab5e0c8239a9a"
+        },
+        "pipeline": {
+          "version": 1,
+          "sigmaShift": {
+            "version": 1,
+            "nodeId": "15",
+            "classType": "MiniMaxH3SigmaShift"
+          },
+          "guider": {
+            "version": 1,
+            "nodeId": "16",
+            "classType": "BasicGuider"
+          },
+          "scheduler": {
+            "version": 1,
+            "nodeId": "17",
+            "classType": "BasicScheduler"
+          },
+          "samplerSelect": {
+            "version": 1,
+            "nodeId": "18",
+            "classType": "KSamplerSelect"
+          },
+          "noise": {
+            "version": 1,
+            "nodeId": "19",
+            "classType": "RandomNoise"
+          },
+          "sampler": {
+            "version": 1,
+            "nodeId": "20",
+            "classType": "SamplerCustomAdvanced"
+          },
+          "videoDecode": {
+            "version": 1,
+            "nodeId": "21",
+            "classType": "VAEDecode"
+          },
+          "audioDecode": {
+            "version": 1,
+            "nodeId": "22",
+            "classType": "VAEDecodeAudio"
+          },
+          "createVideo": {
+            "version": 1,
+            "nodeId": "23",
+            "classType": "CreateVideo"
+          },
+          "saveVideo": {
+            "version": 1,
+            "nodeId": "24",
+            "classType": "SaveVideo"
+          }
+        },
+        "parameterManifest": {
+          "version": 1,
+          "sha256": "e19b7e12350848c556825c1c7ad5b5373efbe272cfba29850a5523792690fc1c"
+        }
+      },
+      "file": "workflows/h3-fl2va-portrait-v2.json"
+    }
+  ],
+  "stagingProfiles": [
+    {
+      "version": 1,
+      "profileId": "h3-fl2va-portrait-v2",
+      "baseUrl": "https://production-gateway.internal.example/",
+      "credentialEnv": "WRITING_LOOP_GATEWAY_TOKEN",
+      "execution": {
+        "version": 1,
+        "operation": "comfyui-workflow",
+        "modelFamily": "minimax-h3",
+        "backendInstanceId": "gateway-h3-fl2va",
+        "workflowSha256": "298ab6c47647b09c03aaac2b3cde1a91623e24b7de8d7318d8cc6a065c02ce21",
+        "modelSha256": "d153e5de740ec05a573d03497225a9bdb144666816cec2d4ba7ab5e0c8239a9a",
+        "parametersSha256": "e19b7e12350848c556825c1c7ad5b5373efbe272cfba29850a5523792690fc1c",
+        "variant": "fl2va",
+        "durationSeconds": 8,
+        "shortEdge": 768,
+        "aspectRatio": "9:16"
+      },
+      "bindings": [
+        {
+          "version": 1,
+          "index": 0,
+          "slot": "shot-request",
+          "source": null,
+          "consumer": null
+        },
+        {
+          "version": 1,
+          "index": 1,
+          "slot": "first_frame",
+          "source": {
+            "version": 1,
+            "nodeId": "100",
+            "classType": "LoadImage",
+            "inputName": "image",
+            "outputIndex": 0
+          },
+          "consumer": {
+            "version": 1,
+            "nodeId": "10",
+            "inputName": "first_frame"
+          }
+        }
+      ]
+    }
+  ],
+  "runner": {
+    "version": 1,
+    "intervalMs": 5000,
+    "projectConcurrency": 1,
+    "perBackendConcurrency": 1
+  }
+}

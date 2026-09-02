@@ -69,11 +69,25 @@ function iso(value: unknown): string {
 
 function locator(value: unknown, index: number): RemoteOutputLocator {
   if (!object(value)) fail(`outputs[${index}] must be an object`);
-  // §4.5：locator 按 source 分支，缺少 source 时按 comfy-view 读取。provider-output 需要 adapter 的
-  // openOutput 取回路径（§8.6 的 ingest kernel 行，下一切片），此处 fail-closed 拒绝。
+  // §4.5：locator 按 source 分支，缺少 source 时按 comfy-view 读取；写入侧总带 source。
   const source = Object.prototype.hasOwnProperty.call(value, "source") ? value.source : "comfy-view";
   if (source === "provider-output") {
-    fail(`outputs[${index}].source provider-output 的 openOutput 取回路径尚未装配`);
+    exactKeys(value, ["source", "remoteJobId", "outputIndex", "role", "kind"], `outputs[${index}]`);
+    const remoteJobId = value.remoteJobId;
+    if (typeof remoteJobId !== "string" || !IDENTIFIER.test(remoteJobId)) {
+      fail(`outputs[${index}].remoteJobId invalid`);
+    }
+    if (!Number.isSafeInteger(value.outputIndex) || (value.outputIndex as number) < 0
+      || (value.outputIndex as number) > 127) fail(`outputs[${index}].outputIndex invalid`);
+    if (value.role !== "primary" && value.role !== "last-frame") fail(`outputs[${index}].role invalid`);
+    if (value.kind !== "video" && value.kind !== "image") fail(`outputs[${index}].kind invalid`);
+    return {
+      source: "provider-output",
+      remoteJobId,
+      outputIndex: value.outputIndex as number,
+      role: value.role,
+      kind: value.kind,
+    };
   }
   if (source !== "comfy-view") fail(`outputs[${index}].source must be comfy-view or provider-output`);
   const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
@@ -102,13 +116,13 @@ function locator(value: unknown, index: number): RemoteOutputLocator {
   if (!OUTPUT_KINDS.has(String(value.kind)) || !FOLDER_TYPES.has(String(value.folderType))) {
     fail(`outputs[${index}] enum invalid`);
   }
-  // 归一化时不落 source：ingest 请求体的 exactKeys 仍是固定五字段。
   return {
+    source: "comfy-view",
     nodeId,
-    kind: value.kind as RemoteOutputLocator["kind"],
+    kind: value.kind as "image" | "video" | "audio" | "file",
     filename,
     subfolder,
-    folderType: value.folderType as RemoteOutputLocator["folderType"],
+    folderType: value.folderType as "input" | "output" | "temp",
   };
 }
 

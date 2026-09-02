@@ -159,19 +159,27 @@ ok(throws(() => decideProductionObservation(submitted("running"), {
   ...observation("running"), remoteJobId: "22222222-2222-4222-8222-222222222222",
 }), "remote tuple"), "另一 remote job 的 observation 不能推进本 task");
 
-// —— §4.5 locator 按 source 分支：缺省即 comfy-view，写入侧尚未落 source ——
+// —— §4.5 locator 按 source 分支：缺省即 comfy-view，归一化后写入侧总带 source ——
 const succeeded = observation("succeeded");
 const taggedComfy = parseRemoteObservation({
   ...succeeded,
   outputs: [{ source: "comfy-view", ...succeeded.outputs[0]! }],
 });
-ok(JSON.stringify(taggedComfy.outputs) === JSON.stringify(succeeded.outputs),
-"source: comfy-view 与缺省读法一致，归一化后 ingest 请求体字节不变");
-ok(throws(() => parseRemoteObservation({
+const defaultedComfy = parseRemoteObservation(succeeded);
+ok(JSON.stringify(taggedComfy.outputs) === JSON.stringify(defaultedComfy.outputs)
+  && taggedComfy.outputs[0]?.source === "comfy-view",
+"source: comfy-view 与缺省读法一致，归一化后总带 source");
+const providerOutput = parseRemoteObservation({
   ...succeeded,
   outputs: [{ source: "provider-output", remoteJobId: REMOTE, outputIndex: 0, role: "primary", kind: "video" }],
-}), "openOutput 取回路径尚未装配"),
-"provider-output locator 在 ingest kernel 装配前 fail-closed 拒绝");
+});
+ok(JSON.stringify(providerOutput.outputs) === JSON.stringify([{
+  source: "provider-output", remoteJobId: REMOTE, outputIndex: 0, role: "primary", kind: "video",
+}]), "provider-output locator 经 openOutput 取回路径装配后进入 durable decision");
+ok(throws(() => parseRemoteObservation({
+  ...succeeded,
+  outputs: [{ source: "provider-output", remoteJobId: REMOTE, outputIndex: 0, role: "thumbnail", kind: "video" }],
+}), "role invalid"), "provider-output 的 role 只接受 primary / last-frame");
 ok(throws(() => parseRemoteObservation({
   ...succeeded, outputs: [{ source: "provider-url", ...succeeded.outputs[0]! }],
 }), "must be comfy-view or provider-output"), "未知 locator source 被拒绝");

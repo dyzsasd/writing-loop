@@ -429,6 +429,19 @@ queue₃ 已消失表示正常完成迁移，仍存在才视为协议冲突/潜�
 `not-found` observation；history 是进程内、最多约 10,000 项且重启会清空，因此已确认提交的 absent
 不等于“从未提交”，由 coordinator 决定 orphan/manual audit。
 
+任何观察路径（`GET /jobs/{id}`、PUT 的提交响应、cancel 的取证）看到 `succeeded / failed / cancelled`
+时，gateway 先把该终态 durable 记入 job 目录的 `terminal.json`（首个写入者胜出），之后的读取直接按它
+回答。这条记录把「provider 忘了一个在跑的任务」与「任务早已结束、history 只是被裁掉了」区分开。
+
+gateway 进程启动时先做一次抢占扫描（Spot 抢占或任何 ComfyUI 重启都会清空进程内 history）：遍历
+`jobStateRoot/jobs/` 下的持久 job record，只对「已提交且未终态」的任务发请求——已有抢占记录、已有
+终态记录、`outcome.json` 为 `not-submitted`、或没有 raw attempt claim（POST 尚未发出，提交路径仍归
+coordinator）的记录一律跳过。其余任务里 `/queue` 与 `/history/{id}` 都不认识的，durable 写入一条
+`provider_failed:preempted` 判定；之后该任务的 `GET /jobs/{id}` 直接按该判定回答 `failed`，不再询问
+provider。单个任务的 inspect 失败或超过该任务自己的截止时间，都只计入 `unresolved` 并留待下一次重启
+判定，不会中断整轮扫描；caller abort 与停机才结束扫描。扫描结果随监听日志一并输出，每条 unresolved
+另记一行原因。
+
 v0.24+ `/api/jobs/{id}` 只有在只读 feature probe 明确成功时才可作为可选优化：精确 JSON 404 表示
 route supported，404 HTML/不同 envelope 才缓存为 legacy unsupported；401/403/429/5xx、timeout、
 oversize 或 invalid JSON 必须保留错误，不能静默 fallback。
@@ -745,17 +758,36 @@ ingests 三个内核装配在同一进程，绑定 registry 配置中的字面�
 `admission`、`reconcilePolicy`。
 
 - `listen.host` 只接受 RFC1918 私网 IPv4 或 `127.0.0.1` 字面地址；`0.0.0.0`、公网 IP 与域名在装配前
-  被拒。`backends[].comfyBaseUrl` 只接受 literal loopback HTTP：ComfyUI 与 gateway 同机。
+  被拒。当前拓扑（操作者 2026-09-02 裁定）是 worker 与全部控制面在操作者本机，经 IAP ssh 隧道
+  `-L 8790:127.0.0.1:8790` 访问 GPU VM 上的 gateway，因此推荐值为 `127.0.0.1`：gateway 不必绑 VPC
+  私网 IP，VM 上除隧道之外没有监听面。`backends[].comfyBaseUrl` 仍只接受 literal loopback HTTP：
+  ComfyUI 与 gateway 同机。
+- `backends[].maxInputImageBytes` 是自托管后端的输入图片上限声明（§4.3）：ComfyUI 没有 provider 侧的
+  上限可引用，只有部署声明，因此由 registry 给出，adapter 不猜数字。它随 capability 的
+  `limitsByModelId[profileId].maxInputImageBytes` 一起出现在 `capabilities` 路由与只读快照里。
 - `executionProfiles[]` 持有 §4.2 execution profile 正本（`kind: "writing-loop/execution-profile"`）、
   pinned graph 文件路径与 `h3GraphContract`、tariff 价目、`ProductionLicenseEvidence` 形态的 `license`
   （义务只在其 `obligations`，与 intent gate 同一判据）与 `processingRegions`。
   intent 级 execution 由 profile 推导，不二次配置，因此 `workflowBindingKey` 的五项不可能与价目面漂移。
 - `stageProfiles[]` 持有 provider CAS namespace、有序 `index/slot/mediaTypes` 与 H3 stage binding 契约；
   两者逐位对齐。stage 资产只经 `cas://<casAuthority>/sha256/<digest>` 解析到本机 ingest CAS。
+  H3 graph 契约 v2 的 stage profile 在固定绑定前增加 index 0 的 `shot-request` slot（mediaType
+  `application/vnd.writing-loop.shot-request+json`，不绑定 LoadImage），LoadImage 绑定 index 顺延；
+  stage 内核对该 slot 改为内容校验（严格解析为 ShotRequest、canonical 字节复算、输出意图与 immutable
+  execution 一致），并把 `prompt.text` 与 `output.seed` 作为回执的 `shotRequest` 投影返回。
+- capability 转发：`GET /v1/scopes/<workspaceId>/<project>/capabilities` 返回 raw adapter 的
+  `BackendCapabilities`，由 registry 的 execution profile 集合推导（modelFamilies、processingRegions、
+  `providerJobIdMapping`、以 profileId 为键的 `limitsByModelId`），jobs 内核不自造字面量。
+- ingest 内核在入库后登记第二个 AssetRef：provider 自带 `role: "last-frame"` 的产物直接入库，否则从
+  唯一一条主视频派生尾帧。gateway 进程恒注入系统 `ffmpeg` 提取器（固定 argv，只有两条 gateway 自有
+  路径进入参数）；宿主机没有可用 ffmpeg 时该次 ingest 以 `derivation-failed` 失败，而不是登记一条缺
+  连续性尾帧的 take。派生对象写进同一 ingest CAS，因此下一镜可经 `cas://` 直接把它当首帧再登记（§6.4）。
 - `objectsRoot` / `ingestRoot` / `jobStateRoot` 是持久化启动盘上的三个独立 durable root；
   gateway 在 `jobStateRoot` 下划分 `jobs/`（job record）与 `storage-admission/`（durable slot）两个子目录。
 - `--export-profile-snapshot` 只导出只读快照后退出，不监听端口。快照按 profileId 索引，含每份 profile
-  的 canonical digest、execution profile 正本、H3 时长网格与价目；worker 的
+  的 canonical digest、execution profile 正本、H3 时长网格、§4.3 `limits` 与价目；`limits` 与
+  `capabilities` 路由取自同一份推导函数，因此 `durationGrid` 与
+  `limits.durationSeconds.grid` 恒等；worker 的
   `executionProfileSnapshotFile` 读取它，并校验 `execution.workflowSha256` 与自身
   `workflows[].workflowSha256` 相等。价目不存在第二处。
 
@@ -781,6 +813,7 @@ representative 值，部署时按实际 graph/artifact attestation 与实测费�
       "backendInstanceId": "gateway-h3-fl2va",
       "kind": "comfyui",
       "comfyBaseUrl": "http://127.0.0.1:8188",
+      "maxInputImageBytes": 16777216,
       "profileIds": [
         "h3-fl2va-portrait"
       ]

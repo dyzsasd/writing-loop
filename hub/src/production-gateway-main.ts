@@ -16,7 +16,10 @@ import { ComfyUiAdapter, type ProductionAdapter } from "./production-adapter.ts"
 import type { AssetRef } from "./production-domain.ts";
 import {
   ProductionGateway,
+  probeProductionFfmpeg,
+  productionFfmpegLastFrameExtractor,
   productionGatewayBlobPath,
+  type ProductionLastFrameExtractor,
 } from "./production-gateway.ts";
 import {
   ProductionGatewayRouter,
@@ -28,6 +31,8 @@ import {
   ProductionGatewayRuntimeConfigError,
   exportExecutionProfileSnapshot,
   loadProductionGatewayRuntimeConfig,
+  productionGatewayH3Profiles,
+  productionGatewayProcessingRegions,
   readProductionGatewayWorkflow,
   type ProductionGatewayExecutionProfileConfig,
   type ProductionGatewayRuntimeConfig,
@@ -67,6 +72,14 @@ export const PRODUCTION_GATEWAY_STORAGE_ADMISSION_SUBDIR = "storage-admission";
 export const DEFAULT_PRODUCTION_GATEWAY_STORAGE_SLOTS = 100_000;
 
 class ProductionGatewayMainUsageError extends Error {}
+
+/** A host prerequisite the registry config cannot fix. Its message is operator-actionable text. */
+export class ProductionGatewayMainDependencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductionGatewayMainDependencyError";
+  }
+}
 
 type GatewayMainOptions = {
   configFile: string;
@@ -508,6 +521,8 @@ export class ProductionGatewayDurableStorageAdmissionPolicy implements Productio
 export type ProductionGatewayProcess = {
   config: ProductionGatewayRuntimeConfig;
   server: ProductionGatewayRouterServer;
+  /** Result of the §7 restart sweep run before the listener opened. */
+  recovery: { scanned: number; rewritten: number; unresolved: number };
   close(): Promise<void>;
 };
 
@@ -516,6 +531,12 @@ export type StartProductionGatewayProcessOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   /** Test seam for the ComfyUI backend transport; production always uses the global fetch. */
   comfyFetchByBackend?: Readonly<Record<string, typeof fetch | undefined>>;
+  /** Test seam for the tail-frame extractor; production always uses the system ffmpeg. */
+  lastFrameExtractor?: ProductionLastFrameExtractor;
+  /** Test seam for the assembly-time ffmpeg probe; production runs `ffmpeg -version`. */
+  ffmpegProbe?: () => Promise<string>;
+  /** Test seam for the jobs kernel per-operation deadline; production uses the kernel default. */
+  jobTimeoutMs?: number;
   maxWorkflowBytes?: number;
   maxStorageSlots?: number;
 };
@@ -553,13 +574,29 @@ export async function startProductionGatewayProcess(
 
   // The parser already rejects a second backend (one raw adapter per process, §8.0).
   const backend = config.backends[0]!;
+  // §4.3: the capability the coordinator reads is derived from the registry, not from a literal —
+  // the same H3 profile set the read-only snapshot derives its limits from (§4.2).
   const rawAdapter: ProductionAdapter = new ComfyUiAdapter({
     baseUrl: backend.comfyBaseUrl,
     backendInstanceId: backend.backendInstanceId,
+    processingRegions: productionGatewayProcessingRegions(config),
+    h3Profiles: productionGatewayH3Profiles(config),
+    maxInputImageBytes: backend.maxInputImageBytes,
     fetch: options.comfyFetchByBackend?.[backend.backendInstanceId],
   });
   if (backendByProfileId.size !== config.executionProfiles.length) {
     configError("execution profile 与 backend 绑定不完整");
+  }
+
+  // §5.3 tail frame: prove the host prerequisite before any kernel owns durable state, so a missing
+  // ffmpeg is a start-up failure with a readable reason instead of a per-ingest failure later.
+  const probe = options.ffmpegProbe ?? (() => probeProductionFfmpeg());
+  try { await probe(); }
+  catch (error) {
+    throw new ProductionGatewayMainDependencyError(
+      "ingest 内核要用系统 ffmpeg 从主视频派生尾帧（§5.3），但 `ffmpeg -version` 探针失败："
+      + `${error instanceof Error ? error.name : "unknown"}。先在本机安装可用的 ffmpeg 再启动 gateway。`,
+    );
   }
 
   const jobsRoot = join(config.jobStateRoot, PRODUCTION_GATEWAY_JOBS_SUBDIR);
@@ -601,12 +638,30 @@ export async function startProductionGatewayProcess(
         admissionRoot, options.maxStorageSlots ?? DEFAULT_PRODUCTION_GATEWAY_STORAGE_SLOTS,
       ),
       rawAdapter,
+      ...(options.jobTimeoutMs === undefined ? {} : { timeoutMs: options.jobTimeoutMs }),
+      hooks: {
+        // §7: an undecided job stays pending and is retried at the next restart; say so, because the
+        // aggregate counts alone do not tell the operator which job the sweep could not reach.
+        afterJobRecovery: (fact) => {
+          console.error(`production gateway: preemption sweep unresolved (${fact.reason})`);
+        },
+      },
     });
     started.push(jobs);
+    // §7: a Spot preemption (or any ComfyUI restart) loses the provider's in-process history, so the
+    // durable job records that were still pending/running are settled before the port opens — the
+    // coordinator must never poll a job the provider can no longer account for.
+    const recovery = await jobs.recoverPreemptedJobs();
     const ingests = await ProductionGateway.create({
       storeRoot: config.ingestRoot,
       comfyBaseUrl: backend.comfyBaseUrl,
       credentialResolver: () => bearer(),
+      // §5.3: H3 does not return a tail frame, so the deployed process always derives one. A host
+      // without a usable ffmpeg fails the ingest rather than silently registering a take whose
+      // continuity frame the next shot needs (§6.4).
+      lastFrameExtractor: options.lastFrameExtractor
+        // Same filesystem as the CAS the frame lands in, so the extraction never crosses devices.
+        ?? productionFfmpegLastFrameExtractor({ temporaryRoot: join(config.ingestRoot, "tmp") }),
       ...(options.comfyFetchByBackend?.[backend.backendInstanceId] === undefined
         ? {}
         : { fetch: options.comfyFetchByBackend[backend.backendInstanceId] }),
@@ -625,6 +680,7 @@ export async function startProductionGatewayProcess(
     return {
       config,
       server,
+      recovery,
       close: async () => { await server.close(); },
     };
   } catch (error) {
@@ -671,6 +727,7 @@ async function writeSnapshot(config: ProductionGatewayRuntimeConfig, outFile: st
  */
 function publicError(error: unknown): string {
   if (error instanceof ProductionGatewayMainUsageError
+    || error instanceof ProductionGatewayMainDependencyError
     || error instanceof ProductionGatewayRuntimeConfigError) {
     return error.message;
   }
@@ -725,7 +782,9 @@ export async function productionGatewayMain(
     });
     console.log(
       `production gateway: listening on ${process_.server.address.host}:${process_.server.address.port}`
-      + ` · ${process_.config.executionProfiles.length} execution profile(s)`,
+      + ` · ${process_.config.executionProfiles.length} execution profile(s)`
+      + ` · preemption sweep ${process_.recovery.rewritten}/${process_.recovery.scanned} rewritten`
+      + `, ${process_.recovery.unresolved} unresolved`,
     );
     const signalSource = dependencies.signalSource === undefined ? process : dependencies.signalSource;
     let resolveStop: (() => void) | null = null;

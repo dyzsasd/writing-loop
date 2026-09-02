@@ -5,6 +5,7 @@ import { lstatSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   ComfyUiAdapter,
+  type BackendCapabilities,
   type FetchLike,
   type ProductionAdapter,
 } from "./production-adapter.ts";
@@ -25,6 +26,7 @@ import {
 import { ProductionGatewayAdapter } from "./production-job-gateway.ts";
 import {
   HttpProductionInputStager,
+  productionInputSlotInstance,
   type ProductionInputStageResult,
   type ProductionInputStager,
   type ProductionWorkflowBindingVerification,
@@ -85,6 +87,7 @@ import {
   type ProductionH3GraphContract,
   type ProductionH3ModelBundleContract,
   type ProductionH3ModelComponentContract,
+  type ProductionH3ShotBinding,
   type ProductionH3PipelineContract,
   type ProductionH3StageBindingContract,
 } from "./production-h3-graph.ts";
@@ -598,9 +601,12 @@ function parseStagingBindings(
         throw error;
       }
     });
+    // 契约 v2 的 index 0 是 shot-request，不绑定 LoadImage（§5.3）；唯一性只对真正绑定图节点的项判定。
+    const graphBindings = bindings.filter((binding) => binding.source !== null && binding.consumer !== null);
     if (new Set(bindings.map((binding) => binding.slot)).size !== bindings.length
-      || new Set(bindings.map((binding) => binding.source.nodeId)).size !== bindings.length
-      || new Set(bindings.map((binding) => `${binding.consumer.nodeId}\0${binding.consumer.inputName}`)).size !== bindings.length) {
+      || new Set(graphBindings.map((binding) => binding.source!.nodeId)).size !== graphBindings.length
+      || new Set(graphBindings.map((binding) =>
+        `${binding.consumer!.nodeId}\0${binding.consumer!.inputName}`)).size !== graphBindings.length) {
       schemaError(subject, "slot、LoadImage source 与 consumer target 均不得重复");
     }
     return Object.freeze({ kind: "h3-graph-bindings", bindings: Object.freeze(bindings) });
@@ -1171,9 +1177,11 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
     if (declared.kind === "provider-slot-policy") {
       // 云家族没有可材料化的图：注册的 workflow 就是 execution profile 快照，template 即 bound。
       // 这里按 slotPolicy 的顺序与计数区间核对 staged.bindings；ShotRequest 的内容校验在 stage kernel。
+      // 可重复的 slot 以带序号实例回执（`reference_image.0`…，§6.5），policy 判定按 slot 基名。
       const sequenceViolation = providerSlotSequenceViolation(
         declared.slots,
-        staged.bindings.map((binding) => binding.slot as ProviderInputSlot),
+        staged.bindings.map((binding) =>
+          (productionInputSlotInstance(binding.slot)?.base ?? binding.slot) as ProviderInputSlot),
       );
       if (sequenceViolation !== null) {
         throw new ProductionRuntimeConfigError(
@@ -1193,6 +1201,20 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
     }
     const contract = this.#workflowConfig.h3GraphContract;
     if (contract === null) throw new ProductionRuntimeConfigError("workflow-invalid", "H3 graph contract 缺失");
+    // 契约 v2 的逐镜 prompt / seed 从 stage 回执的投影读取（§5.3）：该对象由 bindings[0].assetSha256 钉住，
+    // 已计入 bindingsDigest；gateway 侧按同一 receipt 独立复算 bound digest，两边不一致即拒绝提交。
+    let shotBinding: ProductionH3ShotBinding | null = null;
+    if (contract.version === 2) {
+      if (staged.shotRequest === null || staged.shotRequest.seed === null
+        || staged.shotRequest.assetSha256 !== intent.inputs[0]?.sha256) {
+        throw new ProductionRuntimeConfigError(
+          "workflow-invalid", "H3 契约 v2 需要 inputs[0] ShotRequest 的 prompt 与非空 seed",
+        );
+      }
+      shotBinding = { prompt: staged.shotRequest.prompt, seed: staged.shotRequest.seed };
+    } else if (staged.shotRequest !== null) {
+      throw new ProductionRuntimeConfigError("workflow-invalid", "H3 契约 v1 没有 shot-request slot");
+    }
     let materialized;
     try {
       materialized = materializeProductionH3Workflow(
@@ -1202,6 +1224,7 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
         declared.bindings,
         staged.bindings,
         this.#profile.profileId,
+        shotBinding,
       );
     } catch (error) {
       if (error instanceof ProductionH3GraphError) {
@@ -1282,6 +1305,12 @@ class StaticGateContextResolver implements ProductionGateContextResolver {
   readonly #now: () => Date | string;
   readonly #root: string;
   readonly #adapters: ProductionAdapterRegistry;
+  /**
+   * `capabilities()` 现在是一次到 gateway 的 HTTP GET（§8.6 转发），而 gate 对每个 intent 都要读一次
+   * 后端地域。按 backendInstanceId 在进程内缓存首次结果：一轮 `worker --once` 内每个后端只取一次，
+   * 缓存不跨进程，因此后端能力变化在下一轮生效。
+   */
+  readonly #capabilities = new Map<string, Promise<BackendCapabilities | null>>();
 
   constructor(
     project: ProductionRuntimeProjectConfig,
@@ -1301,8 +1330,7 @@ class StaticGateContextResolver implements ProductionGateContextResolver {
   ): Promise<ProductionIntentGateContext> {
     throwIfAborted(signal);
     // 后端处理地域由 backend capability 供给（§4.3）；未声明即空集合，gate 按 fail-closed 判定。
-    const adapter = this.#adapters.resolve(intent.execution.backendInstanceId);
-    const capabilities = adapter === null ? null : await adapter.capabilities(signal);
+    const capabilities = await this.#backendCapabilities(intent.execution.backendInstanceId, signal);
     throwIfAborted(signal);
     return {
       version: 1,
@@ -1317,6 +1345,24 @@ class StaticGateContextResolver implements ProductionGateContextResolver {
       },
       realFaceInputs: realFaceInputsFromIntent(this.#root, this.#project.project, intent),
     };
+  }
+
+  async #backendCapabilities(
+    backendInstanceId: string,
+    signal?: AbortSignal,
+  ): Promise<BackendCapabilities | null> {
+    const cached = this.#capabilities.get(backendInstanceId);
+    if (cached !== undefined) return await cached;
+    const adapter = this.#adapters.resolve(backendInstanceId);
+    // 失败不进缓存：一次网络抖动不该把整轮的 gate context 钉在「后端未声明地域」上。
+    const pending = adapter === null
+      ? Promise.resolve(null)
+      : adapter.capabilities(signal).catch((error: unknown) => {
+        this.#capabilities.delete(backendInstanceId);
+        throw error;
+      });
+    this.#capabilities.set(backendInstanceId, pending);
+    return await pending;
   }
 }
 

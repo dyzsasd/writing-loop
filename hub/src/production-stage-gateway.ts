@@ -29,14 +29,31 @@ import {
   type ProductionIntentExecution,
 } from "./production-intent.ts";
 import {
+  PRODUCTION_SHOT_REQUEST_SLOT,
   productionInputBindingsDigest,
+  productionInputSlotInstance,
   productionInputStageIdentityKey,
   type ProductionInputBinding,
   type ProductionInputStageIdentity,
   type ProductionInputStageRequest,
   type ProductionInputStageResult,
   type ProductionInputStageScope,
+  type ProductionStagedShotRequest,
 } from "./production-input-stager.ts";
+import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  deriveVideoMode,
+  h3VariantForMode,
+  parseShotRequest,
+  referenceAssetKind,
+  shotRequestCanonicalJson,
+  type ShotRequest,
+} from "./production-shot-request.ts";
+import {
+  PROVIDER_INPUT_SLOTS,
+  providerSlotPolicyViolation,
+  type ProviderInputSlot,
+} from "./production-provider-adapter.ts";
 
 export const DEFAULT_PRODUCTION_STAGE_GATEWAY_TIMEOUT_MS = 120_000;
 export const DEFAULT_PRODUCTION_STAGE_GATEWAY_REQUEST_BYTES = 256 * 1024;
@@ -64,12 +81,27 @@ export type ProductionStageProfileInput = {
   mediaTypes: string[];
 };
 
+/**
+ * §6.5 slot policy entry. A cloud-family profile carries several shot shapes (i2v and fl2v, or a
+ * variable number of references), so it declares an ordered policy with count ranges instead of one
+ * fixed slot per index. H3 keeps the fixed `inputs` form: its graph pins the node set per profile.
+ */
+export type ProductionStageSlotPolicyEntry = {
+  version: 1;
+  slot: string;
+  minCount: number;
+  maxCount: number;
+  mediaTypes: string[];
+};
+
 export type ProductionStageProfile = {
   version: 1;
   registration: ProductionStageProfileLookup;
   /** Trusted provider-local namespace. Object suffixes are always derived from sha256. */
   providerCasNamespace: string;
-  inputs: ProductionStageProfileInput[];
+  /** Fixed per-index slots. Exactly one of `inputs` / `slotPolicy` is present. */
+  inputs?: ProductionStageProfileInput[];
+  slotPolicy?: ProductionStageSlotPolicyEntry[];
 };
 
 export interface ProductionStageProfileRegistry {
@@ -98,6 +130,12 @@ export type VerifiedStageReceipt = Readonly<{
   profileDigest: string;
   execution: Readonly<ProductionIntentExecution>;
   bindings: readonly Readonly<ProductionInputBinding>[];
+  /**
+   * Per-shot values read from the receipt's own projection of the staged `inputs[0]` object. The
+   * object is pinned by `bindings[0].assetSha256`, which the bindings digest already covers, so the
+   * projection cannot name a different ShotRequest than the one this receipt staged.
+   */
+  shotRequest: Readonly<ProductionStagedShotRequest> | null;
 }>;
 
 export interface ProductionStageReceiptRegistry {
@@ -221,6 +259,17 @@ type ParsedStageRequest = {
   requestDigest: string;
 };
 
+/** One registry profile plus the exact per-index slots this request resolved against it. */
+type ResolvedStageProfile = {
+  profile: ProductionStageProfile;
+  inputs: ProductionStageProfileInput[];
+};
+
+type StagedAsset = {
+  binding: ProductionInputBinding;
+  shotRequest: ShotRequest | null;
+};
+
 type Operation = {
   signal: AbortSignal;
   finish(): void;
@@ -243,11 +292,14 @@ const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{
  * at request time is refused while the gateway process is still assembling.
  */
 export const PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES: ReadonlySet<string> = Object.freeze(new Set([
+  "application/vnd.writing-loop.shot-request+json",
   "audio/flac", "audio/mpeg", "audio/ogg", "audio/wav",
   "image/gif", "image/jpeg", "image/png", "image/webp",
   "video/mp4", "video/webm",
 ]));
 const ALLOWED_MEDIA_TYPES = PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES;
+/** The one media type this kernel content-checks instead of magic-number sniffing (§5.3). */
+const MAX_SHOT_REQUEST_BYTES = 1024 * 1024;
 const FORBIDDEN_NETWORK_SCHEMES = new Set(["http:", "https:", "file:", "data:"]);
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 const READ_FLAGS = fsConstants.O_RDONLY | O_NOFOLLOW;
@@ -407,12 +459,35 @@ function assertAssetAllowlisted(asset: AssetRef, policies: readonly ProductionSt
     || decoded.split("/").some((part) => part === "." || part === "..")) fail("forbidden");
 }
 
-function parseProfileInput(value: unknown, index: number): ProductionStageProfileInput {
-  if (!isRecord(value) || !exactKeys(value, ["version", "index", "slot", "mediaTypes"])
-    || value.version !== 1 || value.index !== index || typeof value.slot !== "string"
-    || !fullMatch(SAFE_SLOT, value.slot) || !Array.isArray(value.mediaTypes)
-    || value.mediaTypes.length < 1 || value.mediaTypes.length > 32) fail("internal");
-  const mediaTypes = value.mediaTypes.map((mediaType) => {
+/**
+ * The `shot-request` slot is the ShotRequest and nothing else, and no other slot may declare that
+ * media type: the kernel's content check and the graph contract both key off this one pairing.
+ * Returns the rule violation, or null when the pairing holds. The gateway registry validates its
+ * configured stage profiles against this same function at assembly, so a profile that would be
+ * refused at request time cannot start a process.
+ */
+export function productionStageSlotPairingViolation(
+  slot: string,
+  mediaTypes: readonly string[],
+): string | null {
+  const base = productionInputSlotInstance(slot)?.base ?? null;
+  const carriesShotRequest = mediaTypes.includes(SHOT_REQUEST_MEDIA_TYPE);
+  if ((base === PRODUCTION_SHOT_REQUEST_SLOT) !== carriesShotRequest) {
+    return `slot ${PRODUCTION_SHOT_REQUEST_SLOT} 与 mediaType ${SHOT_REQUEST_MEDIA_TYPE} 必须一一对应`;
+  }
+  if (carriesShotRequest && mediaTypes.length !== 1) {
+    return `slot ${PRODUCTION_SHOT_REQUEST_SLOT} 只能声明 ${SHOT_REQUEST_MEDIA_TYPE} 一种 mediaType`;
+  }
+  return null;
+}
+
+function assertShotRequestSlotPairing(slot: string, mediaTypes: readonly string[]): void {
+  if (productionStageSlotPairingViolation(slot, mediaTypes) !== null) fail("internal");
+}
+
+function parseMediaTypes(value: unknown, slot: string): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 32) fail("internal");
+  const mediaTypes = value.map((mediaType) => {
     if (typeof mediaType !== "string" || !fullMatch(MEDIA_TYPE, mediaType)
       || !ALLOWED_MEDIA_TYPES.has(mediaType)) fail("internal");
     return mediaType;
@@ -420,15 +495,117 @@ function parseProfileInput(value: unknown, index: number): ProductionStageProfil
   const sorted = [...mediaTypes].sort();
   if (new Set(mediaTypes).size !== mediaTypes.length
     || mediaTypes.some((mediaType, position) => mediaType !== sorted[position])) fail("internal");
+  assertShotRequestSlotPairing(slot, mediaTypes);
+  return mediaTypes;
+}
+
+function parseProfileInput(value: unknown, index: number): ProductionStageProfileInput {
+  if (!isRecord(value) || !exactKeys(value, ["version", "index", "slot", "mediaTypes"])
+    || value.version !== 1 || value.index !== index || typeof value.slot !== "string"
+    || !fullMatch(SAFE_SLOT, value.slot)) fail("internal");
+  const mediaTypes = parseMediaTypes(value.mediaTypes, value.slot);
+  // The ShotRequest is `inputs[0]` by contract (§6.5); anywhere else it is not the shot's identity.
+  if ((value.slot === PRODUCTION_SHOT_REQUEST_SLOT) !== (index === 0
+    && mediaTypes[0] === SHOT_REQUEST_MEDIA_TYPE)) fail("internal");
   return { version: 1, index, slot: value.slot, mediaTypes };
 }
 
+const KEYFRAME_POLICY_SLOTS = new Set<ProviderInputSlot>(["first_frame", "last_frame"]);
+const REFERENCE_POLICY_SLOTS = new Set<ProviderInputSlot>([
+  "reference_image", "reference_video", "reference_audio",
+]);
+
+function parseSlotPolicyEntry(value: unknown): ProductionStageSlotPolicyEntry {
+  if (!isRecord(value) || !exactKeys(value, ["version", "slot", "minCount", "maxCount", "mediaTypes"])
+    || value.version !== 1 || typeof value.slot !== "string"
+    || !(PROVIDER_INPUT_SLOTS as readonly string[]).includes(value.slot)
+    || !Number.isSafeInteger(value.minCount) || !Number.isSafeInteger(value.maxCount)) fail("internal");
+  return {
+    version: 1,
+    slot: value.slot,
+    minCount: value.minCount as number,
+    maxCount: value.maxCount as number,
+    mediaTypes: parseMediaTypes(value.mediaTypes, value.slot),
+  };
+}
+
+function parseSlotPolicy(value: unknown): ProductionStageSlotPolicyEntry[] {
+  if (!Array.isArray(value) || value.length < 1
+    || value.length > PROVIDER_INPUT_SLOTS.length) fail("internal");
+  const entries = value.map(parseSlotPolicyEntry);
+  if (providerSlotPolicyViolation(entries.map((entry) => ({
+    slot: entry.slot as ProviderInputSlot, minCount: entry.minCount, maxCount: entry.maxCount,
+  }))) !== null) fail("internal");
+  // `keyframesAndReferencesExclusive` holds for all three backends (§4.3). Forbidding the mixture
+  // also removes the only case in which the ordered slot assignment below would be ambiguous.
+  const slots = new Set(entries.map((entry) => entry.slot as ProviderInputSlot));
+  if ([...slots].some((slot) => KEYFRAME_POLICY_SLOTS.has(slot))
+    && [...slots].some((slot) => REFERENCE_POLICY_SLOTS.has(slot))) fail("internal");
+  return entries;
+}
+
+/**
+ * Assign the ordered request inputs to the policy in one forward pass: an input stays on the current
+ * entry while that entry accepts its media type and has room, and the cursor only advances once the
+ * entry has met its `minCount`. The assignment is unique because of what a policy may declare, not
+ * because media types separate the entries — `first_frame` and `last_frame` are both images, and
+ * they are distinguished only by `maxCount: 1` filling the earlier entry first. Media types do the
+ * separating for the one case where counts cannot: a `reference_image` run followed by a
+ * `reference_video` / `reference_audio` run. The keyframe/reference mixture, which neither rule
+ * would resolve, is refused when the policy is parsed (`keyframesAndReferencesExclusive`, §4.3).
+ */
+function resolveSlotPolicyInputs(
+  policy: readonly ProductionStageSlotPolicyEntry[],
+  inputs: readonly { asset: AssetRef }[],
+): ProductionStageProfileInput[] {
+  const resolved: ProductionStageProfileInput[] = [];
+  const counts = policy.map(() => 0);
+  let cursor = 0;
+  for (const [index, input] of inputs.entries()) {
+    while (cursor < policy.length) {
+      const entry = policy[cursor]!;
+      const accepts = entry.mediaTypes.includes(input.asset.mediaType) && counts[cursor]! < entry.maxCount;
+      if (accepts) break;
+      if (counts[cursor]! < entry.minCount) fail("forbidden");
+      cursor++;
+    }
+    if (cursor >= policy.length) fail("forbidden");
+    const entry = policy[cursor]!;
+    const ordinal = counts[cursor]!;
+    counts[cursor] = ordinal + 1;
+    resolved.push({
+      version: 1,
+      index,
+      // A repeatable slot yields numbered instances so one receipt can carry `maxCount > 1` (§6.5).
+      slot: entry.maxCount === 1 ? entry.slot : `${entry.slot}.${ordinal}`,
+      mediaTypes: [...entry.mediaTypes],
+    });
+  }
+  for (const [position, entry] of policy.entries()) {
+    if (counts[position]! < entry.minCount) fail("forbidden");
+  }
+  return resolved;
+}
+
+function profileInputs(
+  profile: ProductionStageProfile,
+  inputs: readonly { asset: AssetRef }[],
+): ProductionStageProfileInput[] {
+  if (profile.slotPolicy !== undefined) return resolveSlotPolicyInputs(profile.slotPolicy, inputs);
+  return profile.inputs ?? fail("internal");
+}
+
 function parseProfile(value: unknown, lookup: ProductionStageProfileLookup): ProductionStageProfile {
-  if (!isRecord(value) || !exactKeys(value, ["version", "registration", "providerCasNamespace", "inputs"])
+  const fixed = isRecord(value)
+    && exactKeys(value, ["version", "registration", "providerCasNamespace", "inputs"]);
+  const policyShaped = isRecord(value)
+    && exactKeys(value, ["version", "registration", "providerCasNamespace", "slotPolicy"]);
+  if (!isRecord(value) || (!fixed && !policyShaped)
     || value.version !== 1 || typeof value.providerCasNamespace !== "string"
     || !fullMatch(SAFE_NAMESPACE, value.providerCasNamespace)
     || !value.providerCasNamespace.endsWith("/sha256")
-    || !Array.isArray(value.inputs) || value.inputs.length > MAX_PRODUCTION_INTENT_INPUTS) fail("internal");
+    || (fixed && (!Array.isArray(value.inputs)
+      || value.inputs.length > MAX_PRODUCTION_INTENT_INPUTS))) fail("internal");
   const registration = isRecord(value.registration) ? value.registration : null;
   if (!registration || !exactKeys(registration, [
     "version", "scope", "taskId", "intentDigest", "execution", "inputs",
@@ -445,7 +622,15 @@ function parseProfile(value: unknown, lookup: ProductionStageProfileLookup): Pro
     inputs: registration.inputs.map((input, index) => parseInput(input, index, "internal")),
   };
   if (JSON.stringify(parsedRegistration) !== JSON.stringify(lookup)) fail("forbidden");
-  const inputs = value.inputs.map(parseProfileInput);
+  if (policyShaped) {
+    return {
+      version: 1,
+      registration: parsedRegistration,
+      providerCasNamespace: value.providerCasNamespace,
+      slotPolicy: parseSlotPolicy(value.slotPolicy),
+    };
+  }
+  const inputs = (value.inputs as unknown[]).map(parseProfileInput);
   if (new Set(inputs.map((input) => input.slot)).size !== inputs.length) fail("internal");
   return {
     version: 1,
@@ -458,14 +643,105 @@ function parseProfile(value: unknown, lookup: ProductionStageProfileLookup): Pro
 /**
  * Digest only execution semantics + ordered slot schema + provider CAS namespace. Registration
  * scope/task/intent stay independently bound by the receipt claim and are not profile identity.
+ * The fixed-`inputs` body is unchanged, so contract v1 profile digests keep their exact bytes.
  */
 export function productionStageProfileDigest(profile: ProductionStageProfile): string {
+  if (profile.slotPolicy !== undefined) {
+    return sha256(JSON.stringify({
+      version: 1,
+      execution: profile.registration.execution,
+      slotPolicy: profile.slotPolicy,
+      providerNamespace: profile.providerCasNamespace,
+    }));
+  }
   return sha256(JSON.stringify({
     version: 1,
     execution: profile.registration.execution,
     inputs: profile.inputs,
     providerNamespace: profile.providerCasNamespace,
   }));
+}
+
+/**
+ * Content check for the `shot-request` slot. The bytes must be exactly the canonical ShotRequest
+ * document whose digest the intent pinned, and its output intent must be the one this execution
+ * profile is pinned to — otherwise a graph materialized from it would silently disagree with the
+ * immutable execution the coordinator approved (§5.3).
+ */
+function validateStagedShotRequest(
+  bytes: Buffer,
+  execution: ProductionIntentExecution,
+  asset: AssetRef,
+): ShotRequest {
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { fail("unsupported-media"); }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { fail("unsupported-media"); }
+  let shotRequest: ShotRequest;
+  try { shotRequest = parseShotRequest(value, "StagedShotRequest"); }
+  catch (error) {
+    if (error instanceof ProductionError) fail("unsupported-media");
+    throw error;
+  }
+  // Canonical bytes, not merely a parseable document: the digest the intent pinned is taken over the
+  // canonical form, and a re-serialised variant would stage a different object under the same name.
+  if (shotRequestCanonicalJson(shotRequest) !== text) fail("asset-integrity");
+  if (asset.byteLength !== bytes.byteLength) fail("asset-integrity");
+  // `prompt.text` is materialized verbatim into a pinned graph literal, so it must satisfy the same
+  // bounded-scalar rule the graph contract applies (`boundedString`, production-h3-graph.ts):
+  // 1–16384 characters with no NUL/VT/FF/DEL. `parseShotRequest` already caps the length at 4096 and
+  // rejects NUL, so the reachable difference is VT/FF/DEL. Rejecting it here keeps a shot that could
+  // never be materialized from reaching dispatch; the public error stays code-only by design, so the
+  // field this rule is about is named here rather than in the response.
+  if (shotRequest.prompt.text.length < 1 || shotRequest.prompt.text.length > 16_384
+    || /[\u0000\u000b\u000c\u007f]/.test(shotRequest.prompt.text)) fail("unsupported-media");
+  if (execution.modelFamily === "minimax-h3") {
+    const variant = h3VariantForMode(deriveVideoMode(shotRequest.continuity));
+    if (shotRequest.output.aspectRatio !== execution.aspectRatio
+      || shotRequest.output.durationSeconds !== execution.durationSeconds
+      || variant !== execution.variant
+      // H3's pipeline always decodes audio through VAEDecodeAudio into CreateVideo (§5.3).
+      || shotRequest.output.generateAudio !== true) fail("unsupported-media");
+  }
+  return shotRequest;
+}
+
+/**
+ * The ShotRequest names its own continuity inputs; the receipt names what was actually staged. They
+ * must be the same assets in the same order, otherwise a graph would be materialized against frames
+ * the approved shot never referenced. `inputs[0]` is the ShotRequest itself and is excluded.
+ */
+function assertStagedContinuityMatchesShotRequest(
+  shotRequest: ShotRequest,
+  bindings: readonly ProductionInputBinding[],
+): void {
+  const referenceBases = (reference: Parameters<typeof referenceAssetKind>[0]): readonly string[] => {
+    const kind = referenceAssetKind(reference);
+    // H3 numbers its image references `reference.N`; the cloud slot policy uses `reference_image.N`.
+    if (kind === "image") return ["reference", "reference_image"];
+    if (kind === "video") return ["reference_video"];
+    if (kind === "audio") return ["reference_audio"];
+    return [];
+  };
+  const expected: Array<{ sha256: string; bases: readonly string[] }> = [];
+  if (shotRequest.continuity.firstFrame !== null) {
+    expected.push({ sha256: shotRequest.continuity.firstFrame.asset.sha256, bases: ["first_frame"] });
+  }
+  if (shotRequest.continuity.lastFrame !== null) {
+    expected.push({ sha256: shotRequest.continuity.lastFrame.asset.sha256, bases: ["last_frame"] });
+  }
+  for (const reference of shotRequest.continuity.references) {
+    expected.push({ sha256: reference.asset.sha256, bases: referenceBases(reference) });
+  }
+  const staged = bindings.slice(1);
+  if (staged.length !== expected.length) fail("forbidden");
+  for (const [index, item] of expected.entries()) {
+    const binding = staged[index]!;
+    const base = productionInputSlotInstance(binding.slot)?.base ?? binding.slot;
+    if (binding.assetSha256 !== item.sha256 || !item.bases.includes(base)) fail("forbidden");
+  }
 }
 
 function parseAssetSource(value: unknown, asset: AssetRef): ProductionStageAssetSource {
@@ -773,7 +1049,8 @@ function parseStoredReceipt(
     || typeof value.requestDigest !== "string" || !fullMatch(SHA256, value.requestDigest)
     || typeof value.profileDigest !== "string" || !fullMatch(SHA256, value.profileDigest)
     || JSON.stringify(parseScope(value.scope, "internal")) !== JSON.stringify(expectedScope)
-    || !isRecord(value.result) || !exactKeys(value.result, ["version", "stageKey", "bindingsDigest", "bindings"])
+    || !isRecord(value.result)
+    || !exactKeys(value.result, ["version", "stageKey", "bindingsDigest", "bindings", "shotRequest"])
     || value.result.version !== 1 || value.result.stageKey !== expectedStageKey
     || typeof value.result.bindingsDigest !== "string" || !fullMatch(SHA256, value.result.bindingsDigest)
     || !Array.isArray(value.result.bindings) || value.result.bindings.length < 1
@@ -794,7 +1071,31 @@ function parseStoredReceipt(
       stageKey: expectedStageKey,
       bindingsDigest: value.result.bindingsDigest,
       bindings,
+      shotRequest: parseStoredShotRequest(value.result.shotRequest, bindings),
     },
+  };
+}
+
+function parseStoredShotRequest(
+  value: unknown,
+  bindings: readonly ProductionInputBinding[],
+): ProductionStagedShotRequest | null {
+  const staged = bindings[0]?.slot === PRODUCTION_SHOT_REQUEST_SLOT;
+  if (value === null) {
+    if (staged) fail("internal");
+    return null;
+  }
+  if (!staged || !isRecord(value) || !exactKeys(value, ["version", "assetSha256", "prompt", "seed"])
+    || value.version !== 1 || typeof value.assetSha256 !== "string"
+    || !fullMatch(SHA256, value.assetSha256) || value.assetSha256 !== bindings[0]!.assetSha256
+    || typeof value.prompt !== "string" || value.prompt.length < 1 || value.prompt.length > 16_384
+    || (value.seed !== null && (!Number.isSafeInteger(value.seed)
+      || (value.seed as number) < 0 || (value.seed as number) > 0xffff_ffff))) fail("internal");
+  return {
+    version: 1,
+    assetSha256: value.assetSha256,
+    prompt: value.prompt,
+    seed: value.seed as number | null,
   };
 }
 
@@ -949,7 +1250,7 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
     }
   }
 
-  async #profile(parsed: ParsedStageRequest, signal: AbortSignal): Promise<ProductionStageProfile> {
+  async #profile(parsed: ParsedStageRequest, signal: AbortSignal): Promise<ResolvedStageProfile> {
     const lookup: ProductionStageProfileLookup = {
       version: 1,
       scope: parsed.request.scope,
@@ -969,13 +1270,14 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
     }
     if (value === null) fail("forbidden");
     const profile = parseProfile(value, lookup);
-    if (profile.inputs.length !== parsed.request.inputs.length) fail("forbidden");
-    for (let index = 0; index < profile.inputs.length; index++) {
-      if (!profile.inputs[index]!.mediaTypes.includes(parsed.request.inputs[index]!.asset.mediaType)) {
+    const inputs = profileInputs(profile, parsed.request.inputs);
+    if (inputs.length !== parsed.request.inputs.length) fail("forbidden");
+    for (let index = 0; index < inputs.length; index++) {
+      if (!inputs[index]!.mediaTypes.includes(parsed.request.inputs[index]!.asset.mediaType)) {
         fail("unsupported-media");
       }
     }
-    return profile;
+    return { profile, inputs };
   }
 
   async #validateExistingObject(path: string, digest: string, length: number, signal: AbortSignal): Promise<void> {
@@ -1031,10 +1333,10 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
 
   async #stageAsset(
     parsed: ParsedStageRequest,
-    profile: ProductionStageProfile,
+    profile: ResolvedStageProfile,
     index: number,
     operation: Operation,
-  ): Promise<ProductionInputBinding> {
+  ): Promise<StagedAsset> {
     const input = parsed.request.inputs[index]!;
     const profileInput = profile.inputs[index]!;
     assertAssetAllowlisted(input.asset, this.#policies);
@@ -1051,11 +1353,14 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
       if (operation.signal.aborted) fail("aborted");
       fail("resolver-unavailable");
     }
+    const isShotRequest = input.asset.mediaType === SHOT_REQUEST_MEDIA_TYPE;
+    if (isShotRequest && input.asset.byteLength > MAX_SHOT_REQUEST_BYTES) fail("asset-too-large");
     const source = parseAssetSource(sourceValue, input.asset);
     const temporary = await createTempFile(this.#directories, "asset");
     const reader = source.body.getReader();
     const hash = createHash("sha256");
     const sniff = Buffer.alloc(64);
+    const documentChunks: Buffer[] = [];
     let sniffed = 0;
     let length = 0;
     let closed = false;
@@ -1073,15 +1378,25 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
           sniff.set(part.value.subarray(0, take), sniffed);
           sniffed += take;
         }
+        if (isShotRequest) documentChunks.push(Buffer.from(part.value));
         hash.update(part.value);
         await writeAll(temporary.handle, part.value);
         if (operation.signal.aborted) fail("aborted");
       }
       const actualDigest = hash.digest("hex");
       if (length !== input.asset.byteLength || actualDigest !== input.asset.sha256) fail("asset-integrity");
-      const sniffedMediaType = sniffMediaType(sniff.subarray(0, sniffed));
-      if (sniffedMediaType === null || sniffedMediaType !== input.asset.mediaType
-        || !profileInput.mediaTypes.includes(sniffedMediaType)) fail("unsupported-media");
+      // The ShotRequest is a JSON document, so its identity is content — not a magic number (§5.3).
+      let shotRequest: ShotRequest | null = null;
+      if (isShotRequest) {
+        if (!profileInput.mediaTypes.includes(SHOT_REQUEST_MEDIA_TYPE)) fail("unsupported-media");
+        shotRequest = validateStagedShotRequest(
+          Buffer.concat(documentChunks, length), parsed.request.execution, input.asset,
+        );
+      } else {
+        const sniffedMediaType = sniffMediaType(sniff.subarray(0, sniffed));
+        if (sniffedMediaType === null || sniffedMediaType !== input.asset.mediaType
+          || !profileInput.mediaTypes.includes(sniffedMediaType)) fail("unsupported-media");
+      }
       await temporary.handle.chmod(0o400);
       // Persist both bytes and the immutable mode before the atomic publication link.
       await temporary.handle.sync();
@@ -1093,14 +1408,14 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
         index,
         slot: profileInput.slot,
         assetSha256: input.asset.sha256,
-        providerObjectKey: providerObjectKey(profile.providerCasNamespace, input.asset.sha256),
+        providerObjectKey: providerObjectKey(profile.profile.providerCasNamespace, input.asset.sha256),
       };
       await this.#publishObject(
         temporary.path, binding.providerObjectKey, input.asset.sha256, input.asset.byteLength, operation.signal,
       );
       this.#hooks.afterProviderObjectPublished?.(Object.freeze(structuredClone(binding)));
       if (operation.signal.aborted) fail("aborted");
-      return binding;
+      return { binding, shotRequest };
     } catch (error) {
       void reader.cancel().catch(() => undefined);
       if (!closed) await temporary.handle.close().catch(() => undefined);
@@ -1126,16 +1441,35 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
     }
     if (parsed.expectedStageKey !== parsed.request.stageKey) fail("bad-request");
     const profile = await this.#profile(parsed, operation.signal);
-    const profileDigest = productionStageProfileDigest(profile);
+    const profileDigest = productionStageProfileDigest(profile.profile);
     const bindings: ProductionInputBinding[] = [];
+    let shotRequest: ProductionStagedShotRequest | null = null;
+    let stagedShotRequest: ShotRequest | null = null;
     for (let index = 0; index < parsed.request.inputs.length; index++) {
-      bindings.push(await this.#stageAsset(parsed, profile, index, operation));
+      const staged = await this.#stageAsset(parsed, profile, index, operation);
+      bindings.push(staged.binding);
+      if (staged.shotRequest !== null) {
+        stagedShotRequest = staged.shotRequest;
+        // The ShotRequest is `inputs[0]` and appears exactly once (§6.5); the profile parser and the
+        // slot pairing rule already refuse any other placement, so a second one is an internal fault.
+        if (index !== 0 || shotRequest !== null) fail("internal");
+        shotRequest = {
+          version: 1,
+          assetSha256: staged.binding.assetSha256,
+          prompt: staged.shotRequest.prompt.text,
+          seed: staged.shotRequest.output.seed,
+        };
+      }
     }
+    if ((bindings[0]?.slot === PRODUCTION_SHOT_REQUEST_SLOT) !== (shotRequest !== null)) fail("internal");
+    // Every input is staged before this check so the comparison sees the whole ordered receipt.
+    if (stagedShotRequest !== null) assertStagedContinuityMatchesShotRequest(stagedShotRequest, bindings);
     const result: ProductionInputStageResult = {
       version: 1,
       stageKey: parsed.request.stageKey,
       bindingsDigest: productionInputBindingsDigest(bindings),
       bindings,
+      shotRequest,
     };
     this.#hooks.beforeReceiptPublish?.(Object.freeze(structuredClone(result)));
     if (operation.signal.aborted) fail("aborted");
@@ -1147,7 +1481,7 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
       intentDigest: parsed.request.intentDigest,
       requestDigest: parsed.requestDigest,
       profileDigest,
-      execution: structuredClone(profile.registration.execution),
+      execution: structuredClone(profile.profile.registration.execution),
       result,
     };
     const published = await publishExactJson(
@@ -1223,6 +1557,9 @@ export class ProductionStageGateway implements ProductionStageReceiptRegistry {
         profileDigest: receipt.profileDigest,
         execution: Object.freeze(structuredClone(receipt.execution)),
         bindings: Object.freeze(receipt.result.bindings.map((binding) => Object.freeze({ ...binding }))),
+        shotRequest: receipt.result.shotRequest === null
+          ? null
+          : Object.freeze({ ...receipt.result.shotRequest }),
       };
       return Object.freeze(verified);
     } finally {

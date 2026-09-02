@@ -300,6 +300,10 @@ class FakeAdapter implements ProductionAdapter {
       providerIdempotency: false,
       inputModes: ["image-upload"],
       outputModes: ["download"],
+      modelFamilies: ["generic"],
+      processingRegions: ["SG"],
+      providerJobIdMapping: "none",
+      limitsByModelId: {},
     };
   }
 
@@ -461,6 +465,7 @@ class FakeInputStager implements ProductionInputStager {
       stageKey: productionInputStageKey(this.workspaceId, this.project, intent),
       bindingsDigest: productionInputBindingsDigest(bindings),
       bindings,
+      shotRequest: null,
     };
     return this.mutate?.(result) ?? result;
   }

@@ -128,6 +128,7 @@ function resultFor(intent: ProductionDispatchIntent, stageKey: string): Producti
     stageKey,
     bindingsDigest: productionInputBindingsDigest(bindings),
     bindings,
+    shotRequest: null,
   };
 }
 

@@ -5,6 +5,14 @@ MiniMax H3 `fl2va` Comfy API-format template. The config is deterministically de
 executable runtime fixture in the Phase 3C AI-SPEC; its workflow and parameter digests are then
 calculated by the same canonical H3 implementation used at runtime.
 
+`production-runtime-v2.json` + `workflows/h3-fl2va-portrait-v2.json` are the same graph under H3 graph
+contract **v2** (DESIGN §5.3): `generator.prompt` and `RandomNoise.noise_seed` hold the sentinels
+`writing-loop://shot-request/<profileId>/prompt|seed`, the stage profile puts a `shot-request` slot at
+index 0 (it binds no LoadImage, so the LoadImage binding moves to index 1), and the gateway fills the
+actual per-shot prompt and seed from the staged ShotRequest at materialization. Both contract versions
+are accepted side by side; a worker-side `production-gateway` backend binds exactly one `profileId`, so
+running both at once means one backend entry per profile.
+
 It contains no real credential value and the smoke performs no network request. The config contains
 only a credential environment-variable **name** and example-only service origins. `smoke.mjs`
 copies the config/template to private `0600` files, injects fake ports and a throwaway in-memory

@@ -30,6 +30,11 @@ import {
   type ProductionInputStageScope,
 } from "../src/production-input-stager.ts";
 import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  parseShotRequest,
+  shotRequestCanonicalJson,
+} from "../src/production-shot-request.ts";
+import {
   ProductionStageGateway,
   ProductionStageGatewayError,
   productionStageProfileDigest,
@@ -168,6 +173,169 @@ function h3IntentFor(id = "take-h3"): ProductionDispatchIntent {
       aspectRatio: "9:16",
     },
   } satisfies ProductionIntentDraft);
+}
+
+/** 契约 v2 / 云家族用的 ShotRequest：inputs[0] 的真实对象，stage kernel 对它做内容校验（§5.3）。 */
+const SHOT_REQUEST = parseShotRequest({
+  version: 1,
+  kind: "writing-loop/shot-request",
+  shotId: "EP001-S1-1",
+  subject: {
+    version: 1,
+    episode: {
+      version: 1,
+      episodeId: "episode-001",
+      revision: 2,
+      source: { version: 1, uri: "cas://wl-sg/sha256/" + SHA.a, sha256: SHA.a, byteLength: 8_192, mediaType: "text/markdown" },
+    },
+    shotId: "EP001-S1-1",
+    revision: 1,
+    source: { version: 1, uri: "cas://wl-sg/sha256/" + SHA.a, sha256: SHA.a, byteLength: 8_192, mediaType: "text/markdown" },
+  },
+  provenance: {
+    storyDesignSha256: SHA.b,
+    assetsRevision: 12,
+    visualProductionSha256: null,
+    beatCardHash: "8137791889ad",
+    scriptLine: 17,
+    mergedScriptLines: [],
+  },
+  scene: {
+    sceneId: "S01", subscene: null, timeOfDay: "night", interior: "ext",
+    lightingStateId: "LIGHT_NIGHT", dressingVariantId: "DRESS_A",
+  },
+  camera: {
+    shot_size: "wide", camera_movement: "dolly_out", lens_mm: 35, lighting_key: "natural",
+    depth_of_field: "deep", color_temperature: "neutral", cameraId: "CAM_A",
+  },
+  cast: [],
+  props: [],
+  crowd: null,
+  action: "蒸汽机车穿过城楼门洞，白汽扑上琉璃瓦。",
+  productionTags: ["特效"],
+  dialogue: [],
+  output: {
+    aspectRatio: "9:16", generateAudio: true, durationSeconds: 8,
+    storyboardDurationSeconds: 8, fps: 24, seed: 4_242,
+  },
+  continuity: {
+    stageGroup: "EP001-S1",
+    prevShotId: null,
+    anchorMode: "keyframes",
+    firstFrame: {
+      // 与 index 1 实际 stage 的资产同一 sha256：stage kernel 会逐条比对 ShotRequest 与回执。
+      asset: {
+        version: 1,
+        uri: "cas://wl-sg/sha256/" + digest(PNG),
+        sha256: digest(PNG),
+        byteLength: PNG.byteLength,
+        mediaType: "image/png",
+      },
+      origin: { kind: "operator-upload", note: "首帧由操作者上传" },
+      containsRealFace: false,
+    },
+    lastFrame: null,
+    references: [],
+    referencePolicy: "trim_by_priority",
+    droppedReferences: [],
+    spatialPasses: [],
+    fingerprint: { modelSha256: SHA.b, workflowSha256: SHA.a, seed: 4_242, seedReproducible: true },
+  },
+  prompt: {
+    text: "未来玉京城楼，蒸汽机车穿过门洞，白汽扑上琉璃瓦，广角缓慢后拉。",
+    negativeText: null,
+    language: "zh-CN",
+    authoredBy: "episode-writer",
+    compiler: "production-shot-request@1",
+    selectedTranslation: null,
+  },
+  compile: { draftSha256: SHA.d, policyDigest: SHA.a, degradations: [] },
+});
+
+function h3V2IntentFor(inputs: AssetRef[], id = "take-h3-v2"): ProductionDispatchIntent {
+  const generic = intentFor(inputs, id);
+  const { idempotencyKey: _ignored, ...draft } = generic;
+  return createProductionDispatchIntent({
+    ...draft,
+    execution: {
+      version: 1,
+      operation: "comfyui-workflow",
+      modelFamily: "minimax-h3",
+      backendInstanceId: "comfy-h3-prod-a",
+      workflowSha256: SHA.a,
+      modelSha256: SHA.b,
+      parametersSha256: SHA.c,
+      variant: "fl2va",
+      durationSeconds: 8,
+      shortEdge: 768,
+      aspectRatio: "9:16",
+    },
+  } satisfies ProductionIntentDraft);
+}
+
+function seedanceIntentFor(inputs: AssetRef[], id = "take-seedance"): ProductionDispatchIntent {
+  const generic = intentFor(inputs, id);
+  const { idempotencyKey: _ignored, ...draft } = generic;
+  return createProductionDispatchIntent({
+    ...draft,
+    execution: {
+      version: 1,
+      operation: "ark-video-task",
+      modelFamily: "seedance",
+      backendInstanceId: "ark-sg-1",
+      workflowSha256: SHA.a,
+      modelSha256: SHA.b,
+      parametersSha256: SHA.c,
+      provider: "byteplus-modelark",
+      modelId: "dreamina-seedance-2-0-260128",
+      resolution: "720p",
+      aspectRatio: "9:16",
+      generateAudio: true,
+      watermark: false,
+      returnLastFrame: true,
+      executionExpiresAfterSeconds: 7_200,
+    },
+  } satisfies ProductionIntentDraft);
+}
+
+function v2ProfileFor(lookup: ProductionStageProfileLookup): ProductionStageProfile {
+  return {
+    version: 1,
+    registration: structuredClone(lookup),
+    providerCasNamespace: "wlcas/sha256",
+    inputs: [
+      { version: 1, index: 0, slot: "shot-request", mediaTypes: [SHOT_REQUEST_MEDIA_TYPE] },
+      { version: 1, index: 1, slot: "first_frame", mediaTypes: ["image/png"] },
+    ],
+  };
+}
+
+function cloudProfileFor(
+  lookup: ProductionStageProfileLookup,
+  maxReferenceImages: number,
+): ProductionStageProfile {
+  return {
+    version: 1,
+    registration: structuredClone(lookup),
+    providerCasNamespace: "wlcas/sha256",
+    slotPolicy: [
+      { version: 1, slot: "shot-request", minCount: 1, maxCount: 1, mediaTypes: [SHOT_REQUEST_MEDIA_TYPE] },
+      {
+        version: 1, slot: "reference_image", minCount: 1, maxCount: maxReferenceImages,
+        mediaTypes: ["image/png"],
+      },
+    ],
+  };
+}
+
+function assetSource(asset: AssetRef, bytes: Uint8Array): ProductionStageAssetSource {
+  return {
+    version: 1,
+    assetSha256: asset.sha256,
+    byteLength: asset.byteLength,
+    mediaType: asset.mediaType,
+    body: new Response(bytes).body!,
+  };
 }
 
 const BASE_INTENT = intentFor();
@@ -340,7 +508,7 @@ try {
   const backendProfileDrift = structuredClone(happy.profiles[0]!);
   backendProfileDrift.registration.execution.backendInstanceId = "comfy-prod-b";
   const slotProfileDrift = structuredClone(happy.profiles[0]!);
-  slotProfileDrift.inputs[0] = { ...slotProfileDrift.inputs[0]!, slot: "alternate_first_frame" };
+  slotProfileDrift.inputs![0] = { ...slotProfileDrift.inputs![0]!, slot: "alternate_first_frame" };
   const namespaceProfileDrift = structuredClone(happy.profiles[0]!);
   namespaceProfileDrift.providerCasNamespace = "othercas/sha256";
   ok(profileDigest.length === 64
@@ -470,14 +638,14 @@ try {
     && !existsSync(join(substituted.storeRoot, "receipts", WS, PROJECT, `${substitutedBody.stageKey}.json`)),
   "已注册 intentDigest 不能被调用方替换 ordered AssetRef；registry 在 resolver/receipt 前 exact fail-closed");
   const shortProfile = await harness(BASE_INTENT, {
-    profileResolver: (lookup) => ({ ...profileFor(lookup, BASE_INTENT), inputs: [profileFor(lookup, BASE_INTENT).inputs[0]!] }),
+    profileResolver: (lookup) => ({ ...profileFor(lookup, BASE_INTENT), inputs: [profileFor(lookup, BASE_INTENT).inputs![0]!] }),
   });
   ok((await shortProfile.gateway.handle(stageRequest())).status === 403,
     "profile slot 数量必须完整覆盖 ordered intent inputs");
   const wrongMediaProfile = await harness(BASE_INTENT, {
     profileResolver: (lookup) => {
       const profile = profileFor(lookup, BASE_INTENT);
-      profile.inputs[0] = { ...profile.inputs[0]!, mediaTypes: ["video/mp4"] };
+      profile.inputs![0] = { ...profile.inputs![0]!, mediaTypes: ["video/mp4"] };
       return profile;
     },
   });
@@ -496,7 +664,7 @@ try {
   if (h3AspectDrift.registration.execution.modelFamily === "minimax-h3") {
     h3AspectDrift.registration.execution.aspectRatio = "16:9";
   }
-  ok(h3Response.status === 200 && h3Profile.inputs[0]?.slot === "first_frame"
+  ok(h3Response.status === 200 && h3Profile.inputs![0]?.slot === "first_frame"
     && productionStageProfileDigest(h3DurationDrift) !== h3ProfileDigest
     && productionStageProfileDigest(h3AspectDrift) !== h3ProfileDigest,
   "H3-over-Comfy profile exact 绑定 variant/duration/aspect ratio 与 ordered semantic slot");
@@ -724,6 +892,195 @@ try {
   ok((await receiptAttack.gateway.handle(stageRequest())).status === 500,
     "nlink>1 receipt 不被可信 replay registry 接受");
 
+  // —— stage 契约 v2：index 0 shot-request slot、内容校验与 slotPolicy（§5.3、§6.5） ——
+  const shotRequestBytes = Buffer.from(shotRequestCanonicalJson(SHOT_REQUEST), "utf8");
+  const shotRequestAsset: AssetRef = {
+    version: 1,
+    uri: `s3://trusted-inputs/episode/${SHOT_REQUEST.shotId}.json`,
+    sha256: digest(shotRequestBytes),
+    byteLength: shotRequestBytes.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const v2Intent = h3V2IntentFor([shotRequestAsset, INPUTS[0]!]);
+  const v2 = await harness(v2Intent, {
+    profileResolver: (lookup) => v2ProfileFor(lookup),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === shotRequestAsset.sha256
+      ? shotRequestBytes
+      : PNG),
+  });
+  const v2Response = await v2.gateway.handle(stageRequest({ body: bodyFor(v2Intent) }));
+  const v2Result = await v2Response.json() as ProductionInputStageResult;
+  ok(v2Response.status === 200 && v2Result.bindings[0]?.slot === "shot-request"
+    && v2Result.bindings[1]?.slot === "first_frame"
+    && v2Result.shotRequest?.assetSha256 === shotRequestAsset.sha256
+    && v2Result.shotRequest.prompt === SHOT_REQUEST.prompt.text
+    && v2Result.shotRequest.seed === SHOT_REQUEST.output.seed,
+  "stage 契约 v2：index 0 为 shot-request slot，回执携带逐镜 prompt / seed 投影");
+
+  // 同一份文档，只是键序不同：sha256 按这串字节计算，因此内容校验必须靠 canonical 复算而非 digest。
+  const nonCanonical = Buffer.from(
+    JSON.stringify(Object.fromEntries(Object.entries(SHOT_REQUEST).reverse())), "utf8",
+  );
+  const nonCanonicalAsset: AssetRef = {
+    version: 1,
+    uri: "s3://trusted-inputs/episode/non-canonical.json",
+    sha256: digest(nonCanonical),
+    byteLength: nonCanonical.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const nonCanonicalIntent = h3V2IntentFor([nonCanonicalAsset, INPUTS[0]!], "take-h3-v2-noncanonical");
+  const nonCanonicalHarness = await harness(nonCanonicalIntent, {
+    profileResolver: (lookup) => v2ProfileFor(lookup),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === nonCanonicalAsset.sha256
+      ? nonCanonical
+      : PNG),
+  });
+  ok((await nonCanonicalHarness.gateway.handle(stageRequest({ body: bodyFor(nonCanonicalIntent) }))).status === 422,
+    "shot-request 对象必须是 canonical ShotRequest 字节，重新序列化的等价文档被拒");
+
+  const plainJson = Buffer.from(JSON.stringify({ hello: "world" }), "utf8");
+  const plainAsset: AssetRef = {
+    version: 1,
+    uri: "s3://trusted-inputs/episode/plain.json",
+    sha256: digest(plainJson),
+    byteLength: plainJson.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const plainIntent = h3V2IntentFor([plainAsset, INPUTS[0]!], "take-h3-v2-plain");
+  const plainHarness = await harness(plainIntent, {
+    profileResolver: (lookup) => v2ProfileFor(lookup),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === plainAsset.sha256 ? plainJson : PNG),
+  });
+  ok((await plainHarness.gateway.handle(stageRequest({ body: bodyFor(plainIntent) }))).status === 415,
+    "shot-request slot 改为内容校验：不是 ShotRequest 的 JSON 被拒");
+
+  const driftedShotRequest = parseShotRequest({
+    ...structuredClone(SHOT_REQUEST),
+    output: { ...SHOT_REQUEST.output, aspectRatio: "16:9" },
+  });
+  const driftedBytes = Buffer.from(shotRequestCanonicalJson(driftedShotRequest), "utf8");
+  const driftedAsset: AssetRef = {
+    version: 1,
+    uri: "s3://trusted-inputs/episode/drifted.json",
+    sha256: digest(driftedBytes),
+    byteLength: driftedBytes.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const driftedIntent = h3V2IntentFor([driftedAsset, INPUTS[0]!], "take-h3-v2-drift");
+  const driftedHarness = await harness(driftedIntent, {
+    profileResolver: (lookup) => v2ProfileFor(lookup),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === driftedAsset.sha256 ? driftedBytes : PNG),
+  });
+  ok((await driftedHarness.gateway.handle(stageRequest({ body: bodyFor(driftedIntent) }))).status === 415,
+    "ShotRequest 的 output 意图必须与 immutable execution 一致，画幅漂移被拒");
+
+  // 云家族：slotPolicy 顺序与计数区间，可重复 slot 以带序号实例回执。ShotRequest 的 references[]
+  // 必须与实际 stage 的三张图逐条同 sha256，否则本次 stage 被拒（见下面的错配用例）。
+  const referenceAssets = [SHA.a, SHA.b, SHA.c].map((seed, index) => ({
+    version: 1 as const,
+    uri: `s3://trusted-inputs/episode/reference-${index}.png`,
+    sha256: digest(Buffer.concat([PNG, Buffer.from(seed.slice(0, 4))])),
+    byteLength: PNG.byteLength + 4,
+    mediaType: "image/png",
+  }));
+  const referenceBytes = new Map(referenceAssets.map((asset, index) =>
+    [asset.sha256, Buffer.concat([PNG, Buffer.from([SHA.a, SHA.b, SHA.c][index]!.slice(0, 4))])]));
+  const referenceShotRequest = parseShotRequest({
+    ...structuredClone(SHOT_REQUEST),
+    continuity: {
+      ...structuredClone(SHOT_REQUEST.continuity),
+      anchorMode: "references",
+      firstFrame: null,
+      lastFrame: null,
+      references: referenceAssets.map((asset, index) => ({
+        asset: { ...asset, uri: `cas://wl-sg/sha256/${asset.sha256}` },
+        purpose: "character-identity",
+        subjectId: null,
+        priority: (index + 1) as 1 | 2 | 3,
+        containsRealFace: false,
+      })),
+    },
+  });
+  const referenceShotRequestBytes = Buffer.from(shotRequestCanonicalJson(referenceShotRequest), "utf8");
+  const referenceShotRequestAsset: AssetRef = {
+    version: 1,
+    uri: "s3://trusted-inputs/episode/ref-shot-request.json",
+    sha256: digest(referenceShotRequestBytes),
+    byteLength: referenceShotRequestBytes.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const cloudBytesFor = (asset: AssetRef): Uint8Array =>
+    asset.sha256 === referenceShotRequestAsset.sha256
+      ? referenceShotRequestBytes
+      : asset.sha256 === shotRequestAsset.sha256 ? shotRequestBytes : referenceBytes.get(asset.sha256)!;
+  const cloudIntent = seedanceIntentFor([referenceShotRequestAsset, ...referenceAssets]);
+  const cloudHarness = await harness(cloudIntent, {
+    profileResolver: (lookup) => cloudProfileFor(lookup, 3),
+    assetResolver: (_scope, asset) => assetSource(asset, cloudBytesFor(asset)),
+  });
+  const cloudResponse = await cloudHarness.gateway.handle(stageRequest({ body: bodyFor(cloudIntent) }));
+  const cloudResult = await cloudResponse.json() as ProductionInputStageResult;
+  ok(cloudResponse.status === 200
+    && cloudResult.bindings.map((binding) => binding.slot).join(",")
+      === "shot-request,reference_image.0,reference_image.1,reference_image.2",
+  "slotPolicy 的 maxCount > 1 经真实 stage kernel 产出带序号的 slot 实例");
+
+  const overCountHarness = await harness(cloudIntent, {
+    profileResolver: (lookup) => cloudProfileFor(lookup, 2),
+    assetResolver: (_scope, asset) => assetSource(asset, cloudBytesFor(asset)),
+  });
+  ok((await overCountHarness.gateway.handle(stageRequest({ body: bodyFor(cloudIntent) }))).status === 403,
+    "staged 输入超出 slotPolicy 的 maxCount 时 stage kernel 拒绝");
+
+  // ShotRequest 声明的连续性输入与实际 stage 的资产必须逐条一致（顺序、slot 与 sha256）。
+  const swappedIntent = seedanceIntentFor(
+    [referenceShotRequestAsset, referenceAssets[1]!, referenceAssets[0]!, referenceAssets[2]!],
+    "take-seedance-swapped",
+  );
+  const swappedHarness = await harness(swappedIntent, {
+    profileResolver: (lookup) => cloudProfileFor(lookup, 3),
+    assetResolver: (_scope, asset) => assetSource(asset, cloudBytesFor(asset)),
+  });
+  ok((await swappedHarness.gateway.handle(stageRequest({ body: bodyFor(swappedIntent) }))).status === 403,
+    "staged 参考顺序与 ShotRequest.references 不一致时被拒");
+  const foreignFrameIntent = h3V2IntentFor([shotRequestAsset, INPUTS[1]!], "take-h3-v2-foreign-frame");
+  const foreignFrameHarness = await harness(foreignFrameIntent, {
+    profileResolver: (lookup) => ({
+      ...v2ProfileFor(lookup),
+      inputs: [
+        { version: 1, index: 0, slot: "shot-request", mediaTypes: [SHOT_REQUEST_MEDIA_TYPE] },
+        { version: 1, index: 1, slot: "first_frame", mediaTypes: ["audio/wav"] },
+      ],
+    }),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === shotRequestAsset.sha256
+      ? shotRequestBytes
+      : WAV),
+  });
+  ok((await foreignFrameHarness.gateway.handle(stageRequest({ body: bodyFor(foreignFrameIntent) }))).status === 403,
+    "staged 首帧不是 ShotRequest.continuity.firstFrame 指向的资产时被拒");
+
+  // prompt.text 按 graph 契约的 bounded scalar 规则校验。NUL 已被 parseShotRequest 拒绝，两条规则的
+  // 实际差集是 VT / FF / DEL：它们能通过 ShotRequest 解析，却不能进 pinned graph 的字面量。
+  const controlPrompt = parseShotRequest({
+    ...structuredClone(SHOT_REQUEST),
+    prompt: { ...structuredClone(SHOT_REQUEST.prompt), text: "夜色\u000c天台" },
+  });
+  const controlBytes = Buffer.from(shotRequestCanonicalJson(controlPrompt), "utf8");
+  const controlAsset: AssetRef = {
+    version: 1,
+    uri: "s3://trusted-inputs/episode/control-prompt.json",
+    sha256: digest(controlBytes),
+    byteLength: controlBytes.byteLength,
+    mediaType: SHOT_REQUEST_MEDIA_TYPE,
+  };
+  const controlIntent = h3V2IntentFor([controlAsset, INPUTS[0]!], "take-h3-v2-control-prompt");
+  const controlHarness = await harness(controlIntent, {
+    profileResolver: (lookup) => v2ProfileFor(lookup),
+    assetResolver: (_scope, asset) => assetSource(asset, asset.sha256 === controlAsset.sha256 ? controlBytes : PNG),
+  });
+  ok((await controlHarness.gateway.handle(stageRequest({ body: bodyFor(controlIntent) }))).status === 415,
+    "prompt.text 含控制字符时 stage kernel 拒绝（与 pinned graph 的 bounded scalar 同一规则）");
+
   // No inference/adapter surface is present or invoked by a stage operation.
   let inferenceCalls = 0;
   const noInference = await harness();
@@ -736,7 +1093,8 @@ try {
     h3, callerSlot, httpsHarness, pathHarness, doubleEncodedPathHarness, metadataHarness, wrongHash,
     wrongLengthMetadata, truncated, fakeImageHarness, tooLargeHarness, bounded, deadline, aborting,
     crashBefore, crashAfter, crashTemp, attacked, receiptAttack, staleObjectRecoveryGateway, staleReceipt,
-    noInference,
+    noInference, v2, nonCanonicalHarness, plainHarness, driftedHarness, cloudHarness, overCountHarness,
+    swappedHarness, foreignFrameHarness, controlHarness,
   ]) instance.gateway.close();
 } finally {
   for (const path of roots) rmSync(path, { recursive: true, force: true });

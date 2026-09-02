@@ -59,9 +59,28 @@ export class ProductionInputStagerError extends Error {
 
 export type ProductionInputBinding = {
   index: number;
+  /**
+   * A numbered slot instance: either a bare singleton slot (`shot-request`, `first_frame`,
+   * `last_frame`) or `<base>.<N>` for a slot a profile may stage more than once (`reference.0`,
+   * cloud `reference_image.0`). Instances — not bases — are unique inside one receipt (§6.5).
+   */
   slot: string;
   assetSha256: string;
   providerObjectKey: string;
+};
+
+/**
+ * The per-shot projection of the staged `inputs[0]` ShotRequest (§5.3 contract v2). It is read from
+ * the receipt, not a second source of truth: the object it projects is pinned by
+ * `bindings[0].assetSha256`, which the bindings digest already covers.
+ */
+export type ProductionStagedShotRequest = {
+  version: 1;
+  assetSha256: string;
+  /** `ShotRequest.prompt.text` — the value the `.../prompt` sentinel is replaced with. */
+  prompt: string;
+  /** `ShotRequest.output.seed`; null cannot be materialized into a pinned graph and is refused there. */
+  seed: number | null;
 };
 
 export type ProductionInputStageResult = {
@@ -69,6 +88,8 @@ export type ProductionInputStageResult = {
   stageKey: string;
   bindingsDigest: string;
   bindings: ProductionInputBinding[];
+  /** Non-null exactly when the profile stages an index 0 `shot-request` slot. */
+  shotRequest: ProductionStagedShotRequest | null;
 };
 
 export interface ProductionInputStager {
@@ -147,6 +168,8 @@ export type HttpProductionInputStagerOptions = {
 const SAFE_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_SLOT = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
+/** §6.5 fixed index 0 slot; its staged object is the ShotRequest that drives every per-shot value. */
+export const PRODUCTION_SHOT_REQUEST_SLOT = "shot-request";
 const SAFE_PROVIDER_OBJECT_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -237,6 +260,49 @@ function safeProviderObjectKey(value: unknown): value is string {
     && value.split("/").every((part) => part !== "." && part !== "..");
 }
 
+/** `<base>` or `<base>.<ordinal>`; returns null when the slot is not a well-formed instance name. */
+export function productionInputSlotInstance(slot: string): { base: string; ordinal: number | null } | null {
+  if (!fullMatch(SAFE_SLOT, slot)) return null;
+  const match = /^(.+)\.(0|[1-9][0-9]{0,2})$/.exec(slot);
+  if (match === null) return { base: slot, ordinal: null };
+  return { base: match[1]!, ordinal: Number(match[2]) };
+}
+
+/**
+ * Slot uniqueness is over numbered instances, not over bases: a profile whose slot policy allows a
+ * slot more than once stages it as `<base>.<N>`, so one receipt can carry `maxCount > 1` while every
+ * binding stays individually addressable (§6.5). A bare base name may still appear only once.
+ */
+function slotInstancesValid(bindings: readonly ProductionInputBinding[]): boolean {
+  return new Set(bindings.map((binding) => binding.slot)).size === bindings.length
+    && bindings.every((binding) => productionInputSlotInstance(binding.slot) !== null);
+}
+
+function parseStagedShotRequest(
+  value: unknown,
+  bindings: readonly ProductionInputBinding[],
+): ProductionStagedShotRequest | null {
+  const staged = bindings[0]?.slot === PRODUCTION_SHOT_REQUEST_SLOT;
+  if (value === null) {
+    if (staged) fail("invalid-response");
+    return null;
+  }
+  if (!staged || !isRecord(value) || !exactKeys(value, ["version", "assetSha256", "prompt", "seed"])
+    || value.version !== 1 || typeof value.assetSha256 !== "string"
+    || !fullMatch(SHA256, value.assetSha256) || value.assetSha256 !== bindings[0]!.assetSha256
+    || typeof value.prompt !== "string" || value.prompt.length < 1 || value.prompt.length > 16_384
+    || (value.seed !== null
+      && (!Number.isSafeInteger(value.seed) || (value.seed as number) < 0 || (value.seed as number) > 0xffff_ffff))) {
+    fail("invalid-response");
+  }
+  return {
+    version: 1,
+    assetSha256: value.assetSha256,
+    prompt: value.prompt,
+    seed: value.seed as number | null,
+  };
+}
+
 /** Strictly validates gateway bindings against the ordered immutable intent inputs. */
 export function parseProductionInputStageResult(
   value: unknown,
@@ -244,7 +310,7 @@ export function parseProductionInputStageResult(
   expectedStageKey?: string,
 ): ProductionInputStageResult {
   const intent = parseIntent(intentValue);
-  if (!isRecord(value) || !exactKeys(value, ["version", "stageKey", "bindingsDigest", "bindings"])
+  if (!isRecord(value) || !exactKeys(value, ["version", "stageKey", "bindingsDigest", "bindings", "shotRequest"])
     || value.version !== PRODUCTION_INPUT_STAGE_SCHEMA_VERSION
     || typeof value.stageKey !== "string" || !fullMatch(SHA256, value.stageKey)
     || (expectedStageKey !== undefined && value.stageKey !== expectedStageKey)
@@ -275,7 +341,7 @@ export function parseProductionInputStageResult(
     if (previous !== undefined && previous !== binding.assetSha256) conflictingObjectKey = true;
     objectKeyDigests.set(binding.providerObjectKey, binding.assetSha256);
   }
-  if (new Set(bindings.map((binding) => binding.slot)).size !== bindings.length
+  if (!slotInstancesValid(bindings)
     || conflictingObjectKey || value.bindingsDigest !== productionInputBindingsDigest(bindings)) {
     fail("invalid-response");
   }
@@ -284,6 +350,7 @@ export function parseProductionInputStageResult(
     stageKey: value.stageKey,
     bindingsDigest: value.bindingsDigest,
     bindings,
+    shotRequest: parseStagedShotRequest(value.shotRequest, bindings),
   };
 }
 

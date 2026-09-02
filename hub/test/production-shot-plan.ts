@@ -1136,10 +1136,42 @@ try {
   capture(planArgs(gateFixture, ["--confirm", plan.batchPlanId, "--json"]), gateFixture.root);
   const intent = readProductionIntent(gateFixture.root, "demo", plan.shots[0].taskId as string)!;
 
+  // gate context 的 backendProcessingRegions 来自 gateway 的 capabilities 路由（§4.3、§8.6）：
+  // 用 fake 后端服务它，两个用例分别观察「后端未声明地域」与「后端声明了项目允许的地域」。
+  let declaredRegions: readonly string[] = [];
+  let capabilityCalls = 0;
+  const capabilityFetch = async (input: string | URL | Request): Promise<Response> => {
+    if (!new URL(input.toString()).pathname.endsWith("/capabilities")) {
+      throw new Error("gate context 只应读 capabilities 路由");
+    }
+    capabilityCalls++;
+    return new Response(JSON.stringify({
+      version: 1,
+      scope: { version: 1, workspaceId: WORKSPACE_ID, project: "demo" },
+      capabilities: {
+        backendKind: "comfyui",
+        backendInstanceId: "gateway-h3-fl2va",
+        modelFamilies: ["minimax-h3"],
+        processingRegions: [...declaredRegions],
+        asynchronous: true,
+        clientAssignedJobId: true,
+        providerJobIdMapping: "none",
+        inspectById: true,
+        progressHints: "optional-websocket",
+        pendingCancellation: "best-effort",
+        runningCancellation: "version-gated-best-effort",
+        providerIdempotency: false,
+        inputModes: ["image-upload"],
+        outputModes: ["download"],
+        limitsByModelId: {},
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
   const registry = createProductionRuntimeRegistry({
     root: gateFixture.root,
     configFile: gateFixture.configFile,
     env: { WRITING_LOOP_GATEWAY_TOKEN: "t".repeat(32) },
+    fetchByBackend: { "gateway-h3-fl2va": capabilityFetch },
   });
   const gate = await registry.projects[0]!.gateContextResolver.resolve(
     intent,
@@ -1151,12 +1183,39 @@ try {
   "gate context 的 allowedProcessingRegions / licenseCompliance 来自 runtime projects[]");
   ok(gate.realFaceInputs === "absent",
     `realFaceInputs 由 inputs[0] 的 ShotRequest 汇总（实得 ${gate.realFaceInputs}）`);
-  // gateway adapter 尚未转发 processingRegions（1b 的 job gateway 行）：空集合即 fail-closed，
-  // 判据是 gate 真的因为「后端地域未声明」而 deny，且只 deny 这一项。
+  // 后端未声明处理地域时空集合即 fail-closed：gate 真的因为「后端地域未声明」而 deny，且只 deny 这一项。
   const decision = evaluateProductionIntentGates(intent, gate);
   const codes = decision.failures.map((failure) => failure.code).join(",");
-  ok(!decision.allowed && codes === "processing-region-not-allowed",
-    `后端地域未声明时 gate 恰以 processing-region-not-allowed deny（实得 ${codes || "allowed"}）`);
+  ok(!decision.allowed && codes === "processing-region-not-allowed"
+    && gate.backendProcessingRegions?.length === 0,
+  `后端地域未声明时 gate 恰以 processing-region-not-allowed deny（实得 ${codes || "allowed"}）`);
+
+  // 后端声明了项目允许的地域后，同一 intent 的地域门不再 deny。
+  declaredRegions = ["CN"];
+  const allowedRegistry = createProductionRuntimeRegistry({
+    root: gateFixture.root,
+    configFile: gateFixture.configFile,
+    env: { WRITING_LOOP_GATEWAY_TOKEN: "t".repeat(32) },
+    fetchByBackend: { "gateway-h3-fl2va": capabilityFetch },
+  });
+  const allowedGate = await allowedRegistry.projects[0]!.gateContextResolver.resolve(
+    intent,
+    {} as Parameters<typeof registry.projects[0]["gateContextResolver"]["resolve"]>[1],
+  );
+  const allowedCodes = evaluateProductionIntentGates(intent, allowedGate)
+    .failures.map((failure) => failure.code);
+  ok(allowedGate.backendProcessingRegions?.join(",") === "CN"
+    && !allowedCodes.includes("processing-region-not-allowed"),
+  `后端声明项目允许的处理地域后该门通过（实得 ${allowedCodes.join(",") || "allowed"}）`);
+
+  // 同一 registry 内按 backendInstanceId 缓存：逐个 intent 评估 gate 不会重复取 capability。
+  const callsBefore = capabilityCalls;
+  await allowedRegistry.projects[0]!.gateContextResolver.resolve(
+    intent,
+    {} as Parameters<typeof registry.projects[0]["gateContextResolver"]["resolve"]>[1],
+  );
+  ok(capabilityCalls === callsBefore,
+    "gate context 按 backendInstanceId 缓存 capability，一轮内每个后端只取一次");
 
   const bare = await registry.projects[0]!.gateContextResolver.resolve(
     { ...intent, inputs: [intent.inputs[1]!] },

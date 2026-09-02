@@ -37,11 +37,23 @@ import {
   productionInputStageKey,
 } from "../src/production-input-stager.ts";
 import { HttpProductionArtifactIngestor } from "../src/production-ingestor.ts";
-import { ProductionGatewayAdapter } from "../src/production-job-gateway.ts";
+import {
+  ProductionGatewayAdapter,
+  productionJobPutRequestDigest,
+  productionJobWorkflowDigest,
+} from "../src/production-job-gateway.ts";
+import { parseVideoBackendLimits } from "../src/production-provider-adapter.ts";
+import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  parseShotRequest,
+  shotRequestCanonicalJson,
+  type ShotRequest,
+} from "../src/production-shot-request.ts";
 import { materializeProductionH3Workflow } from "../src/production-h3-graph.ts";
 import {
   exportExecutionProfileSnapshot,
   parseProductionGatewayRuntimeConfig,
+  productionGatewayH3Profiles,
   ProductionGatewayRuntimeConfigError,
 } from "../src/production-gateway-runtime-config.ts";
 import {
@@ -64,6 +76,8 @@ const STAGE_PROFILE_ID = "h3-fl2va-portrait-stage";
 const BEARER = "gateway-registry-bearer-SECRET-0001";
 const BEARER_ENV = "WRITING_LOOP_TEST_GATEWAY_BEARER";
 const REMOTE_ID = "11111111-1111-4111-8111-111111111111";
+const TERMINAL_REMOTE_ID = "44444444-4444-4444-8444-444444444444";
+const REJECTED_REMOTE_ID = "55555555-5555-4555-8555-555555555555";
 const SHA = { a: "a".repeat(64), b: "b".repeat(64), c: "c".repeat(64), d: "d".repeat(64) };
 const at = (second: number): string => `2026-08-10T12:00:${String(second).padStart(2, "0")}.000Z`;
 const digest = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
@@ -90,6 +104,22 @@ const exampleStage = (exampleRuntime.stagingProfiles as Record<string, unknown>[
 const INTENT_EXECUTION = exampleStage.execution as ProductionIntentExecution;
 const H3_CONTRACT = exampleWorkflow.h3GraphContract as Record<string, unknown>;
 const STAGE_BINDINGS = exampleStage.bindings as Record<string, unknown>[];
+
+// 打包示例的契约 v2 档：同一张图，prompt / seed 为 sentinel，stage 绑定前置 index 0 的 shot-request。
+const exampleRuntimeV2 = JSON.parse(
+  readFileSync(join(exampleRoot, "production-runtime-v2.json"), "utf8"),
+) as Record<string, unknown>;
+const templateTextV2 = readFileSync(
+  join(exampleRoot, "workflows", "h3-fl2va-portrait-v2.json"), "utf8",
+);
+const templateWorkflowV2 = JSON.parse(templateTextV2) as Record<string, unknown>;
+const exampleWorkflowV2 = (exampleRuntimeV2.workflows as Record<string, unknown>[])[0]!;
+const exampleStageV2 = (exampleRuntimeV2.stagingProfiles as Record<string, unknown>[])[0]!;
+const PROFILE_ID_V2 = String(exampleStageV2.profileId);
+const STAGE_PROFILE_ID_V2 = `${PROFILE_ID_V2}-stage`;
+const INTENT_EXECUTION_V2 = exampleStageV2.execution as ProductionIntentExecution;
+const H3_CONTRACT_V2 = exampleWorkflowV2.h3GraphContract as Record<string, unknown>;
+const STAGE_BINDINGS_V2 = exampleStageV2.bindings as Record<string, unknown>[];
 
 const roots: string[] = [];
 const root = (): string => {
@@ -118,7 +148,8 @@ function registryConfig(dirs: {
       backendInstanceId: BACKEND,
       kind: "comfyui",
       comfyBaseUrl: `http://127.0.0.1:${dirs.comfyPort}`,
-      profileIds: [PROFILE_ID],
+      maxInputImageBytes: 16 * 1024 * 1024,
+      profileIds: [PROFILE_ID, PROFILE_ID_V2],
     }],
     executionProfiles: [{
       version: 1,
@@ -167,6 +198,53 @@ function registryConfig(dirs: {
         },
       },
       processingRegions: ["SG"],
+    }, {
+      version: 1,
+      execution: {
+        version: 1,
+        kind: "writing-loop/execution-profile",
+        profileId: PROFILE_ID_V2,
+        backendInstanceId: BACKEND,
+        workflowSha256: exampleWorkflowV2.workflowSha256,
+        modelSha256: exampleWorkflowV2.modelSha256,
+        parametersSha256: exampleWorkflowV2.parametersSha256,
+        resolution: "768p",
+        aspectRatio: "9:16",
+        generateAudio: true,
+        modelFamily: "minimax-h3",
+        operation: "comfyui-workflow",
+        variant: "fl2va",
+        shortEdge: 768,
+        durationSeconds: 8,
+      },
+      workflowFile: `workflows/${PROFILE_ID_V2}.json`,
+      stageProfileId: STAGE_PROFILE_ID_V2,
+      h3GraphContract: H3_CONTRACT_V2,
+      priceTable: {
+        version: 1,
+        basis: "tariff",
+        currency: "USD",
+        microsPerOutputSecond: 430,
+        priceAsOf: "2026-08-28T00:00:00.000Z",
+        source: "GCP g4-standard-48 Spot asia-southeast1",
+      },
+      license: {
+        version: 1,
+        status: "verified",
+        basis: "community",
+        territories: ["SG"],
+        licenseSha256: null,
+        evidence: null,
+        issuedBy: "MiniMaxAI",
+        issuedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: null,
+        obligations: {
+          attribution: "MiniMax H3",
+          revenueThresholdUsd: 20_000_000,
+          noModelImprovement: true,
+        },
+      },
+      processingRegions: ["SG"],
     }],
     stageProfiles: [{
       version: 1,
@@ -174,6 +252,20 @@ function registryConfig(dirs: {
       providerCasNamespace: "wlcas/sha256",
       inputs: [{ version: 1, index: 0, slot: "first_frame", mediaTypes: ["image/png"] }],
       bindings: STAGE_BINDINGS,
+    }, {
+      version: 1,
+      stageProfileId: STAGE_PROFILE_ID_V2,
+      providerCasNamespace: "wlcas/sha256",
+      inputs: [
+        {
+          version: 1,
+          index: 0,
+          slot: "shot-request",
+          mediaTypes: ["application/vnd.writing-loop.shot-request+json"],
+        },
+        { version: 1, index: 1, slot: "first_frame", mediaTypes: ["image/png"] },
+      ],
+      bindings: STAGE_BINDINGS_V2,
     }],
     casAuthority: "wl-sg",
     objectsRoot: dirs.objectsRoot,
@@ -195,6 +287,7 @@ function writeRegistry(
 ): string {
   mkdirSync(join(configRoot, "workflows"), { recursive: true, mode: 0o700 });
   writeFileSync(join(configRoot, "workflows", "h3-fl2va-portrait.json"), templateText, { mode: 0o600 });
+  writeFileSync(join(configRoot, "workflows", `${PROFILE_ID_V2}.json`), templateTextV2, { mode: 0o600 });
   const configFile = join(configRoot, "gateway-registry.json");
   writeFileSync(
     configFile,
@@ -211,7 +304,83 @@ function casAsset(bytes: Uint8Array, mediaType: string): AssetRef {
 
 const FIRST_FRAME = casAsset(PNG, "image/png");
 
-function dispatchIntent(taskId = "take-h3-001"): ReturnType<typeof createProductionDispatchIntent> {
+/** 契约 v2 的 inputs[0]：stage kernel 内容校验它，并把 prompt / seed 投影进回执。 */
+function shotRequestFor(seed: number | null, text = "夜色中的天台，人物背对镜头缓慢后拉"): ShotRequest {
+  const source = (sha256: string): AssetRef => ({
+    version: 1, uri: `cas://wl-sg/sha256/${sha256}`, sha256, byteLength: 8_192, mediaType: "text/markdown",
+  });
+  return parseShotRequest({
+    version: 1,
+    kind: "writing-loop/shot-request",
+    shotId: "shot-001-01",
+    subject: {
+      version: 1,
+      episode: { version: 1, episodeId: "ep-001", revision: 1, source: source(SHA.a) },
+      shotId: "shot-001-01",
+      revision: 1,
+      source: source(SHA.a),
+    },
+    provenance: {
+      storyDesignSha256: SHA.b,
+      assetsRevision: 12,
+      visualProductionSha256: null,
+      beatCardHash: "8137791889ad",
+      scriptLine: 17,
+      mergedScriptLines: [],
+    },
+    scene: {
+      sceneId: "S01", subscene: null, timeOfDay: "night", interior: "ext",
+      lightingStateId: "LIGHT_NIGHT", dressingVariantId: "DRESS_A",
+    },
+    camera: {
+      shot_size: "wide", camera_movement: "dolly_out", lens_mm: 35, lighting_key: "natural",
+      depth_of_field: "deep", color_temperature: "neutral", cameraId: "CAM_A",
+    },
+    cast: [],
+    props: [],
+    crowd: null,
+    action: "蒸汽机车穿过城楼门洞。",
+    productionTags: ["特效"],
+    dialogue: [],
+    output: {
+      aspectRatio: "9:16", generateAudio: true, durationSeconds: 8,
+      storyboardDurationSeconds: 8, fps: 24, seed,
+    },
+    continuity: {
+      stageGroup: "EP001-S1",
+      prevShotId: null,
+      anchorMode: "keyframes",
+      firstFrame: {
+        asset: structuredClone(FIRST_FRAME),
+        origin: { kind: "operator-upload", note: "首帧由操作者上传" },
+        containsRealFace: false,
+      },
+      lastFrame: null,
+      references: [],
+      referencePolicy: "trim_by_priority",
+      droppedReferences: [],
+      spatialPasses: [],
+      fingerprint: { modelSha256: SHA.b, workflowSha256: SHA.a, seed, seedReproducible: seed !== null },
+    },
+    prompt: {
+      text,
+      negativeText: null,
+      language: "zh-CN",
+      authoredBy: "episode-writer",
+      compiler: "production-shot-request@1",
+      selectedTranslation: null,
+    },
+    compile: { draftSha256: SHA.d, policyDigest: SHA.a, degradations: [] },
+  });
+}
+
+function dispatchIntent(
+  taskId = "take-h3-001",
+  overrides: {
+    execution?: ProductionIntentExecution;
+    inputs?: AssetRef[];
+  } = {},
+): ReturnType<typeof createProductionDispatchIntent> {
   const source = (uri: string, sha256: string): AssetRef => ({
     version: 1, uri, sha256, byteLength: 123, mediaType: "application/json",
   });
@@ -236,8 +405,8 @@ function dispatchIntent(taskId = "take-h3-001"): ReturnType<typeof createProduct
     },
     createdAt: at(0),
     useTerritories: ["SG"],
-    execution: structuredClone(INTENT_EXECUTION),
-    inputs: [structuredClone(FIRST_FRAME)],
+    execution: structuredClone(overrides.execution ?? INTENT_EXECUTION),
+    inputs: overrides.inputs ?? [structuredClone(FIRST_FRAME)],
     budget: { version: 1, currency: "USD", estimatedAmountMicros: 3_440, maximumAmountMicros: 5_160 },
     rights: {
       version: 1,
@@ -301,26 +470,65 @@ function ingestingTask(taskId: string, remoteJobId: string): ProductionTask {
   return transitionProductionTask(task, event(task, "ingestion-started", `${taskId}-ingest`, 4));
 }
 
-type ComfyServer = { port: number; prompts: string[]; close(): Promise<void> };
+type ComfyPrompt = { promptId: string; prompt: Record<string, unknown> };
+type ComfyServer = {
+  port: number;
+  prompts: string[];
+  submitted: ComfyPrompt[];
+  /** prompt_id 在此集合时 `/history/{id}` 返回一个已完成的历史项。 */
+  terminal: Set<string>;
+  /** prompt_id 在此集合时 `POST /prompt` 以 400 拒绝（provider 侧校验失败）。 */
+  rejected: Set<string>;
+  /** 大于 0 时把 `/queue` 与 `/history/*` 的响应推迟这么多毫秒（用于制造扫描超时）。 */
+  delay: { ms: number };
+  close(): Promise<void>;
+};
 
 async function startFakeComfy(): Promise<ComfyServer> {
   const prompts: string[] = [];
+  const submitted: ComfyPrompt[] = [];
+  const terminal = new Set<string>();
+  const rejected = new Set<string>();
+  const delay = { ms: 0 };
   const server = createServer((incoming: IncomingMessage, outgoing: ServerResponse) => {
     const url = new URL(incoming.url ?? "/", "http://127.0.0.1");
     const json = (value: unknown): void => {
       const body = JSON.stringify(value);
-      outgoing.writeHead(200, {
-        "content-type": "application/json; charset=utf-8",
-        "content-length": String(Buffer.byteLength(body)),
-      });
-      outgoing.end(body);
+      const send = (): void => {
+        outgoing.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+          "content-length": String(Buffer.byteLength(body)),
+        });
+        outgoing.end(body);
+      };
+      if (delay.ms > 0 && (url.pathname === "/queue" || url.pathname.startsWith("/history/"))) {
+        setTimeout(send, delay.ms);
+        return;
+      }
+      send();
     };
     if (incoming.method === "POST" && url.pathname === "/prompt") {
       const chunks: Buffer[] = [];
       incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
       incoming.on("end", () => {
-        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { prompt_id?: string };
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          prompt_id?: string;
+          prompt?: Record<string, unknown>;
+        };
+        if (rejected.has(String(body.prompt_id))) {
+          const failure = JSON.stringify({
+            error: { type: "prompt_outputs_failed_validation", message: "invalid prompt" },
+            node_errors: {},
+          });
+          outgoing.writeHead(400, {
+            "content-type": "application/json; charset=utf-8",
+            "content-length": String(Buffer.byteLength(failure)),
+          });
+          outgoing.end(failure);
+          return;
+        }
         prompts.push(String(body.prompt_id));
+        submitted.push({ promptId: String(body.prompt_id), prompt: body.prompt ?? {} });
         json({ prompt_id: body.prompt_id, number: prompts.length, node_errors: {} });
       });
       return;
@@ -330,6 +538,11 @@ async function startFakeComfy(): Promise<ComfyServer> {
       return;
     }
     if (incoming.method === "GET" && url.pathname.startsWith("/history/")) {
+      const promptId = url.pathname.slice("/history/".length);
+      if (terminal.has(promptId)) {
+        json({ [promptId]: { status: { completed: true }, outputs: {} } });
+        return;
+      }
       json({});
       return;
     }
@@ -350,6 +563,10 @@ async function startFakeComfy(): Promise<ComfyServer> {
   return {
     port: address.port,
     prompts,
+    submitted,
+    terminal,
+    rejected,
+    delay,
     close: async () => await new Promise<void>((resolvePromise) => server.close(() => resolvePromise())),
   };
 }
@@ -467,8 +684,13 @@ try {
   );
   ok(snapshotExit === 0 && snapshot.version === 1
     && snapshot.kind === "writing-loop/execution-profile-snapshot"
-    && snapshot.casAuthority === "wl-sg" && snapshot.profiles.length === 1,
-  "--export-profile-snapshot 导出只读 v1 快照");
+    && snapshot.casAuthority === "wl-sg" && snapshot.profiles.length === 2,
+  "--export-profile-snapshot 导出只读 v1 快照（含契约 v1 与 v2 两档 profile）");
+  const snapshotV2 = snapshot.profiles.find((entry) => entry.profileId === PROFILE_ID_V2);
+  ok((snapshotV2?.limits as { seed?: string } | undefined)?.seed === "uint32"
+    && (snapshot.profiles.find((entry) => entry.profileId === PROFILE_ID)!
+      .limits as { seed?: string }).seed === "unsupported",
+  "同一 registry 里 v1 / v2 两档并存，seed 能力按各自 graph 契约版本声明");
   const snapshotBytes = readFileSync(snapshotOut);
   ok(snapshotBytes.equals(Buffer.from(`${JSON.stringify(expectedSnapshot, null, 2)}\n`, "utf8"))
     && (statSync(snapshotOut).mode & 0o777) === 0o600,
@@ -483,15 +705,119 @@ try {
     && (snapshot.profiles[0]!.license as { obligations?: { attribution?: string } }).obligations?.attribution
       === "MiniMax H3",
   "快照 profile digest 与配置一致，并携带 workflowSha256、时长网格、价目与 license.obligations");
-  const driftedSnapshot = exportExecutionProfileSnapshot(parseProductionGatewayRuntimeConfig({
-    ...registryConfig(snapshotDirs),
-    executionProfiles: [{
-      ...(registryConfig(snapshotDirs).executionProfiles as Record<string, unknown>[])[0]!,
-      processingRegions: ["CN"],
-    }],
-  }));
+  // 只保留 v1 一档（backend 的 profileIds 随之收窄），用于观察单项字段变化对 digest 的影响。
+  const v1OnlyConfig = (profileOverrides: Record<string, unknown>): Record<string, unknown> => {
+    const base = registryConfig(snapshotDirs);
+    return {
+      ...base,
+      backends: [{ ...(base.backends as Record<string, unknown>[])[0]!, profileIds: [PROFILE_ID] }],
+      executionProfiles: [{
+        ...(base.executionProfiles as Record<string, unknown>[])[0]!,
+        ...profileOverrides,
+      }],
+    };
+  };
+  const driftedSnapshot = exportExecutionProfileSnapshot(
+    parseProductionGatewayRuntimeConfig(v1OnlyConfig({ processingRegions: ["CN"] })),
+  );
   ok(driftedSnapshot.profiles[0]!.profileDigest !== expectedSnapshot.profiles[0]!.profileDigest,
     "registry 内容变更后快照 digest 随之变化");
+
+  // 多地域 profile：registry 与 worker 两侧共用同一份地域解析（去重、升序、拒绝集合别名），
+  // 否则配置里的书写顺序会让两边算出不同的 profileDigest。
+  const multiRegionConfig = (regions: readonly string[]): Record<string, unknown> =>
+    v1OnlyConfig({ processingRegions: [...regions] });
+  const sortedRegions = exportExecutionProfileSnapshot(
+    parseProductionGatewayRuntimeConfig(multiRegionConfig(["SG", "US", "JP"])),
+  );
+  const writtenInAnotherOrder = exportExecutionProfileSnapshot(
+    parseProductionGatewayRuntimeConfig(multiRegionConfig(["US", "JP", "SG"])),
+  );
+  ok(JSON.stringify(sortedRegions.profiles[0]!.processingRegions) === '["JP","SG","US"]'
+    && sortedRegions.profiles[0]!.profileDigest === writtenInAnotherOrder.profiles[0]!.profileDigest,
+  "多地域 profile 的 processingRegions 去重升序，profileDigest 不随配置书写顺序变化");
+  const aliasRegion = ((): string => {
+    try {
+      parseProductionGatewayRuntimeConfig(multiRegionConfig(["EU"]));
+      return "accepted";
+    } catch (error) {
+      return error instanceof ProductionGatewayRuntimeConfigError ? error.code : "other";
+    }
+  })();
+  ok(aliasRegion === "config-invalid-schema", "集合别名 EU 作为处理地域在 registry 解析期被拒");
+  const snapshotLimits = expectedSnapshot.profiles[0]!.limits;
+  ok(parseVideoBackendLimits(snapshotLimits, "snapshot.limits").maxInputImageBytes === 16 * 1024 * 1024
+    && JSON.stringify(snapshotLimits.durationSeconds.grid)
+      === JSON.stringify(expectedSnapshot.profiles[0]!.durationGrid),
+  "快照条目的 limits 通过 §4.3 严格读取器，且与 durationGrid 同源");
+
+  // 契约 v2 的 stage profile 形态在 registry 解析期即被钉住（§6.5、§5.3）。
+  const stageProfileDrift = (mutate: (profiles: Record<string, unknown>[]) => void): string => {
+    const base = registryConfig(snapshotDirs);
+    const profiles = structuredClone(base.stageProfiles) as Record<string, unknown>[];
+    mutate(profiles);
+    try {
+      parseProductionGatewayRuntimeConfig({ ...base, stageProfiles: profiles });
+      return "accepted";
+    } catch (error) {
+      return error instanceof ProductionGatewayRuntimeConfigError ? error.code : "other";
+    }
+  };
+  // 去掉 shot-request slot 后 stage profile 自身仍自洽，漂移只有对着 pinned graph 才看得见：
+  // 由 readProductionGatewayWorkflow 的模板断言在导出快照时拒绝。
+  const missingSlotRoot = root();
+  const missingSlotDirs = {
+    objectsRoot: join(missingSlotRoot, "objects"),
+    ingestRoot: join(missingSlotRoot, "ingest"),
+    jobStateRoot: join(missingSlotRoot, "jobs"),
+    comfyPort: comfy.port,
+  };
+  writeRegistry(missingSlotDirs, missingSlotRoot);
+  const missingSlotConfig = registryConfig(missingSlotDirs);
+  const missingSlotProfiles = structuredClone(missingSlotConfig.stageProfiles) as Record<string, unknown>[];
+  missingSlotProfiles[1]!.inputs = (missingSlotProfiles[1]!.inputs as Record<string, unknown>[]).slice(1)
+    .map((input, index) => ({ ...input, index }));
+  missingSlotProfiles[1]!.bindings = (missingSlotProfiles[1]!.bindings as Record<string, unknown>[]).slice(1)
+    .map((binding, index) => ({ ...binding, index }));
+  const missingSlotFile = join(missingSlotRoot, "gateway-registry.json");
+  writeFileSync(
+    missingSlotFile,
+    `${JSON.stringify({ ...missingSlotConfig, stageProfiles: missingSlotProfiles }, null, 2)}\n`,
+    { mode: 0o600 },
+  );
+  const missingSlotExit = await productionGatewayMain(
+    ["--config", missingSlotFile, "--export-profile-snapshot", join(missingSlotRoot, "snapshot.json")],
+    missingSlotRoot,
+    { signalSource: null, env: { [BEARER_ENV]: BEARER } },
+  );
+  ok(missingSlotExit === 1 && !existsSync(join(missingSlotRoot, "snapshot.json")),
+    "契约 v2 的 stage profile 去掉 index 0 的 shot-request slot 后，pinned graph 模板断言拒绝");
+  ok(stageProfileDrift((profiles) => {
+    profiles[0]!.inputs = [
+      {
+        version: 1,
+        index: 0,
+        slot: "shot-request",
+        mediaTypes: ["application/vnd.writing-loop.shot-request+json"],
+      },
+      ...(profiles[0]!.inputs as Record<string, unknown>[]).map((input, index) => ({
+        ...input, index: index + 1,
+      })),
+    ];
+  }) === "config-invalid-schema",
+  "契约 v1 的 stage profile 声明 shot-request slot 时在解析期被拒（bindings 无对应项）");
+  ok(stageProfileDrift((profiles) => {
+    profiles[1]!.inputs = (profiles[1]!.inputs as Record<string, unknown>[]).map((input, index) =>
+      index === 0 ? { ...input, mediaTypes: ["image/png"] } : input);
+  }) === "config-invalid-schema",
+  "shot-request slot 声明别的 mediaType 时在解析期被拒（与 stage kernel 同一判定）");
+  ok(stageProfileDrift((profiles) => {
+    profiles[1]!.inputs = (profiles[1]!.inputs as Record<string, unknown>[]).map((input, index) =>
+      index === 1
+        ? { ...input, mediaTypes: ["application/vnd.writing-loop.shot-request+json"] }
+        : input);
+  }) === "config-invalid-schema",
+  "非 index 0 的 slot 声明 shot-request mediaType 时在解析期被拒");
 
   const oversizedRoot = root();
   const oversizedDirs = {
@@ -543,14 +869,35 @@ try {
     comfyPort: comfy.port,
   };
   const liveConfigFile = writeRegistry(liveDirs, liveRoot);
+  // 装配层默认注入系统 ffmpeg 提取器；这里换成 fake，让全进程冒烟不依赖宿主机上的 ffmpeg。
+  const derivedFrame = Buffer.concat([PNG, Buffer.from("derived-last-frame")]);
+  let extractedFrom: string | null = null;
+  let missingFfmpeg = "";
+  try {
+    await startProductionGatewayProcess({
+      configFile: liveConfigFile,
+      env: { [BEARER_ENV]: BEARER },
+      ffmpegProbe: async () => { throw new Error("spawn ENOENT"); },
+    });
+  } catch (error) { missingFfmpeg = error instanceof Error ? error.message : String(error); }
+  ok(missingFfmpeg.includes("ffmpeg") && missingFfmpeg.includes("§5.3"),
+    "宿主机缺可用 ffmpeg 时进程在任何内核持有 durable 状态前拒绝启动，并写明原因");
+
+  let probeCalls = 0;
   const gateway = await startProductionGatewayProcess({
     configFile: liveConfigFile,
     env: { [BEARER_ENV]: BEARER },
+    ffmpegProbe: async () => { probeCalls++; return "ffmpeg version test"; },
+    lastFrameExtractor: async (input) => {
+      extractedFrom = input.videoPath;
+      return derivedFrame;
+    },
   });
   try {
     const origin = `http://${gateway.server.address.host}:${gateway.server.address.port}`;
-    ok(gateway.server.address.host === "127.0.0.1" && gateway.server.address.port > 0,
-      "进程绑定配置中的字面私网 IP");
+    ok(gateway.server.address.host === "127.0.0.1" && gateway.server.address.port > 0
+      && probeCalls === 1,
+    "进程绑定配置中的字面私网 IP，且装配期只做一次 ffmpeg 探针");
 
     // The continuity input is already in the gateway's own ingest CAS, exactly like a last frame
     // that a previous take produced (§6.4). The stage kernel resolves it through `cas://`.
@@ -710,10 +1057,213 @@ try {
       responseDigest: SHA.b,
     };
     const ingested = await ingestor.ingest(task, observation);
-    ok(ingested.assets.length === 1 && ingested.assets[0]!.sha256 === digest(MP4)
+    ok(ingested.assets.length === 2 && ingested.assets[0]!.sha256 === digest(MP4)
       && ingested.assets[0]!.uri === `urn:sha256:${digest(MP4)}`
-      && ingested.assets[0]!.mediaType === "video/mp4",
-    "ingests 路由冒烟：产物按内容寻址入 CAS 并回 urn:sha256 AssetRef");
+      && ingested.assets[0]!.mediaType === "video/mp4"
+      && ingested.assets[1]!.sha256 === digest(derivedFrame)
+      && ingested.assets[1]!.mediaType === "image/png"
+      && String(extractedFrom).endsWith(digest(MP4)),
+    "ingests 路由冒烟：主视频按内容寻址入 CAS，并由装配层的帧提取器登记尾帧为第二个 AssetRef");
+
+    // —— H3 graph 契约 v2 全链路：stage → PUT /jobs → ComfyUI 收到的 prompt 带逐镜值（§5.3） ——
+    const stageShotRequest = (shotRequest: ShotRequest): AssetRef => {
+      const bytes = Buffer.from(shotRequestCanonicalJson(shotRequest), "utf8");
+      const sha256 = digest(bytes);
+      const shard = join(liveDirs.ingestRoot, "blobs", "sha256", sha256.slice(0, 2));
+      mkdirSync(shard, { recursive: true, mode: 0o700 });
+      if (!existsSync(join(shard, sha256))) writeFileSync(join(shard, sha256), bytes, { mode: 0o400 });
+      return {
+        version: 1,
+        uri: `cas://wl-sg/sha256/${sha256}`,
+        sha256,
+        byteLength: bytes.byteLength,
+        mediaType: SHOT_REQUEST_MEDIA_TYPE,
+      };
+    };
+    const generatorNode = String((H3_CONTRACT_V2.generator as { nodeId: string }).nodeId);
+    const noiseNode = String(
+      ((H3_CONTRACT_V2.pipeline as Record<string, { nodeId: string }>).noise).nodeId,
+    );
+    const v2Adapter = new ProductionGatewayAdapter({
+      baseUrl: origin,
+      workspaceId: WS,
+      project: PROJECT,
+      backendInstanceId: BACKEND,
+      profileId: PROFILE_ID_V2,
+      transport: "insecure-private-http",
+      credentialResolver: () => BEARER,
+    });
+
+    const v2ShotRequest = shotRequestFor(4_242);
+    const v2ShotAsset = stageShotRequest(v2ShotRequest);
+    const v2Intent = dispatchIntent("take-h3-v2", {
+      execution: structuredClone(INTENT_EXECUTION_V2),
+      inputs: [v2ShotAsset, structuredClone(FIRST_FRAME)],
+    });
+    const v2Staged = await stager.stage(v2Intent);
+    ok(v2Staged.bindings.map((binding) => binding.slot).join(",") === "shot-request,first_frame"
+      && v2Staged.shotRequest?.prompt === v2ShotRequest.prompt.text
+      && v2Staged.shotRequest.seed === 4_242,
+    "契约 v2 stage：index 0 是 shot-request slot，回执携带逐镜 prompt 与 seed");
+    const v2Materialized = materializeProductionH3Workflow(
+      templateWorkflowV2,
+      H3_CONTRACT_V2 as never,
+      INTENT_EXECUTION_V2,
+      STAGE_BINDINGS_V2 as never,
+      v2Staged.bindings.map((binding) => ({
+        index: binding.index,
+        slot: binding.slot,
+        assetSha256: binding.assetSha256,
+        providerObjectKey: binding.providerObjectKey,
+      })),
+      PROFILE_ID_V2,
+      { prompt: v2ShotRequest.prompt.text, seed: 4_242 },
+    );
+    const V2_REMOTE_ID = "22222222-2222-4222-8222-222222222222";
+    const v2Submitted = await v2Adapter.submitPrepared(v2Adapter.prepareSubmission({
+      idempotencyKey: v2Intent.idempotencyKey,
+      remoteJobId: V2_REMOTE_ID,
+      workflow: v2Materialized.workflow,
+      inputBinding: {
+        version: 1,
+        stageKey: v2Staged.stageKey,
+        bindingsDigest: v2Staged.bindingsDigest,
+        intentDigest: v2Intent.idempotencyKey,
+      },
+    }));
+    const v2Prompt = comfy.submitted.find((entry) => entry.promptId === V2_REMOTE_ID);
+    const v2Generator = (v2Prompt?.prompt[generatorNode] as { inputs: Record<string, unknown> } | undefined)?.inputs;
+    const v2Noise = (v2Prompt?.prompt[noiseNode] as { inputs: Record<string, unknown> } | undefined)?.inputs;
+    ok(v2Submitted.remoteJobId === V2_REMOTE_ID
+      && v2Generator?.prompt === v2ShotRequest.prompt.text
+      && v2Noise?.noise_seed === 4_242,
+    "契约 v2 提交给 ComfyUI 的 prompt body 里 generator.prompt 与 RandomNoise.noise_seed 是 ShotRequest 的值");
+
+    // seed 为 null 时 pinned graph 的 noise_seed 无法材料化：gateway 在提交前 403。
+    const nullSeedShotRequest = shotRequestFor(null, "无 seed 的镜头提示词");
+    const nullSeedAsset = stageShotRequest(nullSeedShotRequest);
+    const nullSeedIntent = dispatchIntent("take-h3-v2-null-seed", {
+      execution: structuredClone(INTENT_EXECUTION_V2),
+      inputs: [nullSeedAsset, structuredClone(FIRST_FRAME)],
+    });
+    const nullSeedStaged = await stager.stage(nullSeedIntent);
+    const NULL_SEED_REMOTE_ID = "33333333-3333-4333-8333-333333333333";
+    const nullSeedBody = {
+      version: 1 as const,
+      scope: { version: 1 as const, workspaceId: WS, project: PROJECT },
+      backendInstanceId: BACKEND,
+      remoteJobId: NULL_SEED_REMOTE_ID,
+      idempotencyKey: nullSeedIntent.idempotencyKey,
+      profile: { version: 1 as const, profileId: PROFILE_ID_V2, workflowDigest: SHA.a },
+      inputBinding: {
+        version: 1 as const,
+        stageKey: nullSeedStaged.stageKey,
+        bindingsDigest: nullSeedStaged.bindingsDigest,
+        intentDigest: nullSeedIntent.idempotencyKey,
+      },
+    };
+    const nullSeedResponse = await fetch(
+      `${origin}/v1/scopes/${WS}/${PROJECT}/jobs/${NULL_SEED_REMOTE_ID}`,
+      {
+        method: "PUT",
+        redirect: "error",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${BEARER}`,
+          "x-writing-loop-idempotency-key": nullSeedIntent.idempotencyKey,
+          "x-writing-loop-request-digest": productionJobPutRequestDigest(nullSeedBody),
+        },
+        body: JSON.stringify(nullSeedBody),
+      },
+    );
+    ok(nullSeedStaged.shotRequest?.seed === null && nullSeedResponse.status === 403
+      && !comfy.prompts.includes(NULL_SEED_REMOTE_ID),
+    "契约 v2 的 ShotRequest seed 为 null 时 gateway 以 403 拒绝，且未向 ComfyUI 提交");
+
+    // —— §7 扫描的两条负面前提：已终态、以及从未提交（not-submitted） ——
+    const submitOnV1 = async (taskId: string, remoteJobId: string): Promise<Response | null> => {
+      const jobIntent = dispatchIntent(taskId);
+      const jobStaged = await stager.stage(jobIntent);
+      const bound = materializeProductionH3Workflow(
+        templateWorkflow,
+        H3_CONTRACT as never,
+        INTENT_EXECUTION,
+        STAGE_BINDINGS as never,
+        jobStaged.bindings.map((binding) => ({
+          index: binding.index,
+          slot: binding.slot,
+          assetSha256: binding.assetSha256,
+          providerObjectKey: binding.providerObjectKey,
+        })),
+        PROFILE_ID,
+      );
+      const putBody = {
+        version: 1 as const,
+        scope: { version: 1 as const, workspaceId: WS, project: PROJECT },
+        backendInstanceId: BACKEND,
+        remoteJobId,
+        idempotencyKey: jobIntent.idempotencyKey,
+        profile: {
+          version: 1 as const,
+          profileId: PROFILE_ID,
+          workflowDigest: productionJobWorkflowDigest(bound.workflow),
+        },
+        inputBinding: {
+          version: 1 as const,
+          stageKey: jobStaged.stageKey,
+          bindingsDigest: jobStaged.bindingsDigest,
+          intentDigest: jobIntent.idempotencyKey,
+        },
+      };
+      return await fetch(`${origin}/v1/scopes/${WS}/${PROJECT}/jobs/${remoteJobId}`, {
+        method: "PUT",
+        redirect: "error",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${BEARER}`,
+          "x-writing-loop-idempotency-key": jobIntent.idempotencyKey,
+          "x-writing-loop-request-digest": productionJobPutRequestDigest(putBody),
+        },
+        body: JSON.stringify(putBody),
+      });
+    };
+
+    // 两个 ID 提到外层常量，重启段（try 之外）也要用。
+    const terminalPut = await submitOnV1("take-h3-terminal", TERMINAL_REMOTE_ID);
+    comfy.terminal.add(TERMINAL_REMOTE_ID);
+    const terminalObserved = await adapter.inspect(TERMINAL_REMOTE_ID);
+    ok(terminalPut?.status === 200 && terminalObserved.state === "succeeded",
+      "已提交的 job 观察到 succeeded 后 gateway durable 记下终态");
+
+    comfy.rejected.add(REJECTED_REMOTE_ID);
+    const rejectedPut = await submitOnV1("take-h3-rejected", REJECTED_REMOTE_ID);
+    ok(rejectedPut?.status === 422 && !comfy.prompts.includes(REJECTED_REMOTE_ID),
+      "provider 校验失败的提交以 not-submitted 结清，job record 保留");
+
+    // capabilities：jobs kernel 转发 raw adapter 的真实描述符（§4.3、§8.6）。
+    const capabilities = await adapter.capabilities();
+    const profileLimits = capabilities.limitsByModelId[PROFILE_ID];
+    ok(capabilities.backendInstanceId === BACKEND
+      && capabilities.modelFamilies.includes("minimax-h3")
+      && capabilities.processingRegions.join(",") === "SG"
+      && capabilities.providerJobIdMapping === "none"
+      && profileLimits?.maxInputImageBytes === 16 * 1024 * 1024
+      && profileLimits.aspectRatios.join(",") === "9:16"
+      && profileLimits.resolutions.join(",") === "768p",
+    "capabilities 路由转发 registry 推导出的真实 capability，而不是自造字面量");
+    const derivedProfiles = productionGatewayH3Profiles(gateway.config);
+    ok(profileLimits?.seed === "unsupported"
+      && derivedProfiles[0]?.graphContractVersion
+        === gateway.config.executionProfiles[0]!.h3GraphContract.version,
+    "capability 的 graphContractVersion 取自 registry 的 h3GraphContract.version：v1 声明 seed 不受支持");
+    const liveSnapshot = exportExecutionProfileSnapshot(gateway.config);
+    ok(JSON.stringify(liveSnapshot.profiles[0]!.durationGrid)
+      === JSON.stringify(profileLimits?.durationSeconds.grid)
+      && JSON.stringify(liveSnapshot.profiles[0]!.limits) === JSON.stringify(profileLimits),
+    "只读快照的 durationGrid 与 capabilities().limitsByModelId[profileId].durationSeconds.grid 同源相等");
+    ok(gateway.recovery.scanned === 0 && gateway.recovery.rewritten === 0
+      && gateway.recovery.unresolved === 0,
+    "空 jobStateRoot 上的抢占扫描不改写任何记录");
   } finally {
     await gateway.close();
   }
@@ -723,6 +1273,131 @@ try {
     { headers: { authorization: `Bearer ${BEARER}` }, redirect: "error" },
   ).then(() => "reachable", () => "closed");
   ok(closedProbe === "closed", "优雅停机后端口不再接受连接");
+
+  // 慢响应：单 job 截止时间到不是整体失败，而是该 job 无判定（unresolved）并留待下次重启。
+  comfy.delay.ms = 400;
+  const slowSweep = await startProductionGatewayProcess({
+    configFile: liveConfigFile,
+    env: { [BEARER_ENV]: BEARER },
+    ffmpegProbe: async () => "ffmpeg version test",
+    jobTimeoutMs: 60,
+  });
+  try {
+    ok(slowSweep.recovery.rewritten === 0 && slowSweep.recovery.unresolved === 2
+      && slowSweep.server.address.port > 0,
+    "扫描时 provider 响应超过单 job 截止时间：进程照常启动，该 job 计 unresolved 且不被改写");
+  } finally {
+    await slowSweep.close();
+  }
+  comfy.delay.ms = 0;
+
+  // ── §7 Spot 抢占：同一 jobStateRoot 重新装配，ComfyUI 的进程内 history 已清空 ──
+  const restarted = await startProductionGatewayProcess({
+    configFile: liveConfigFile,
+    env: { [BEARER_ENV]: BEARER },
+    ffmpegProbe: async () => "ffmpeg version test",
+  });
+  try {
+    ok(restarted.recovery.rewritten === 2 && restarted.recovery.unresolved === 0
+      && restarted.recovery.scanned === 4,
+    "重启后只把重启前 pending / running 且不在 /history 与 /queue 的两条 job 改写为抢占失败");
+    const restartedAdapter = new ProductionGatewayAdapter({
+      baseUrl: `http://${restarted.server.address.host}:${restarted.server.address.port}`,
+      workspaceId: WS,
+      project: PROJECT,
+      backendInstanceId: BACKEND,
+      profileId: PROFILE_ID,
+      transport: "insecure-private-http",
+      credentialResolver: () => BEARER,
+    });
+    const afterPreemption = await restartedAdapter.inspect(REMOTE_ID);
+    ok(afterPreemption.state === "failed"
+      && afterPreemption.errorSummary === "provider_failed:preempted"
+      && afterPreemption.outputs.length === 0,
+    "worker 侧 inspect 读到 provider_failed:preempted，而不是无休止的 not-found");
+    const afterTerminal = await restartedAdapter.inspect(TERMINAL_REMOTE_ID);
+    ok(afterTerminal.state === "succeeded" && afterTerminal.errorSummary === null,
+      "已记下终态的 job 在 ComfyUI history 清空后仍答 succeeded，不被改写为抢占失败");
+    const afterRejected = await restartedAdapter.inspect(REJECTED_REMOTE_ID);
+    ok(afterRejected.state === "not-found" && afterRejected.errorSummary === null,
+      "从未提交（not-submitted）的 job 不被改写为抢占失败");
+
+    // 重放 PUT：coordinator 重发同一请求时，响应里的 observation 也走抢占判定，而不是再问 provider。
+    const restartedOrigin = `http://${restarted.server.address.host}:${restarted.server.address.port}`;
+    const replayStager = new HttpProductionInputStager({
+      baseUrl: restartedOrigin,
+      workspaceId: WS,
+      project: PROJECT,
+      transport: "insecure-private-http",
+      credentialResolver: () => BEARER,
+    });
+    const replayIntent = dispatchIntent();
+    const replayStaged = await replayStager.stage(replayIntent);
+    const replayBound = materializeProductionH3Workflow(
+      templateWorkflow,
+      H3_CONTRACT as never,
+      INTENT_EXECUTION,
+      STAGE_BINDINGS as never,
+      replayStaged.bindings.map((binding) => ({
+        index: binding.index,
+        slot: binding.slot,
+        assetSha256: binding.assetSha256,
+        providerObjectKey: binding.providerObjectKey,
+      })),
+      PROFILE_ID,
+    );
+    const replayBody = {
+      version: 1 as const,
+      scope: { version: 1 as const, workspaceId: WS, project: PROJECT },
+      backendInstanceId: BACKEND,
+      remoteJobId: REMOTE_ID,
+      idempotencyKey: replayIntent.idempotencyKey,
+      profile: {
+        version: 1 as const,
+        profileId: PROFILE_ID,
+        workflowDigest: productionJobWorkflowDigest(replayBound.workflow),
+      },
+      inputBinding: {
+        version: 1 as const,
+        stageKey: replayStaged.stageKey,
+        bindingsDigest: replayStaged.bindingsDigest,
+        intentDigest: replayIntent.idempotencyKey,
+      },
+    };
+    const replayResponse = await fetch(`${restartedOrigin}/v1/scopes/${WS}/${PROJECT}/jobs/${REMOTE_ID}`, {
+      method: "PUT",
+      redirect: "error",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${BEARER}`,
+        "x-writing-loop-idempotency-key": replayIntent.idempotencyKey,
+        "x-writing-loop-request-digest": productionJobPutRequestDigest(replayBody),
+      },
+      body: JSON.stringify(replayBody),
+    });
+    const replayed = await replayResponse.json() as {
+      submissionState: string;
+      observation: { state: string; errorSummary: string | null } | null;
+    };
+    ok(replayResponse.status === 200 && replayed.submissionState === "accepted"
+      && replayed.observation?.state === "failed"
+      && replayed.observation.errorSummary === "provider_failed:preempted"
+      && comfy.prompts.filter((id) => id === REMOTE_ID).length === 1,
+    "重放同一 PUT 时响应里的 observation 也读抢占记录，且不重复向 ComfyUI 提交");
+    const secondSweep = await startProductionGatewayProcess({
+      configFile: liveConfigFile,
+      env: { [BEARER_ENV]: BEARER },
+      ffmpegProbe: async () => "ffmpeg version test",
+    });
+    try {
+      ok(secondSweep.recovery.rewritten === 0,
+        "已改写过的 job record 在下一次重启时不再重复改写");
+    } finally {
+      await secondSweep.close();
+    }
+  } finally {
+    await restarted.close();
+  }
 } finally {
   await comfy.close();
   for (const path of roots) rmSync(path, { recursive: true, force: true });

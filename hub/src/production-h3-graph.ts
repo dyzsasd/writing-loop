@@ -1,8 +1,17 @@
 // Pure, server-owned MiniMax H3 Comfy API graph contract.
 //
-// This v1 contract intentionally accepts one narrow representative API-format graph. It is not a
+// This contract intentionally accepts one narrow representative API-format graph. It is not a
 // claim that a deployment has passed a live ComfyUI /prompt probe. Deployment admission remains a
 // separate operational attestation.
+//
+// Two contract versions coexist (§5.3). Version 1 pins `generator.prompt` and `RandomNoise.noise_seed`
+// as literals inside the parameter projection, so one graph plus one config entry carries exactly one
+// shot. Version 2 replaces both with the sentinels
+// `writing-loop://shot-request/<profileId>/prompt|seed`, projects the parameter manifest over those
+// sentinels (they are the fixed value of the template) and fills the actual per-shot prompt/seed from
+// the staged ShotRequest at materialization, re-asserting the whole graph afterwards. Version 2 also
+// adds the index 0 `shot-request` stage slot, which binds no LoadImage and therefore shifts the
+// LoadImage binding indices by one.
 import type { ProductionIntentExecution } from "./production-intent.ts";
 import { productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
 
@@ -74,30 +83,48 @@ export type ProductionH3PipelineContract = Readonly<{
   saveVideo: ProductionH3NodeContract<"SaveVideo">;
 }>;
 
+/** Contract v1 pins prompt/seed as literals; v2 moves both to per-shot sentinels (§5.3). */
+export type ProductionH3GraphContractVersion = 1 | 2;
+
 export type ProductionH3GraphContract = Readonly<{
-  version: 1;
+  version: ProductionH3GraphContractVersion;
   generator: ProductionH3GeneratorContract;
   modelBundle: ProductionH3ModelBundleContract;
   pipeline: ProductionH3PipelineContract;
   parameterManifest: Readonly<{ version: 1; sha256: string }>;
 }>;
 
+/**
+ * Fixed index 0 slot of contract v2. It binds no graph node; the gateway reads the staged object.
+ * Same literal as `PRODUCTION_SHOT_REQUEST_SLOT` in production-input-stager.ts, which names it on the
+ * receipt wire — this module stays free of the stager so the graph contract has no transport imports.
+ */
+export const PRODUCTION_H3_SHOT_REQUEST_SLOT = "shot-request";
+
 export type ProductionH3StageBindingContract = Readonly<{
   version: 1;
   index: number;
   slot: string;
+  /** null only for the contract v2 `shot-request` slot, which binds no LoadImage node. */
   source: Readonly<{
     version: 1;
     nodeId: string;
     classType: "LoadImage";
     inputName: "image";
     outputIndex: 0;
-  }>;
+  }> | null;
+  /** null exactly when `source` is null. */
   consumer: Readonly<{
     version: 1;
     nodeId: string;
     inputName: string;
-  }>;
+  }> | null;
+}>;
+
+/** Per-shot prompt/seed filled into a contract v2 graph at materialization (§5.3). */
+export type ProductionH3ShotBinding = Readonly<{
+  prompt: string;
+  seed: number;
 }>;
 
 export type ProductionH3ReceiptBinding = Readonly<{
@@ -138,6 +165,11 @@ function exactKeys(value: JsonRecord, keys: readonly string[], subject: string):
 
 function version(value: unknown, subject: string): void {
   if (value !== 1) fail(`${subject}.version must equal 1`);
+}
+
+function contractVersion(value: unknown, subject: string): ProductionH3GraphContractVersion {
+  if (value !== 1 && value !== 2) fail(`${subject}.version must equal 1 or 2`);
+  return value;
 }
 
 function exactString(value: unknown, pattern: RegExp, subject: string): string {
@@ -253,7 +285,7 @@ export function parseProductionH3GraphContract(value: unknown): ProductionH3Grap
   const subject = "ProductionH3GraphContract";
   const row = record(value, subject);
   exactKeys(row, ["version", "generator", "modelBundle", "pipeline", "parameterManifest"], subject);
-  version(row.version, subject);
+  const graphVersion = contractVersion(row.version, subject);
 
   const generatorRow = record(row.generator, `${subject}.generator`);
   exactKeys(generatorRow, ["version", "nodeId", "classType", "width", "height", "length"], `${subject}.generator`);
@@ -334,7 +366,7 @@ export function parseProductionH3GraphContract(value: unknown): ProductionH3Grap
     pipeline.saveVideo.nodeId,
   ];
   if (new Set(nodeIds).size !== nodeIds.length) fail(`${subject} role nodeIds must be unique`);
-  return Object.freeze({ version: 1, generator, modelBundle, pipeline, parameterManifest });
+  return Object.freeze({ version: graphVersion, generator, modelBundle, pipeline, parameterManifest });
 }
 
 export function parseProductionH3StageBindingContract(
@@ -346,6 +378,20 @@ export function parseProductionH3StageBindingContract(
   exactKeys(row, ["version", "index", "slot", "source", "consumer"], subject);
   version(row.version, subject);
   if (row.index !== expectedIndex) fail(`${subject}.index must equal its ordered position`);
+  const slot = exactString(row.slot, SAFE_SLOT, `${subject}.slot`);
+  if (row.source === null || row.consumer === null) {
+    // Contract v2's index 0 ShotRequest: staged and content-checked, but bound to no graph node.
+    if (row.source !== null || row.consumer !== null) {
+      fail(`${subject} source and consumer must be null together`);
+    }
+    if (slot !== PRODUCTION_H3_SHOT_REQUEST_SLOT || expectedIndex !== 0) {
+      fail(`${subject} may only omit its graph binding for the index 0 ${PRODUCTION_H3_SHOT_REQUEST_SLOT} slot`);
+    }
+    return Object.freeze({ version: 1, index: 0, slot, source: null, consumer: null });
+  }
+  if (slot === PRODUCTION_H3_SHOT_REQUEST_SLOT) {
+    fail(`${subject} ${PRODUCTION_H3_SHOT_REQUEST_SLOT} must not bind a LoadImage node`);
+  }
   const source = record(row.source, `${subject}.source`);
   exactKeys(source, ["version", "nodeId", "classType", "inputName", "outputIndex"], `${subject}.source`);
   version(source.version, `${subject}.source`);
@@ -358,7 +404,7 @@ export function parseProductionH3StageBindingContract(
   return Object.freeze({
     version: 1,
     index: expectedIndex,
-    slot: exactString(row.slot, SAFE_SLOT, `${subject}.slot`),
+    slot,
     source: Object.freeze({
       version: 1,
       nodeId: exactString(source.nodeId, SAFE_ID, `${subject}.source.nodeId`),
@@ -383,6 +429,26 @@ export function productionH3StageInputSentinel(
     || !SAFE_SLOT.test(slot)) fail("stage input sentinel identity is invalid");
   return `writing-loop://stage-input/${profileId}/${index}/${encodeURIComponent(slot)}`;
 }
+
+export type ProductionH3ShotRequestField = "prompt" | "seed";
+
+/** Contract v2 sentinel for one per-shot field of the staged ShotRequest (§5.3). */
+export function productionH3ShotRequestSentinel(
+  profileId: string,
+  field: ProductionH3ShotRequestField,
+): string {
+  if (!SAFE_ID.test(profileId) || (field !== "prompt" && field !== "seed")) {
+    fail("shot request sentinel identity is invalid");
+  }
+  return `writing-loop://shot-request/${profileId}/${field}`;
+}
+
+/**
+ * Private marker substituted for the real profile id before a graph enters `assertGraph`, so the
+ * parameter projection measures "this input is bound to the staged ShotRequest" rather than the
+ * profile's name. The public API always normalizes first.
+ */
+const TEMPLATE_PROFILE_MARKER = "profile";
 
 function expectedGeneratorClass(execution: ProductionIntentExecution): ProductionH3GeneratorClass {
   if (execution.modelFamily !== "minimax-h3") fail("H3 graph requires a minimax-h3 execution");
@@ -410,20 +476,35 @@ function validateStageContracts(
   stageContracts: readonly ProductionH3StageBindingContract[],
 ): void {
   if (execution.modelFamily !== "minimax-h3") fail("H3 stage bindings require minimax-h3 execution");
-  if ((execution.variant === "fl2va" && (stageContracts.length < 1 || stageContracts.length > 2))
-    || (execution.variant === "ref2va" && (stageContracts.length < 1 || stageContracts.length > 9))) {
+  // Contract v2 prefixes the fixed LoadImage bindings with the index 0 ShotRequest slot (§5.3), so
+  // the image bindings keep their v1 dataflow and only shift one position to the right.
+  const offset = contract.version === 2 ? 1 : 0;
+  if (offset === 1) {
+    const head = stageContracts[0];
+    if (head === undefined || head.index !== 0 || head.slot !== PRODUCTION_H3_SHOT_REQUEST_SLOT
+      || head.source !== null || head.consumer !== null) {
+      fail("H3 contract v2 requires the index 0 shot-request stage slot");
+    }
+  }
+  const imageBindings = stageContracts.length - offset;
+  if ((execution.variant === "fl2va" && (imageBindings < 1 || imageBindings > 2))
+    || (execution.variant === "ref2va" && (imageBindings < 1 || imageBindings > 9))) {
     fail("H3 stage binding count is invalid for the selected variant");
   }
   const sourceIds = new Set<string>();
-  for (let index = 0; index < stageContracts.length; index++) {
+  for (let index = offset; index < stageContracts.length; index++) {
     const binding = stageContracts[index]!;
+    const position = index - offset;
     const expectedSlot = execution.variant === "fl2va"
-      ? index === 0 ? "first_frame" : "last_frame"
-      : `reference.${index}`;
+      ? position === 0 ? "first_frame" : "last_frame"
+      : `reference.${position}`;
     const expectedInput = execution.variant === "fl2va"
       ? expectedSlot
-      : `ref_images.ref_image_${index}`;
+      : `ref_images.ref_image_${position}`;
+    // A v1 contract has no shot-request slot, and the parser only accepts one at index 0 — where a
+    // v1 binding list must instead carry its first LoadImage slot, so this is where it is refused.
     if (binding.index !== index || binding.slot !== expectedSlot
+      || binding.source === null || binding.consumer === null
       || binding.consumer.nodeId !== contract.generator.nodeId
       || binding.consumer.inputName !== expectedInput || sourceIds.has(binding.source.nodeId)) {
       fail(`H3 stage binding ${index} does not match the exact variant dataflow`);
@@ -534,8 +615,16 @@ function parameterRows(
   const noise = graphNode(workflow, contract.pipeline.noise.nodeId, "RandomNoise", ["noise_seed"]);
   const createVideo = graphNode(workflow, contract.pipeline.createVideo.nodeId, "CreateVideo", ["images", "fps", "audio", "bit_depth"]);
   const saveVideo = graphNode(workflow, contract.pipeline.saveVideo.nodeId, "SaveVideo", ["video", "filename_prefix", "format", "codec"]);
+  // Contract v2 projects both per-shot inputs at their sentinel value, so one profile's parameter
+  // manifest stays constant across every shot it carries (§5.3).
+  const promptProjection = contract.version === 2
+    ? productionH3ShotRequestSentinel(TEMPLATE_PROFILE_MARKER, "prompt")
+    : generator.prompt;
+  const seedProjection = contract.version === 2
+    ? productionH3ShotRequestSentinel(TEMPLATE_PROFILE_MARKER, "seed")
+    : noise.noise_seed;
   const rows: ParameterRow[] = [
-    ["generator", contract.generator.classType, "prompt", generator.prompt],
+    ["generator", contract.generator.classType, "prompt", promptProjection],
     ["generator", contract.generator.classType, "width", generator.width],
     ["generator", contract.generator.classType, "height", generator.height],
     ["generator", contract.generator.classType, "length", generator.length],
@@ -548,7 +637,7 @@ function parameterRows(
     ["scheduler", "BasicScheduler", "steps", scheduler.steps],
     ["scheduler", "BasicScheduler", "denoise", scheduler.denoise],
     ["samplerSelect", "KSamplerSelect", "sampler_name", samplerSelect.sampler_name],
-    ["noise", "RandomNoise", "noise_seed", noise.noise_seed],
+    ["noise", "RandomNoise", "noise_seed", seedProjection],
     ["createVideo", "CreateVideo", "fps", createVideo.fps],
     ["createVideo", "CreateVideo", "bit_depth", createVideo.bit_depth],
     ["saveVideo", "SaveVideo", "filename_prefix", saveVideo.filename_prefix],
@@ -591,9 +680,15 @@ function assertGraph(
   execution: ProductionIntentExecution,
   stageContracts: readonly ProductionH3StageBindingContract[],
   boundProviderKeys: ReadonlyMap<number, string> | null,
+  boundShot: ProductionH3ShotBinding | null,
 ): void {
   assertProductionH3ExecutionContract(contract, execution, stageContracts);
   if (execution.modelFamily !== "minimax-h3") fail("H3 execution narrowing failed");
+  if (contract.version === 1 && boundShot !== null) fail("H3 contract v1 has no per-shot binding");
+  if (contract.version === 2 && boundProviderKeys !== null && boundShot === null) {
+    fail("H3 contract v2 requires the staged ShotRequest prompt/seed at materialization");
+  }
+  const imageBindings = stageContracts.filter((binding) => binding.source !== null);
 
   const p = contract.pipeline;
   const b = contract.modelBundle;
@@ -601,7 +696,7 @@ function assertGraph(
     contract.generator.nodeId, b.diffusion.nodeId, b.textEncoder.nodeId, b.videoVae.nodeId, b.audioVae.nodeId,
     p.sigmaShift.nodeId, p.guider.nodeId, p.scheduler.nodeId, p.samplerSelect.nodeId, p.noise.nodeId,
     p.sampler.nodeId, p.videoDecode.nodeId, p.audioDecode.nodeId, p.createVideo.nodeId, p.saveVideo.nodeId,
-    ...stageContracts.map((binding) => binding.source.nodeId),
+    ...imageBindings.map((binding) => binding.source!.nodeId),
   ]);
   const actualNodeIds = Object.keys(workflow);
   if (actualNodeIds.length !== expectedNodeIds.size
@@ -622,9 +717,9 @@ function assertGraph(
 
   const generatorKeys = execution.variant === "fl2va"
     ? ["clip", "vae", "prompt", "width", "height", "length",
-      ...stageContracts.map((binding) => binding.consumer.inputName)]
+      ...imageBindings.map((binding) => binding.consumer!.inputName)]
     : ["clip", "vae", "audio_vae", "prompt", "width", "height", "length", "ref_image_size",
-      ...stageContracts.map((binding) => binding.consumer.inputName)];
+      ...imageBindings.map((binding) => binding.consumer!.inputName)];
   const generator = graphNode(workflow, contract.generator.nodeId, contract.generator.classType, generatorKeys);
   assertLink(generator.clip, b.textEncoder.nodeId, 0, "H3 generator.clip");
   assertLink(generator.vae, b.videoVae.nodeId, 0, "H3 generator.vae");
@@ -633,6 +728,15 @@ function assertGraph(
     || generator.prompt.length < 1 || generator.prompt.length > 16_384) {
     fail("H3 generator literal parameters drifted");
   }
+  if (contract.version === 2) {
+    const expectedPrompt = boundShot === null
+      ? productionH3ShotRequestSentinel(TEMPLATE_PROFILE_MARKER, "prompt")
+      : boundShot.prompt;
+    if (generator.prompt !== expectedPrompt) fail("H3 generator.prompt is not the contract v2 shot value");
+    if (boundShot === null && countExactString(workflow, expectedPrompt) !== 1) {
+      fail("H3 contract v2 prompt sentinel must occur exactly once");
+    }
+  }
   if (execution.variant === "ref2va") {
     assertLink(generator.audio_vae, b.audioVae.nodeId, 0, "H3 generator.audio_vae");
     if (generator.ref_image_size !== "match" && generator.ref_image_size !== "max") {
@@ -640,19 +744,19 @@ function assertGraph(
     }
   }
 
-  for (const binding of stageContracts) {
-    const source = graphNode(workflow, binding.source.nodeId, "LoadImage", ["image"]);
+  for (const binding of imageBindings) {
+    const source = graphNode(workflow, binding.source!.nodeId, "LoadImage", ["image"]);
     const expectedSourceValue = boundProviderKeys === null
-      ? productionH3StageInputSentinel("profile", binding.index, binding.slot)
+      ? productionH3StageInputSentinel(TEMPLATE_PROFILE_MARKER, binding.index, binding.slot)
       : boundProviderKeys.get(binding.index);
     // The public API substitutes the actual profile id before entering assertGraph; `profile` is a
     // private marker used only when a caller supplied an already-normalized template expectation.
     if (typeof expectedSourceValue !== "string" || source.image !== expectedSourceValue) {
       fail(`H3 stage source ${binding.index} literal drifted`);
     }
-    assertLink(generator[binding.consumer.inputName], binding.source.nodeId, 0,
-      `H3 generator.${binding.consumer.inputName}`);
-    if (countLink(workflow, binding.source.nodeId, 0) !== 1) {
+    assertLink(generator[binding.consumer!.inputName], binding.source!.nodeId, 0,
+      `H3 generator.${binding.consumer!.inputName}`);
+    if (countLink(workflow, binding.source!.nodeId, 0) !== 1) {
       fail(`H3 stage source ${binding.index} must feed exactly one authorized consumer`);
     }
     if (countExactString(workflow, expectedSourceValue) !== 1) {
@@ -675,7 +779,18 @@ function assertGraph(
   const samplerSelect = graphNode(workflow, p.samplerSelect.nodeId, "KSamplerSelect", ["sampler_name"]);
   boundedString(samplerSelect.sampler_name, 128, "H3 samplerSelect.sampler_name");
   const noise = graphNode(workflow, p.noise.nodeId, "RandomNoise", ["noise_seed"]);
-  boundedInteger(noise.noise_seed, 0, Number.MAX_SAFE_INTEGER, "H3 noise.noise_seed");
+  if (contract.version === 2 && boundShot === null) {
+    const sentinel = productionH3ShotRequestSentinel(TEMPLATE_PROFILE_MARKER, "seed");
+    if (noise.noise_seed !== sentinel) fail("H3 noise.noise_seed is not the contract v2 seed sentinel");
+    if (countExactString(workflow, sentinel) !== 1) {
+      fail("H3 contract v2 seed sentinel must occur exactly once");
+    }
+  } else {
+    boundedInteger(noise.noise_seed, 0, Number.MAX_SAFE_INTEGER, "H3 noise.noise_seed");
+    if (boundShot !== null && noise.noise_seed !== boundShot.seed) {
+      fail("H3 noise.noise_seed is not the contract v2 shot seed");
+    }
+  }
   const sampler = graphNode(workflow, p.sampler.nodeId, "SamplerCustomAdvanced",
     ["noise", "guider", "sampler", "sigmas", "latent_image"]);
   assertLink(sampler.noise, p.noise.nodeId, 0, "H3 sampler.noise");
@@ -709,17 +824,32 @@ function assertGraph(
 
 function normalizeTemplateForProfile(
   template: Record<string, unknown>,
+  contract: ProductionH3GraphContract,
   stageContracts: readonly ProductionH3StageBindingContract[],
   profileId: string,
 ): Record<string, unknown> {
   const normalized = structuredClone(template);
   for (const binding of stageContracts) {
+    if (binding.source === null) continue;
     const node = normalized[binding.source.nodeId];
     if (!isRecord(node) || !isRecord(node.inputs)) fail("H3 stage source is missing");
     if (node.inputs.image !== productionH3StageInputSentinel(profileId, binding.index, binding.slot)) {
       fail(`H3 template source ${binding.index} does not contain the fixed sentinel`);
     }
-    node.inputs.image = productionH3StageInputSentinel("profile", binding.index, binding.slot);
+    node.inputs.image = productionH3StageInputSentinel(TEMPLATE_PROFILE_MARKER, binding.index, binding.slot);
+  }
+  if (contract.version === 2) {
+    for (const [field, node, input] of [
+      ["prompt", contract.generator.nodeId, "prompt"],
+      ["seed", contract.pipeline.noise.nodeId, "noise_seed"],
+    ] as const) {
+      const target = normalized[node];
+      if (!isRecord(target) || !isRecord(target.inputs)) fail(`H3 contract v2 ${field} node is missing`);
+      if (target.inputs[input] !== productionH3ShotRequestSentinel(profileId, field)) {
+        fail(`H3 template ${field} does not contain the fixed contract v2 sentinel`);
+      }
+      target.inputs[input] = productionH3ShotRequestSentinel(TEMPLATE_PROFILE_MARKER, field);
+    }
   }
   return normalized;
 }
@@ -731,8 +861,24 @@ export function assertProductionH3Template(
   stageContracts: readonly ProductionH3StageBindingContract[],
   profileId: string,
 ): void {
-  const normalized = normalizeTemplateForProfile(workflow, stageContracts, profileId);
-  assertGraph(normalized, contract, execution, stageContracts, null);
+  const normalized = normalizeTemplateForProfile(workflow, contract, stageContracts, profileId);
+  assertGraph(normalized, contract, execution, stageContracts, null, null);
+}
+
+function parseShotBinding(
+  contract: ProductionH3GraphContract,
+  shotBinding: ProductionH3ShotBinding | null,
+): ProductionH3ShotBinding | null {
+  if (contract.version === 1) {
+    if (shotBinding !== null) fail("H3 contract v1 does not accept a per-shot binding");
+    return null;
+  }
+  if (shotBinding === null) fail("H3 contract v2 requires the staged ShotRequest prompt/seed");
+  boundedString(shotBinding.prompt, 16_384, "H3 shot binding prompt");
+  // ShotRequest.output.seed is a uint32 (production-shot-request.ts); a null seed cannot be
+  // materialized into a pinned graph and is rejected here rather than silently substituted.
+  boundedInteger(shotBinding.seed, 0, 0xffff_ffff, "H3 shot binding seed");
+  return Object.freeze({ prompt: shotBinding.prompt, seed: shotBinding.seed });
 }
 
 export function materializeProductionH3Workflow(
@@ -742,11 +888,14 @@ export function materializeProductionH3Workflow(
   stageContracts: readonly ProductionH3StageBindingContract[],
   receiptBindings: readonly ProductionH3ReceiptBinding[],
   profileId: string,
+  shotBinding: ProductionH3ShotBinding | null = null,
 ): ProductionH3MaterializedWorkflow {
   assertProductionH3Template(template, contract, execution, stageContracts, profileId);
+  const shot = parseShotBinding(contract, shotBinding);
   if (receiptBindings.length !== stageContracts.length) fail("H3 receipt binding count drifted");
   const bound = structuredClone(template);
   const providerKeys = new Map<number, string>();
+  const usedKeys = new Set<string>();
   for (let index = 0; index < stageContracts.length; index++) {
     const expected = stageContracts[index]!;
     const actual = receiptBindings[index];
@@ -754,9 +903,10 @@ export function materializeProductionH3Workflow(
       || !SHA256.test(actual.assetSha256) || !safeProviderObjectKey(actual.providerObjectKey)) {
       fail(`H3 receipt binding ${index} is invalid or reordered`);
     }
-    if ([...providerKeys.values()].includes(actual.providerObjectKey)) {
-      fail("H3 receipt provider keys must be unique");
-    }
+    if (usedKeys.has(actual.providerObjectKey)) fail("H3 receipt provider keys must be unique");
+    usedKeys.add(actual.providerObjectKey);
+    // The shot-request slot is staged and content-checked but binds no graph node (§5.3).
+    if (expected.source === null) continue;
     const node = record(bound[expected.source.nodeId], `H3 stage source ${index}`);
     const inputs = record(node.inputs, `H3 stage source ${index}.inputs`);
     if (inputs.image !== productionH3StageInputSentinel(profileId, index, expected.slot)) {
@@ -765,7 +915,21 @@ export function materializeProductionH3Workflow(
     inputs.image = actual.providerObjectKey;
     providerKeys.set(index, actual.providerObjectKey);
   }
-  assertGraph(bound, contract, execution, stageContracts, providerKeys);
+  if (shot !== null) {
+    const generator = record(bound[contract.generator.nodeId], "H3 generator");
+    const generatorInputs = record(generator.inputs, "H3 generator.inputs");
+    if (generatorInputs.prompt !== productionH3ShotRequestSentinel(profileId, "prompt")) {
+      fail("H3 prompt sentinel drifted before materialization");
+    }
+    generatorInputs.prompt = shot.prompt;
+    const noise = record(bound[contract.pipeline.noise.nodeId], "H3 noise");
+    const noiseInputs = record(noise.inputs, "H3 noise.inputs");
+    if (noiseInputs.noise_seed !== productionH3ShotRequestSentinel(profileId, "seed")) {
+      fail("H3 seed sentinel drifted before materialization");
+    }
+    noiseInputs.noise_seed = shot.seed;
+  }
+  assertGraph(bound, contract, execution, stageContracts, providerKeys, shot);
   return Object.freeze({
     templateWorkflowSha256: productionH3WorkflowSha256(template),
     boundWorkflowSha256: productionH3WorkflowSha256(bound),

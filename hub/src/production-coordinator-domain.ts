@@ -131,8 +131,10 @@ const SAFE_ERROR_SUMMARY = PRODUCTION_ERROR_SUMMARY_PATTERN;
 const REMOTE_STATES = new Set<RemoteJobState>([
   "pending", "running", "succeeded", "failed", "cancelled", "not-found",
 ]);
-const OUTPUT_KINDS = new Set<RemoteOutputLocator["kind"]>(["image", "video", "audio", "file"]);
-const OUTPUT_FOLDERS = new Set<RemoteOutputLocator["folderType"]>(["input", "output", "temp"]);
+const OUTPUT_KINDS = new Set(["image", "video", "audio", "file"]);
+const OUTPUT_FOLDERS = new Set(["input", "output", "temp"]);
+const PROVIDER_OUTPUT_KINDS = new Set(["video", "image"]);
+const PROVIDER_OUTPUT_ROLES = new Set(["primary", "last-frame"]);
 const OPERATIONS = new Set<CoordinatorOperation>(["stage-inputs", "submit", "inspect", "cancel", "ingest"]);
 const FAILURE_CODES = new Set<CoordinatorFailure["code"]>([
   "aborted", "submission-unknown", "remote-rejected", "remote-unavailable", "invalid-response",
@@ -314,12 +316,27 @@ export function parseCancelAttempt(value: unknown, subject = "CancelAttempt"): C
 
 function parseOutput(value: unknown, subject: string): RemoteOutputLocator {
   const row = record(value, subject);
-  // §4.5 的 locator 联合按 source 分支；缺少 source 时按 comfy-view 读取。provider-output 的取回要走
-  // adapter 的 openOutput，ingest kernel 收敛到该联合前（§8.6 的 production-gateway.ts /
-  // production-ingestor.ts 行）durable observation 不接受它——登记一条取不回的产物只会造成滞留任务。
+  // §4.5 的 locator 联合按 source 分支；缺少 source 时按 comfy-view 读取，写入侧总带 source。
   const source = Object.prototype.hasOwnProperty.call(row, "source") ? row.source : "comfy-view";
   if (source === "provider-output") {
-    fail(`${subject}.source`, "provider-output locator 的 openOutput 取回路径尚未装配，durable observation 暂不接受");
+    exactKeys(row, ["source", "remoteJobId", "outputIndex", "role", "kind"], subject);
+    if (typeof row.kind !== "string" || !PROVIDER_OUTPUT_KINDS.has(row.kind)) {
+      fail(`${subject}.kind`, "provider-output 只支持 video 或 image");
+    }
+    if (typeof row.role !== "string" || !PROVIDER_OUTPUT_ROLES.has(row.role)) {
+      fail(`${subject}.role`, "必须是 primary 或 last-frame");
+    }
+    if (!Number.isSafeInteger(row.outputIndex) || (row.outputIndex as number) < 0
+      || (row.outputIndex as number) > 127) {
+      fail(`${subject}.outputIndex`, "必须是 0–127 的安全整数");
+    }
+    return {
+      source: "provider-output",
+      remoteJobId: identifier(row.remoteJobId, `${subject}.remoteJobId`),
+      outputIndex: row.outputIndex as number,
+      role: row.role as "primary" | "last-frame",
+      kind: row.kind as "video" | "image",
+    };
   }
   if (source !== "comfy-view") fail(`${subject}.source`, "必须是 comfy-view 或 provider-output");
   const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
@@ -328,19 +345,19 @@ function parseOutput(value: unknown, subject: string): RemoteOutputLocator {
     Object.prototype.hasOwnProperty.call(row, "source") ? ["source", ...comfyKeys] : comfyKeys,
     subject,
   );
-  if (typeof row.kind !== "string" || !OUTPUT_KINDS.has(row.kind as RemoteOutputLocator["kind"])) {
+  if (typeof row.kind !== "string" || !OUTPUT_KINDS.has(row.kind)) {
     fail(`${subject}.kind`, "不是受支持的 output kind");
   }
-  if (typeof row.folderType !== "string" || !OUTPUT_FOLDERS.has(row.folderType as RemoteOutputLocator["folderType"])) {
+  if (typeof row.folderType !== "string" || !OUTPUT_FOLDERS.has(row.folderType)) {
     fail(`${subject}.folderType`, "必须是 input、output 或 temp");
   }
-  // 归一化时不落 source：durable 记录与 ingest 请求体的 exactKeys 仍是固定五字段，提前写入会被拒。
   return {
+    source: "comfy-view",
     nodeId: identifier(row.nodeId, `${subject}.nodeId`),
-    kind: row.kind as RemoteOutputLocator["kind"],
+    kind: row.kind as "image" | "video" | "audio" | "file",
     filename: relativePath(row.filename, `${subject}.filename`),
     subfolder: relativePath(row.subfolder, `${subject}.subfolder`, true),
-    folderType: row.folderType as RemoteOutputLocator["folderType"],
+    folderType: row.folderType as "input" | "output" | "temp",
   };
 }
 

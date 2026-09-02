@@ -7,7 +7,8 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { constants as fsConstants, type BigIntStats } from "node:fs";
 import { link, lstat, mkdir, open, readdir, realpath, unlink, type FileHandle } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { parseBackendCapabilities } from "./production-provider-adapter.ts";
 import {
   ProductionAdapterError,
   type BackendCapabilities,
@@ -16,6 +17,7 @@ import {
   type PreparedSubmission,
   type ProductionAdapter,
   type ProductionAdapterErrorCode,
+  type RemoteJobState,
   type RemoteObservation,
   type RemoteOutputLocator,
   type ProductionSubmissionInputBinding,
@@ -27,8 +29,10 @@ import {
   productionCanonicalJsonSha256,
 } from "./production-canonical-json.ts";
 import {
+  PRODUCTION_SHOT_REQUEST_SLOT,
   productionInputBindingsDigest,
   type ProductionInputBinding,
+  type ProductionStagedShotRequest,
 } from "./production-input-stager.ts";
 import {
   parseProductionIntentExecution,
@@ -40,6 +44,7 @@ import {
   parseProductionH3GraphContract,
   parseProductionH3StageBindingContract,
   type ProductionH3GraphContract,
+  type ProductionH3ShotBinding,
   type ProductionH3StageBindingContract,
 } from "./production-h3-graph.ts";
 import type {
@@ -55,7 +60,12 @@ export const DEFAULT_PRODUCTION_JOB_GATEWAY_REQUEST_BYTES = 256 * 1024;
 export const DEFAULT_PRODUCTION_JOB_GATEWAY_RESPONSE_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_PRODUCTION_JOB_GATEWAY_RECORD_BYTES = 16 * 1024 * 1024;
 export const DEFAULT_PRODUCTION_JOB_GATEWAY_WORKFLOW_BYTES = 8 * 1024 * 1024;
-const PRODUCTION_JOB_DURABLE_RECORDS_PER_SLOT = 12;
+/**
+ * Durable records one job slot may own: request, admission request/decision, raw attempt, outcome,
+ * the two settlement records, the §7 preemption and terminal verdicts, and one cancellation pair,
+ * with margin. The storage authority reserves `maxRecordBytes × this` per slot.
+ */
+export const PRODUCTION_JOB_DURABLE_RECORDS_PER_SLOT = 14;
 
 export type ProductionJobScope = {
   version: 1;
@@ -210,7 +220,7 @@ export interface ProductionJobStorageAdmissionPolicy {
 export type ProductionJobGatewayCredentialResolver = (
   context: Readonly<{
     scope: Readonly<ProductionJobScope>;
-    operation: "put-job" | "inspect-job" | "cancel-job";
+    operation: "put-job" | "inspect-job" | "cancel-job" | "read-capabilities";
   }>,
   signal: AbortSignal,
 ) => string | Promise<string>;
@@ -233,6 +243,15 @@ export type ProductionJobGatewayHooks = {
   afterRawSubmit?: (result: Readonly<SubmitResult>) => void | Promise<void>;
   /** Test/failpoint hook: cancellation intent is fsync'd, raw cancel not called yet. */
   afterCancellationDurable?: (request: Readonly<ProductionJobCancellationRequest>) => void | Promise<void>;
+  /**
+   * §7 restart sweep reporting. Called for every job the sweep could not decide, so the assembling
+   * process can log it: an undecided job stays pending and is retried at the next restart.
+   */
+  afterJobRecovery?: (fact: Readonly<{
+    directory: string;
+    outcome: "unresolved";
+    reason: "deadline" | "inspect-failed";
+  }>) => void;
 };
 
 export type ProductionJobGatewayOptions = {
@@ -455,6 +474,33 @@ type JobOutcomeRecord = {
   outcome: ProductionSubmissionAdmissionOutcome;
 };
 
+/**
+ * §7 Spot preemption. ComfyUI keeps its history in-process, so a restart loses every job that was
+ * still pending/running. The gateway records that verdict durably instead of letting the coordinator
+ * poll a `not-found` forever, and `GET /jobs/<id>` answers from the record afterwards.
+ */
+type JobPreemptionRecord = {
+  version: 1;
+  requestDigest: string;
+  remoteJobId: string;
+  recordedAt: string;
+  errorSummary: typeof PRODUCTION_JOB_PREEMPTED_ERROR_SUMMARY;
+  responseDigest: string;
+};
+
+/**
+ * A remote terminal state, recorded the first time any observation path sees one. It makes the
+ * verdict durable, so the §7 restart sweep can tell "the provider forgot a running job" from "the
+ * job already finished and its history has since been pruned" without asking the provider again.
+ */
+type JobTerminalRecord = {
+  version: 1;
+  requestDigest: string;
+  remoteJobId: string;
+  recordedAt: string;
+  observation: RemoteObservation;
+};
+
 type CancellationRecord = {
   version: 1;
   requestDigest: string;
@@ -479,6 +525,10 @@ const SAFE_PROFILE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_SLOT = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROVIDER_OBJECT_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$/;
 const SAFE_ERROR_SUMMARY = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/;
+/** §4.5 errorSummary 词表中的抢占类别。 */
+export const PRODUCTION_JOB_PREEMPTED_ERROR_SUMMARY = "provider_failed:preempted" as const;
+/** Bound on one restart sweep so a corrupt store cannot turn startup into an unbounded walk. */
+export const MAX_PRODUCTION_JOB_RECOVERY_SCAN = 100_000;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const REMOTE_STATES = new Set(["pending", "running", "succeeded", "failed", "cancelled", "not-found"]);
@@ -681,17 +731,39 @@ function safeRemotePath(value: unknown, allowEmpty: boolean): value is string {
 }
 
 function parseLocator(value: unknown, code: "internal" | "invalid-request" = "internal"): RemoteOutputLocator {
-  if (!isRecord(value) || !exactKeys(value, ["nodeId", "kind", "filename", "subfolder", "folderType"])
+  if (!isRecord(value)) fail(code);
+  // §4.5 判别联合：缺少 source 时按 comfy-view 读取；写入侧总带 source。
+  const source = Object.prototype.hasOwnProperty.call(value, "source") ? value.source : "comfy-view";
+  if (source === "provider-output") {
+    if (!exactKeys(value, ["source", "remoteJobId", "outputIndex", "role", "kind"])
+      || typeof value.remoteJobId !== "string" || !fullMatch(SAFE_ID, value.remoteJobId)
+      || !Number.isSafeInteger(value.outputIndex) || (value.outputIndex as number) < 0
+      || (value.outputIndex as number) > 127
+      || (value.role !== "primary" && value.role !== "last-frame")
+      || (value.kind !== "video" && value.kind !== "image")) fail(code);
+    return {
+      source: "provider-output",
+      remoteJobId: value.remoteJobId,
+      outputIndex: value.outputIndex as number,
+      role: value.role,
+      kind: value.kind,
+    };
+  }
+  if (source !== "comfy-view") fail(code);
+  const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
+  if (!exactKeys(value, Object.prototype.hasOwnProperty.call(value, "source")
+    ? ["source", ...comfyKeys] : comfyKeys)
     || typeof value.nodeId !== "string" || !fullMatch(SAFE_ID, value.nodeId)
     || typeof value.kind !== "string" || !LOCATOR_KINDS.has(value.kind)
     || !safeRemotePath(value.filename, false) || !safeRemotePath(value.subfolder, true)
     || typeof value.folderType !== "string" || !LOCATOR_FOLDERS.has(value.folderType)) fail(code);
   return {
+    source: "comfy-view",
     nodeId: value.nodeId,
-    kind: value.kind as RemoteOutputLocator["kind"],
+    kind: value.kind as "image" | "video" | "audio" | "file",
     filename: value.filename,
     subfolder: value.subfolder,
-    folderType: value.folderType as RemoteOutputLocator["folderType"],
+    folderType: value.folderType as "input" | "output" | "temp",
   };
 }
 
@@ -806,7 +878,8 @@ function parseVerifiedStageReceipt(
   claim: ProductionStageReceiptClaim,
 ): VerifiedStageReceipt {
   if (!isRecord(value) || !exactKeys(value, [
-    "version", "scope", "stageKey", "bindingsDigest", "intentDigest", "profileDigest", "execution", "bindings",
+    "version", "scope", "stageKey", "bindingsDigest", "intentDigest", "profileDigest", "execution",
+    "bindings", "shotRequest",
   ]) || value.version !== 1 || value.stageKey !== claim.stageKey
     || value.bindingsDigest !== claim.bindingsDigest || value.intentDigest !== claim.intentDigest
     || value.profileDigest !== claim.profileDigest || !isRecord(value.scope)
@@ -839,8 +912,38 @@ function parseVerifiedStageReceipt(
     profileDigest: claim.profileDigest,
     execution: Object.freeze({ ...execution }),
     bindings: Object.freeze(bindings.map((binding) => Object.freeze({ ...binding }))),
+    shotRequest: parseVerifiedShotRequest(value.shotRequest, bindings),
   };
   return Object.freeze(verified);
+}
+
+/**
+ * The per-shot projection the stage kernel read back out of the staged `inputs[0]` object. It is
+ * present exactly when the profile stages a `shot-request` slot, and it is bound to that object's
+ * digest, which the bindings digest already covers. A malformed shape here is a server-internal
+ * fault of the paired stage kernel, not a caller error — same classification as the stage side.
+ */
+function parseVerifiedShotRequest(
+  value: unknown,
+  bindings: readonly ProductionInputBinding[],
+): Readonly<ProductionStagedShotRequest> | null {
+  const staged = bindings[0]?.slot === PRODUCTION_SHOT_REQUEST_SLOT;
+  if (value === null) {
+    if (staged) fail("internal");
+    return null;
+  }
+  if (!staged || !isRecord(value) || !exactKeys(value, ["version", "assetSha256", "prompt", "seed"])
+    || value.version !== 1 || typeof value.assetSha256 !== "string"
+    || !SHA256.test(value.assetSha256) || value.assetSha256 !== bindings[0]!.assetSha256
+    || typeof value.prompt !== "string" || value.prompt.length < 1 || value.prompt.length > 16_384
+    || (value.seed !== null && (!Number.isSafeInteger(value.seed)
+      || (value.seed as number) < 0 || (value.seed as number) > 0xffff_ffff))) fail("internal");
+  return Object.freeze({
+    version: 1 as const,
+    assetSha256: value.assetSha256,
+    prompt: value.prompt,
+    seed: value.seed as number | null,
+  });
 }
 
 function adapterErrorCode(error: unknown): ProductionAdapterErrorCode | "internal" {
@@ -1133,14 +1236,20 @@ function decodeSegment(value: string): string {
 
 type ParsedRoute =
   | { kind: "job"; scope: ProductionJobScope; remoteJobId: string }
-  | { kind: "cancel"; scope: ProductionJobScope; remoteJobId: string; cancelKey: string };
+  | { kind: "cancel"; scope: ProductionJobScope; remoteJobId: string; cancelKey: string }
+  | { kind: "capabilities"; scope: ProductionJobScope };
 
 function parseRoute(url: URL): ParsedRoute {
   if (url.search || url.hash) fail("not-found");
   const parts = url.pathname.split("/");
-  if (parts.length !== 7 && parts.length !== 9) fail("not-found");
-  if (parts[0] !== "" || parts[1] !== "v1" || parts[2] !== "scopes" || parts[5] !== "jobs") fail("not-found");
+  if (parts.length !== 6 && parts.length !== 7 && parts.length !== 9) fail("not-found");
+  if (parts[0] !== "" || parts[1] !== "v1" || parts[2] !== "scopes") fail("not-found");
   const scope = parseScope(decodeSegment(parts[3]!), decodeSegment(parts[4]!));
+  if (parts.length === 6) {
+    if (parts[5] !== "capabilities") fail("not-found");
+    return { kind: "capabilities", scope };
+  }
+  if (parts[5] !== "jobs") fail("not-found");
   const remoteJobId = safeId(decodeSegment(parts[6]!));
   if (parts.length === 7) return { kind: "job", scope, remoteJobId };
   if (parts[7] !== "cancellations" || !SHA256.test(parts[8]!)) fail("not-found");
@@ -1241,6 +1350,62 @@ function parseStoredPutRequest(
 ): ProductionJobPutRequest {
   try { return parsePutRequest(value, scope, remoteJobId); }
   catch { fail("internal"); }
+}
+
+function preemptionResponseDigest(remoteJobId: string, recordedAt: string): string {
+  return sha256(JSON.stringify({
+    version: 1, kind: "provider-preempted", remoteJobId, recordedAt,
+  }));
+}
+
+function parsePreemptionRecord(
+  value: unknown,
+  request: JobRequestRecord,
+): JobPreemptionRecord {
+  if (!isRecord(value) || !exactKeys(value, [
+    "version", "requestDigest", "remoteJobId", "recordedAt", "errorSummary", "responseDigest",
+  ]) || value.version !== 1 || value.requestDigest !== request.requestDigest
+    || value.remoteJobId !== request.request.remoteJobId || !canonicalIso(value.recordedAt)
+    || value.errorSummary !== PRODUCTION_JOB_PREEMPTED_ERROR_SUMMARY
+    || value.responseDigest !== preemptionResponseDigest(value.remoteJobId, value.recordedAt)) fail("internal");
+  return {
+    version: 1,
+    requestDigest: request.requestDigest,
+    remoteJobId: request.request.remoteJobId,
+    recordedAt: value.recordedAt,
+    errorSummary: PRODUCTION_JOB_PREEMPTED_ERROR_SUMMARY,
+    responseDigest: value.responseDigest,
+  };
+}
+
+const TERMINAL_REMOTE_STATES = new Set<RemoteJobState>(["succeeded", "failed", "cancelled"]);
+
+function parseTerminalRecord(value: unknown, request: JobRequestRecord): JobTerminalRecord {
+  if (!isRecord(value) || !exactKeys(value, [
+    "version", "requestDigest", "remoteJobId", "recordedAt", "observation",
+  ]) || value.version !== 1 || value.requestDigest !== request.requestDigest
+    || value.remoteJobId !== request.request.remoteJobId
+    || !canonicalIso(value.recordedAt)) fail("internal");
+  const observation = parseObservation(value.observation, request.request.remoteJobId, "internal");
+  if (!TERMINAL_REMOTE_STATES.has(observation.state)) fail("internal");
+  return {
+    version: 1,
+    requestDigest: request.requestDigest,
+    remoteJobId: request.request.remoteJobId,
+    recordedAt: value.recordedAt,
+    observation,
+  };
+}
+
+function preemptedObservation(record: JobPreemptionRecord): RemoteObservation {
+  return {
+    remoteJobId: record.remoteJobId,
+    state: "failed",
+    observedAt: record.recordedAt,
+    outputs: [],
+    errorSummary: record.errorSummary,
+    responseDigest: record.responseDigest,
+  };
 }
 
 function parseJobRequestRecord(value: unknown, scope: ProductionJobScope, remoteJobId: string): JobRequestRecord {
@@ -1564,7 +1729,8 @@ export class ProductionJobGateway {
       || !this.#storageAdmissionPolicy || typeof this.#storageAdmissionPolicy.acquire !== "function"
       || typeof this.#storageAdmissionPolicy.commit !== "function"
       || typeof this.#storageAdmissionPolicy.release !== "function"
-      || !this.#rawAdapter || typeof this.#rawAdapter.prepareSubmission !== "function"
+      || !this.#rawAdapter || typeof this.#rawAdapter.capabilities !== "function"
+      || typeof this.#rawAdapter.prepareSubmission !== "function"
       || typeof this.#rawAdapter.submitPrepared !== "function" || typeof this.#rawAdapter.inspect !== "function"
       || typeof this.#rawAdapter.cancel !== "function") fail("invalid-request");
     this.#timeoutMs = safeInteger(
@@ -1616,7 +1782,7 @@ export class ProductionJobGateway {
     request: Request,
     context: Readonly<{
       scope: Readonly<ProductionJobScope>;
-      operation: "put-job" | "inspect-job" | "cancel-job";
+      operation: "put-job" | "inspect-job" | "cancel-job" | "read-capabilities";
     }>,
     signal: AbortSignal,
   ): Promise<void> {
@@ -1681,6 +1847,202 @@ export class ProductionJobGateway {
     const request = await this.#loadJob(scope, remoteJobId, signal);
     if (!request || request.requestDigest !== binding.requestDigest) fail("not-found");
     return request;
+  }
+
+  async #loadPreemption(
+    request: JobRequestRecord,
+    signal: AbortSignal,
+  ): Promise<JobPreemptionRecord | null> {
+    const value = await optionalJson(
+      this.#store,
+      jobFile(this.#store, request.request.scope, request.request.remoteJobId, "preempted.json"),
+      this.#maxRecordBytes,
+      signal,
+    );
+    return value === null ? null : parsePreemptionRecord(value, request);
+  }
+
+  async #loadTerminal(
+    request: JobRequestRecord,
+    signal: AbortSignal,
+  ): Promise<JobTerminalRecord | null> {
+    const value = await optionalJson(
+      this.#store,
+      jobFile(this.#store, request.request.scope, request.request.remoteJobId, "terminal.json"),
+      this.#maxRecordBytes,
+      signal,
+    );
+    return value === null ? null : parseTerminalRecord(value, request);
+  }
+
+  /** First writer wins: a concurrent observer's record is read back and returned unchanged. */
+  async #recordTerminal(
+    request: JobRequestRecord,
+    observation: RemoteObservation,
+    signal: AbortSignal,
+  ): Promise<RemoteObservation> {
+    const record: JobTerminalRecord = {
+      version: 1,
+      requestDigest: request.requestDigest,
+      remoteJobId: request.request.remoteJobId,
+      recordedAt: this.#now().toISOString(),
+      observation,
+    };
+    const path = jobFile(this.#store, request.request.scope, request.request.remoteJobId, "terminal.json");
+    const created = await this.#publish(path, record);
+    if (created) return observation;
+    const existing = await this.#loadTerminal(request, signal);
+    return existing === null ? observation : existing.observation;
+  }
+
+  /**
+   * The one observation path for a job. Durable verdicts outrank the provider: a preemption record
+   * (§7) means the provider can no longer account for the job, and a recorded terminal state stays
+   * the answer after ComfyUI's in-process history is pruned or lost. Otherwise the provider is asked
+   * once, and a terminal answer is made durable so later reads and the restart sweep agree with it.
+   * Returns null when the provider could not be reached.
+   */
+  async #observeJob(
+    request: JobRequestRecord,
+    signal: AbortSignal,
+  ): Promise<RemoteObservation | null> {
+    const preempted = await this.#loadPreemption(request, signal);
+    if (preempted !== null) return preemptedObservation(preempted);
+    const terminal = await this.#loadTerminal(request, signal);
+    if (terminal !== null) return terminal.observation;
+    const observation = await this.#tryInspect(request.request.remoteJobId, signal);
+    if (observation === null) return null;
+    if (!TERMINAL_REMOTE_STATES.has(observation.state)) return observation;
+    return await this.#recordTerminal(request, observation, signal);
+  }
+
+  /**
+   * §7 restart sweep. Every durable job record that had already reached its raw submission attempt
+   * and that the provider no longer knows is rewritten to `provider_failed:preempted`. A job the
+   * provider still knows, and a job whose inspection could not be completed, are both left alone:
+   * this pass only records a verdict it has evidence for, and reports what it could not decide.
+   */
+  async recoverPreemptedJobs(callerSignal?: AbortSignal): Promise<{
+    scanned: number;
+    rewritten: number;
+    unresolved: number;
+  }> {
+    let scanned = 0;
+    let rewritten = 0;
+    let unresolved = 0;
+    await verifyRoot(this.#store);
+    let scopeDirectories: string[];
+    try { scopeDirectories = await readdir(this.#store.scopes); }
+    catch (error) {
+      if (isNodeError(error, "ENOENT")) return { scanned: 0, rewritten: 0, unresolved: 0 };
+      throw error;
+    }
+    for (const scopeDirectory of scopeDirectories.sort()) {
+      if (!SHA256.test(scopeDirectory)) continue;
+      const jobsRoot = join(this.#store.scopes, scopeDirectory, "jobs");
+      let jobDirectories: string[];
+      try { jobDirectories = await readdir(jobsRoot); }
+      catch (error) {
+        if (isNodeError(error, "ENOENT")) continue;
+        throw error;
+      }
+      for (const jobDirectory of jobDirectories.sort()) {
+        if (!SHA256.test(jobDirectory)) continue;
+        if (scanned >= MAX_PRODUCTION_JOB_RECOVERY_SCAN) fail("internal");
+        scanned++;
+        const outcome = await this.#recoverOneJob(
+          join(jobsRoot, jobDirectory), scopeDirectory, callerSignal,
+        );
+        if (outcome === "rewritten") rewritten++;
+        else if (outcome === "unresolved") unresolved++;
+      }
+    }
+    return { scanned, rewritten, unresolved };
+  }
+
+  /**
+   * One job, under its own deadline: a long batch must not make the whole sweep time out. Only a
+   * caller abort or a shutdown ends the sweep; this job's own deadline elapsing means "no verdict
+   * for this job", which is reported as `unresolved` and left for the next restart.
+   */
+  async #recoverOneJob(
+    directory: string,
+    scopeDirectory: string,
+    callerSignal?: AbortSignal,
+  ): Promise<"rewritten" | "unresolved" | "skipped"> {
+    const fallback = new AbortController();
+    const operation = this.#operation(callerSignal ?? fallback.signal);
+    try { return await this.#recoverOneJobUnderDeadline(directory, scopeDirectory, operation.signal); }
+    catch (error) {
+      if (callerSignal?.aborted === true || this.#shutdown.signal.aborted) throw error;
+      if (error instanceof ProductionJobGatewayError && error.code === "aborted") {
+        this.#hooks.afterJobRecovery?.(Object.freeze({
+          directory, outcome: "unresolved" as const, reason: "deadline",
+        }));
+        return "unresolved";
+      }
+      throw error;
+    }
+    finally { operation.finish(); }
+  }
+
+  async #recoverOneJobUnderDeadline(
+    directory: string,
+    scopeDirectory: string,
+    signal: AbortSignal,
+  ): Promise<"rewritten" | "unresolved" | "skipped"> {
+    const value = await optionalJson(this.#store, join(directory, "request.json"), this.#maxRecordBytes, signal);
+    if (value === null) return "skipped";
+    if (!isRecord(value) || !isRecord(value.request)) fail("internal");
+    const scope = parseScopeObjectInternal((value.request as Record<string, unknown>).scope);
+    const remoteJobId = safeId((value.request as Record<string, unknown>).remoteJobId, "internal");
+    // The store path is derived from the record's own identity, so a record found under a foreign
+    // directory name is a corrupt store, not a job to make a verdict about.
+    if (scopeHash(scope) !== scopeDirectory || idHash(remoteJobId) !== basename(directory)) fail("internal");
+    const request = parseJobRequestRecord(value, scope, remoteJobId);
+    if (await this.#loadPreemption(request, signal) !== null) return "skipped";
+    // A recorded terminal state is the durable answer already: the job finished, and a pruned
+    // provider history must not turn it into a preemption.
+    if (await this.#loadTerminal(request, signal) !== null) return "skipped";
+    // A durable not-submitted outcome proves no provider request was ever attempted.
+    const outcomeValue = await optionalJson(
+      this.#store, join(directory, "outcome.json"), this.#maxRecordBytes, signal,
+    );
+    if (outcomeValue !== null && parseOutcomeRecord(outcomeValue, request).outcome.state === "not-submitted") {
+      return "skipped";
+    }
+    // No raw attempt claim means no POST was ever issued for this record; the coordinator's own
+    // submission path still owns it, and marking it preempted would poison a live retry.
+    const attempt = await optionalJson(
+      this.#store, join(directory, "raw-attempt.json"), this.#maxRecordBytes, signal,
+    );
+    if (attempt === null) return "skipped";
+    // Only a submitted, non-terminal job reaches the provider here.
+    let observation: RemoteObservation;
+    try { observation = parseObservation(await this.#rawAdapter.inspect(remoteJobId, signal), remoteJobId); }
+    catch {
+      if (signal.aborted) fail("aborted");
+      this.#hooks.afterJobRecovery?.(Object.freeze({
+        directory, outcome: "unresolved" as const, reason: "inspect-failed",
+      }));
+      return "unresolved";
+    }
+    if (TERMINAL_REMOTE_STATES.has(observation.state)) {
+      await this.#recordTerminal(request, observation, signal);
+      return "skipped";
+    }
+    if (observation.state !== "not-found") return "skipped";
+    const recordedAt = this.#now().toISOString();
+    const record: JobPreemptionRecord = {
+      version: 1,
+      requestDigest: request.requestDigest,
+      remoteJobId,
+      recordedAt,
+      errorSummary: PRODUCTION_JOB_PREEMPTED_ERROR_SUMMARY,
+      responseDigest: preemptionResponseDigest(remoteJobId, recordedAt),
+    };
+    await this.#publish(join(directory, "preempted.json"), record);
+    return "rewritten";
   }
 
   async #resolveProfile(request: ProductionJobPutRequest, signal: AbortSignal): Promise<ProductionJobProfile> {
@@ -1756,6 +2118,15 @@ export class ProductionJobGateway {
     const receipt = await this.#verifiedStageReceipt(request, profile, signal);
     if (profile.execution === null || profile.h3GraphContract === null || profile.stageGraphBindings === null
       || profile.execution.workflowSha256 !== profile.workflowDigest) fail("forbidden");
+    // Contract v2 fills prompt/seed from the staged ShotRequest the stage kernel content-checked
+    // and re-read; a null seed cannot be materialized into a pinned graph (§5.3).
+    let shotBinding: ProductionH3ShotBinding | null = null;
+    if (profile.h3GraphContract.version === 2) {
+      if (receipt.shotRequest === null || receipt.shotRequest.seed === null) fail("forbidden");
+      shotBinding = { prompt: receipt.shotRequest.prompt, seed: receipt.shotRequest.seed };
+    } else if (receipt.shotRequest !== null) {
+      fail("forbidden");
+    }
     let materialized: ReturnType<typeof materializeProductionH3Workflow>;
     try {
       assertProductionH3Template(
@@ -1772,6 +2143,7 @@ export class ProductionJobGateway {
         profile.stageGraphBindings,
         receipt.bindings,
         profile.profileId,
+        shotBinding,
       );
     } catch { fail("forbidden"); }
     if (materialized.templateWorkflowSha256 !== profile.workflowDigest
@@ -2344,7 +2716,7 @@ export class ProductionJobGateway {
     // render into an unnecessary provider network call.
     const observation = outcome?.state === "not-submitted"
       ? null
-      : await this.#tryInspect(request.request.remoteJobId, signal);
+      : await this.#observeJob(request, signal);
     const submissionState: ProductionJobSubmissionState = outcome?.state === "submitted" ? "accepted"
       : outcome?.state === "not-submitted" && outcome.errorCode === "remote-rejected"
         ? "rejected"
@@ -2459,12 +2831,8 @@ export class ProductionJobGateway {
 
   async #getJob(route: Extract<ParsedRoute, { kind: "job" }>, signal: AbortSignal): Promise<Response> {
     const request = await this.#requireOwnedJob(route.scope, route.remoteJobId, signal);
-    let observation: RemoteObservation;
-    try { observation = parseObservation(await this.#rawAdapter.inspect(route.remoteJobId, signal), route.remoteJobId); }
-    catch {
-      if (signal.aborted) fail("aborted");
-      fail("raw-unavailable");
-    }
+    const observation = await this.#observeJob(request, signal);
+    if (observation === null) fail("raw-unavailable");
     const response: ProductionJobGetResponse = {
       version: 1,
       scope: route.scope,
@@ -2526,7 +2894,7 @@ export class ProductionJobGateway {
       this.#store, join(directory, "result.json"), this.#maxRecordBytes, signal,
     );
     const result = resultValue === null ? null : parseCancellationResultRecord(resultValue, durableRecord).result;
-    const observation = await this.#tryInspect(route.remoteJobId, signal);
+    const observation = await this.#observeJob(job, signal);
     const response: ProductionJobCancellationResponse = {
       version: 1,
       scope: route.scope,
@@ -2541,6 +2909,25 @@ export class ProductionJobGateway {
   }
 
   /** Fetch-compatible private HTTP boundary. */
+  /**
+   * §8.6 capability forwarding: the answer is the raw adapter's own capability descriptor, parsed
+   * with the same strict reader the coordinator uses on the wire. The kernel never authors a
+   * literal — a backend whose descriptor does not satisfy §4.3 must fail here, not silently
+   * present a fabricated one.
+   */
+  async #capabilities(scope: ProductionJobScope, signal: AbortSignal): Promise<Response> {
+    let raw: BackendCapabilities;
+    try { raw = await raceAbort(Promise.resolve(this.#rawAdapter.capabilities(signal)), signal); }
+    catch {
+      if (signal.aborted) fail("aborted");
+      fail("raw-unavailable");
+    }
+    let parsed: Required<BackendCapabilities>;
+    try { parsed = parseBackendCapabilities(raw, "ProductionJobGateway.capabilities"); }
+    catch { fail("internal"); }
+    return jsonResponse({ version: 1, scope, capabilities: parsed });
+  }
+
   async handle(request: Request): Promise<Response> {
     let operation: Operation | null = null;
     try {
@@ -2551,7 +2938,9 @@ export class ProductionJobGateway {
           ? "put-job" as const
           : route.kind === "job" && request.method === "GET"
             ? "inspect-job" as const
-            : null;
+            : route.kind === "capabilities" && request.method === "GET"
+              ? "read-capabilities" as const
+              : null;
       if (credentialOperation === null) fail("not-found");
       operation = this.#operation(request.signal);
       await verifyRoot(this.#store);
@@ -2559,6 +2948,7 @@ export class ProductionJobGateway {
         scope: Object.freeze({ ...route.scope }),
         operation: credentialOperation,
       }), operation.signal);
+      if (route.kind === "capabilities") return await this.#capabilities(route.scope, operation.signal);
       if (route.kind === "job" && request.method === "PUT") return await this.#putJob(request, route, operation.signal);
       if (route.kind === "job" && request.method === "GET") return await this.#getJob(route, operation.signal);
       if (route.kind === "cancel" && request.method === "PUT") {
@@ -2826,20 +3216,37 @@ export class ProductionGatewayAdapter implements ProductionAdapter {
     }
   }
 
-  async capabilities(_signal?: AbortSignal): Promise<BackendCapabilities> {
-    return {
-      backendKind: "comfyui",
-      backendInstanceId: this.#backendInstanceId,
-      asynchronous: true,
-      clientAssignedJobId: true,
-      inspectById: true,
-      progressHints: "optional-websocket",
-      pendingCancellation: "best-effort",
-      runningCancellation: "version-gated-best-effort",
-      providerIdempotency: false,
-      inputModes: ["image-upload"],
-      outputModes: ["download"],
-    };
+  /**
+   * §8.6: read the gateway's forwarded capability descriptor instead of authoring a literal here.
+   * The gateway derives it from its own registry, so the coordinator sees the backend's real model
+   * families, processing regions and per-profile limits (§4.3).
+   */
+  async capabilities(signal?: AbortSignal): Promise<BackendCapabilities> {
+    const exchanged = await this.#exchange(
+      endpoint(this.#baseUrl, this.#scope, "capabilities"),
+      { method: "GET", headers: { accept: "application/json" } },
+      signal,
+    );
+    if (exchanged.status !== 200) {
+      throw adapterFailure(
+        exchanged.status >= 400 && exchanged.status < 500 ? "remote-rejected" : "remote-unavailable",
+        `Production Gateway capabilities 返回 ${exchanged.status}`,
+      );
+    }
+    const value = exchanged.value;
+    if (!isRecord(value) || !exactKeys(value, ["version", "scope", "capabilities"]) || value.version !== 1) {
+      throw adapterFailure("invalid-response", "Production Gateway capabilities 响应无效");
+    }
+    const scope = value.scope;
+    if (!isRecord(scope) || scope.workspaceId !== this.#scope.workspaceId
+      || scope.project !== this.#scope.project) {
+      throw adapterFailure("invalid-response", "Production Gateway capabilities scope 与本 adapter 不一致");
+    }
+    const parsed = parseBackendCapabilities(value.capabilities, "ProductionGatewayAdapter.capabilities");
+    if (parsed.backendInstanceId !== this.#backendInstanceId) {
+      throw adapterFailure("invalid-response", "Production Gateway capabilities backendInstanceId 不一致");
+    }
+    return parsed;
   }
 
   #putBody(requestValue: SubmitRequest): { request: SubmitRequest; body: ProductionJobPutRequest; digest: string } {

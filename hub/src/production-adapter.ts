@@ -119,13 +119,12 @@ export type BackendCapabilities = {
   providerIdempotency: false;
   inputModes: readonly ("image-upload" | "cas-object-key" | "inline-base64" | "gcs-uri")[];
   outputModes: readonly ("download" | "provider-signed-url" | "gcs-object" | "inline-base64")[];
-  // §4.3 的四个描述字段。`ProductionGatewayAdapter.capabilities()` 目前自造 11 字段字面量，转发
-  // provider capabilities 后（§8.6 job gateway 行，下一切片）这四项改为必填；跨线解析
-  // （parseBackendCapabilities）现在就要求它们齐全，缺省只对进程内的过渡字面量成立。
-  modelFamilies?: readonly ProductionModelFamily[];
-  processingRegions?: readonly string[];
-  providerJobIdMapping?: "none" | "gateway-durable";
-  limitsByModelId?: Readonly<Record<string, VideoBackendLimits>>;
+  // §4.3 的四个描述字段。`ProductionGatewayAdapter.capabilities()` 转发 gateway 的真实 capability
+  // 后它们不再有「进程内过渡字面量」这一缺省来源，因此与跨线解析（parseBackendCapabilities）一致地必填。
+  modelFamilies: readonly ProductionModelFamily[];
+  processingRegions: readonly string[];
+  providerJobIdMapping: "none" | "gateway-durable";
+  limitsByModelId: Readonly<Record<string, VideoBackendLimits>>;
 };
 
 export type ProductionSubmissionInputBinding = {
@@ -172,9 +171,8 @@ export type SubmitResult = {
 export type RemoteJobState = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "not-found";
 
 /**
- * §4.5 locator 判别联合的 comfy-view 分支。`source` 缺省按 comfy-view 读取；写入侧在 ingest kernel
- * 与 job gateway 收敛到联合前（§8.6 的 production-gateway.ts / production-ingestor.ts 行，下一切片）
- * 保持不写该键——它们的 exactKeys 仍是固定五字段，提前写入会被拒。
+ * §4.5 locator 判别联合的 comfy-view 分支。读取侧对缺省 `source` 仍按 comfy-view 兼容（旧记录），
+ * 写入侧总带该键，因此 durable observation 与 ingest 请求体里的 locator 一律是显式判别联合。
  */
 export type ComfyViewOutputLocator = {
   source?: "comfy-view";
@@ -197,10 +195,11 @@ export type ProviderOutputLocator = {
 export type ProductionOutputLocator = ComfyViewOutputLocator | ProviderOutputLocator;
 
 /**
- * 兼容别名。durable observation（`RemoteObservation` / `CoordinatorRemoteObservation`）在 ingest
- * kernel 能取回 provider-output 之前只承载 comfy-view 形态；届时该别名收敛为 ProductionOutputLocator。
+ * durable observation（`RemoteObservation` / `CoordinatorRemoteObservation`）承载 §4.5 的完整判别
+ * 联合：ingest kernel 既能经 `comfyBaseUrl/view` 取回 comfy-view 产物，也能经 adapter 的 `openOutput`
+ * 取回 provider-output 产物。
  */
-export type RemoteOutputLocator = ComfyViewOutputLocator;
+export type RemoteOutputLocator = ProductionOutputLocator;
 
 export type RemoteObservation = {
   remoteJobId: string;
@@ -243,9 +242,9 @@ export type ComfyUiH3ProfileCapability = {
   durationSeconds: number;
   aspectRatio: H3AspectRatio;
   /**
-   * 该档所用 H3 graph 契约的版本。v1 把 `RandomNoise.noise_seed` 固定在 pinned graph 内，逐镜 seed
-   * 不落图，因此 capability 声明 `seed: "unsupported"`；契约 v2（1b，seed 改为 sentinel）落地后该档
-   * 改声明 2，`seed` 随之翻转为 `"uint32"`（§5.3）。
+   * 该档所用 H3 graph 契约的版本，由 gateway registry 的 `h3GraphContract.version` 提供。v1 把
+   * `RandomNoise.noise_seed` 固定在 pinned graph 内，逐镜 seed 不落图，因此 capability 声明
+   * `seed: "unsupported"`；v2 的 seed 是 sentinel、materialize 时逐镜填入，`seed` 为 `"uint32"`（§5.3）。
    */
   graphContractVersion: 1 | 2;
 };
@@ -360,8 +359,11 @@ function trustedProcessingRegions(value: readonly string[] | undefined): readonl
  * H3 契约的能力事实（§5.3）：fl2va 走 LoadImage 首/尾帧（尾帧可缺省），ref2va 走 ref_images；
  * 短边固定 768；音频由固定 pipeline 生成立体声；尾帧不回传，由 ingest kernel 用 ffmpeg 提取。
  * 逐镜 seed 只有契约 v2 落图，v1 的档声明 seed 不受支持。
+ *
+ * 导出以便 gateway registry 的只读 profile 快照与 `ComfyUiAdapter.capabilities()` 共用同一份推导：
+ * 快照里的 durationGrid 与 capability 的 `limitsByModelId[profileId].durationSeconds.grid` 因此恒等。
  */
-function h3LimitsByProfileId(
+export function h3LimitsByProfileId(
   profiles: readonly ComfyUiH3ProfileCapability[],
   maxInputImageBytes: number,
 ): Readonly<Record<string, VideoBackendLimits>> {
@@ -606,6 +608,8 @@ function outputLocators(outputs: unknown): RemoteOutputLocator[] {
           throw new ProductionAdapterError("invalid-response", "ComfyUI output.type 无效");
         }
         rows.push({
+          // §4.5：写入侧总带 source；读取侧对缺省 source 仍按 comfy-view 兼容。
+          source: "comfy-view",
           nodeId,
           kind: outputKind(group),
           filename: relativeRemotePath(entry.filename, "ComfyUI output.filename"),

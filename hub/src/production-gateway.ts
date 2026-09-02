@@ -10,11 +10,16 @@ import {
   link,
   lstat,
   mkdir,
+  mkdtemp,
   open,
+  readFile,
   realpath,
+  rm,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { isIP } from "node:net";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -26,11 +31,17 @@ import {
   type AssetRef,
   type ProductionCost,
 } from "./production-domain.ts";
-import type { FetchLike, RemoteOutputLocator } from "./production-adapter.ts";
 import type {
-  ProductionGatewayIngestRequest,
-  ProductionIngestScope,
-  ProductionIngestResult,
+  ComfyViewOutputLocator,
+  FetchLike,
+  ProviderOutputLocator,
+  RemoteOutputLocator,
+} from "./production-adapter.ts";
+import {
+  compareProductionOutputLocator,
+  type ProductionGatewayIngestRequest,
+  type ProductionIngestScope,
+  type ProductionIngestResult,
 } from "./production-ingestor.ts";
 
 export const DEFAULT_PRODUCTION_GATEWAY_TIMEOUT_MS = 120_000;
@@ -53,6 +64,23 @@ export type ProductionGatewayCostResolver = (
   signal: AbortSignal,
 ) => ProductionCost | Promise<ProductionCost>;
 
+/** §4.4 `openOutput`: a provider-output locator is fetched through the adapter, never through a URL. */
+export type ProductionProviderOutputOpener = (
+  output: Readonly<ProviderOutputLocator>,
+  signal: AbortSignal,
+) => Promise<{ body: ReadableStream<Uint8Array>; declaredLength: number | null }>;
+
+/**
+ * §5.3 tail frame: H3 does not return one, so the ingest kernel derives it from the ingested primary
+ * video. The extractor is injected so the kernel stays free of process spawning; the default
+ * implementation (`productionFfmpegLastFrameExtractor`) runs a fixed `ffmpeg` argv over two
+ * gateway-owned paths.
+ */
+export type ProductionLastFrameExtractor = (
+  input: Readonly<{ videoPath: string; mediaType: string; byteLength: number }>,
+  signal: AbortSignal,
+) => Promise<Uint8Array>;
+
 export type ProductionGatewayOptions = {
   /** Absolute, server-owned filesystem root. It is never accepted from an HTTP request. */
   storeRoot: string;
@@ -66,6 +94,13 @@ export type ProductionGatewayOptions = {
   comfyCredentialResolver?: ProductionGatewayCredentialResolver;
   /** Optional server-side provider accounting integration. Defaults to an honest unknown cost. */
   costResolver?: ProductionGatewayCostResolver;
+  /** Required before a `provider-output` locator can be ingested; there is no URL fallback. */
+  providerOutputOpener?: ProductionProviderOutputOpener;
+  /**
+   * Enables the derived tail frame. It is opt-in because a deployment without ffmpeg must fail
+   * loudly at assembly rather than half-way through an ingest.
+   */
+  lastFrameExtractor?: ProductionLastFrameExtractor;
   fetch?: FetchLike;
   timeoutMs?: number;
   maxRequestBytes?: number;
@@ -91,6 +126,7 @@ export type ProductionGatewayErrorCode =
   | "asset-too-large"
   | "bad-request"
   | "conflict"
+  | "derivation-failed"
   | "forbidden"
   | "internal"
   | "not-found"
@@ -104,6 +140,7 @@ const ERROR_STATUS: Readonly<Record<ProductionGatewayErrorCode, number>> = Objec
   "asset-too-large": 413,
   "bad-request": 400,
   conflict: 409,
+  "derivation-failed": 500,
   forbidden: 403,
   internal: 500,
   "not-found": 404,
@@ -226,10 +263,6 @@ function boundedInteger(
   return result;
 }
 
-function asciiCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -337,8 +370,28 @@ function safeRemotePath(value: unknown, allowEmpty: boolean): value is string {
 }
 
 function parseLocator(value: unknown): RemoteOutputLocator {
-  if (!isRecord(value)
-    || !exactKeys(value, ["nodeId", "kind", "filename", "subfolder", "folderType"])
+  if (!isRecord(value)) fail("bad-request");
+  // §4.5 判别联合：缺少 source 时按 comfy-view 读取；写入侧总带 source。
+  const source = Object.prototype.hasOwnProperty.call(value, "source") ? value.source : "comfy-view";
+  if (source === "provider-output") {
+    if (!exactKeys(value, ["source", "remoteJobId", "outputIndex", "role", "kind"])
+      || typeof value.remoteJobId !== "string" || !IDENTIFIER.test(value.remoteJobId)
+      || !Number.isSafeInteger(value.outputIndex) || (value.outputIndex as number) < 0
+      || (value.outputIndex as number) > 127
+      || (value.role !== "primary" && value.role !== "last-frame")
+      || (value.kind !== "video" && value.kind !== "image")) fail("bad-request");
+    return {
+      source: "provider-output",
+      remoteJobId: value.remoteJobId,
+      outputIndex: value.outputIndex as number,
+      role: value.role,
+      kind: value.kind,
+    };
+  }
+  if (source !== "comfy-view") fail("bad-request");
+  const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
+  if (!exactKeys(value, Object.prototype.hasOwnProperty.call(value, "source")
+    ? ["source", ...comfyKeys] : comfyKeys)
     || typeof value.nodeId !== "string" || !IDENTIFIER.test(value.nodeId)
     || typeof value.kind !== "string" || !LOCATOR_KINDS.has(value.kind)
     || !safeRemotePath(value.filename, false) || !safeRemotePath(value.subfolder, true)
@@ -346,21 +399,16 @@ function parseLocator(value: unknown): RemoteOutputLocator {
     fail("bad-request");
   }
   return {
+    source: "comfy-view",
     nodeId: value.nodeId,
-    kind: value.kind as RemoteOutputLocator["kind"],
+    kind: value.kind as "image" | "video" | "audio" | "file",
     filename: value.filename,
     subfolder: value.subfolder,
     folderType: value.folderType as "output" | "temp",
   };
 }
 
-function compareLocator(left: RemoteOutputLocator, right: RemoteOutputLocator): number {
-  return asciiCompare(left.nodeId, right.nodeId)
-    || asciiCompare(left.kind, right.kind)
-    || asciiCompare(left.folderType, right.folderType)
-    || asciiCompare(left.subfolder, right.subfolder)
-    || asciiCompare(left.filename, right.filename);
-}
+const compareLocator = compareProductionOutputLocator;
 
 function parseIngestRequest(
   value: unknown,
@@ -487,7 +535,7 @@ function sniffMediaType(header: Uint8Array): string | null {
   return null;
 }
 
-function mediaMatchesKind(mediaType: string, kind: RemoteOutputLocator["kind"]): boolean {
+function mediaMatchesKind(mediaType: string, kind: "image" | "video" | "audio" | "file"): boolean {
   if (!ALLOWED_MEDIA_TYPES.has(mediaType)) return false;
   if (kind === "file") return true;
   return mediaType.startsWith(`${kind}/`);
@@ -820,7 +868,7 @@ function parseGatewayRoute(url: URL, method: string): GatewayRoute {
   return { kind: "asset", scope, digest: match[4]! };
 }
 
-function comfyOutputUrl(base: URL, locator: RemoteOutputLocator): URL {
+function comfyOutputUrl(base: URL, locator: ComfyViewOutputLocator): URL {
   const url = new URL(base.toString());
   // WHATWG URL normalizes an empty HTTP pathname back to "/". Treat that root sentinel as an
   // empty prefix so a trusted origin-only base (http://127.0.0.1:8188) resolves to /view.
@@ -848,6 +896,8 @@ export class ProductionGateway {
   readonly #credentialResolver: ProductionGatewayCredentialResolver | null;
   readonly #comfyCredentialResolver: ProductionGatewayCredentialResolver | null;
   readonly #costResolver: ProductionGatewayCostResolver | null;
+  readonly #providerOutputOpener: ProductionProviderOutputOpener | null;
+  readonly #lastFrameExtractor: ProductionLastFrameExtractor | null;
   readonly #fetch: FetchLike;
   readonly #timeoutMs: number;
   readonly #maxRequestBytes: number;
@@ -867,6 +917,12 @@ export class ProductionGateway {
     if (this.#credentialResolver !== null && typeof this.#credentialResolver !== "function") fail("bad-request");
     this.#comfyCredentialResolver = options.comfyCredentialResolver ?? null;
     this.#costResolver = options.costResolver ?? null;
+    this.#providerOutputOpener = options.providerOutputOpener ?? null;
+    this.#lastFrameExtractor = options.lastFrameExtractor ?? null;
+    if ((this.#providerOutputOpener !== null && typeof this.#providerOutputOpener !== "function")
+      || (this.#lastFrameExtractor !== null && typeof this.#lastFrameExtractor !== "function")) {
+      fail("bad-request");
+    }
     this.#fetch = options.fetch ?? fetch;
     this.#timeoutMs = boundedInteger(options.timeoutMs, DEFAULT_PRODUCTION_GATEWAY_TIMEOUT_MS, 50, 900_000);
     this.#maxRequestBytes = boundedInteger(
@@ -1100,11 +1156,45 @@ export class ProductionGateway {
     }
   }
 
-  async #download(
+  /**
+   * Obtain the byte stream for one audited locator. `comfy-view` goes through the trusted ComfyUI
+   * origin; `provider-output` goes through the adapter's `openOutput`, which keeps any signed URL or
+   * OAuth token inside that one transfer (§4.4).
+   */
+  async #openLocator(
     scope: ProductionIngestScope,
     locator: RemoteOutputLocator,
     operation: Operation,
-  ): Promise<DownloadedAsset> {
+  ): Promise<{ body: ReadableStream<Uint8Array>; declared: number | null }> {
+    if (locator.source === "provider-output") {
+      if (this.#providerOutputOpener === null) fail("provider-unavailable");
+      let opened: { body: ReadableStream<Uint8Array>; declaredLength: number | null };
+      try {
+        opened = await raceAbort(Promise.resolve(this.#providerOutputOpener(
+          Object.freeze({ ...locator }), operation.signal,
+        )), operation.signal);
+      } catch (error) {
+        if (error instanceof ProductionGatewayError) throw error;
+        if (operation.signal.aborted) fail("aborted");
+        fail("provider-unavailable");
+      }
+      if (!opened || typeof opened !== "object" || typeof opened.body !== "object" || opened.body === null
+        || typeof (opened.body as ReadableStream<Uint8Array>).getReader !== "function") {
+        fail("provider-unavailable");
+      }
+      const declaredLength = opened.declaredLength;
+      if (declaredLength !== null) {
+        if (!Number.isSafeInteger(declaredLength) || declaredLength < 1) {
+          void opened.body.cancel().catch(() => undefined);
+          fail("provider-unavailable");
+        }
+        if (declaredLength > this.#maxAssetBytes) {
+          void opened.body.cancel().catch(() => undefined);
+          fail("asset-too-large");
+        }
+      }
+      return { body: opened.body, declared: declaredLength };
+    }
     const headers: Record<string, string> = {
       accept: "application/octet-stream",
       "accept-encoding": "identity",
@@ -1145,10 +1235,22 @@ export class ProductionGateway {
       void response.body.cancel().catch(() => undefined);
       fail("unsupported-media");
     }
+    return { body: response.body, declared };
+  }
 
+  /**
+   * Stream one opened locator into the content-addressed store. The digest, the length and the
+   * sniffed media type are all measured from the bytes actually received.
+   */
+  async #absorb(
+    body: ReadableStream<Uint8Array>,
+    declared: number | null,
+    kind: "image" | "video" | "audio" | "file",
+    operation: Operation,
+  ): Promise<DownloadedAsset> {
     await this.#verifyRoot();
     const temporary = await createTempFile(this.#directories, "asset");
-    const reader = response.body.getReader();
+    const reader = body.getReader();
     const hash = createHash("sha256");
     const sniff = Buffer.alloc(64);
     let sniffed = 0;
@@ -1174,7 +1276,7 @@ export class ProductionGateway {
       }
       if (length < 1 || (declared !== null && declared !== length)) fail("provider-unavailable");
       const mediaType = sniffMediaType(sniff.subarray(0, sniffed));
-      if (mediaType === null || !mediaMatchesKind(mediaType, locator.kind)) fail("unsupported-media");
+      if (mediaType === null || !mediaMatchesKind(mediaType, kind)) fail("unsupported-media");
       await temporary.handle.sync();
       requireActive(operation.signal);
       await temporary.handle.chmod(0o400);
@@ -1201,6 +1303,16 @@ export class ProductionGateway {
     } finally {
       reader.releaseLock();
     }
+  }
+
+
+  async #download(
+    scope: ProductionIngestScope,
+    locator: RemoteOutputLocator,
+    operation: Operation,
+  ): Promise<DownloadedAsset> {
+    const opened = await this.#openLocator(scope, locator, operation);
+    return await this.#absorb(opened.body, opened.declared, locator.kind, operation);
   }
 
   async #ingest(
@@ -1236,6 +1348,13 @@ export class ProductionGateway {
     requireActive(operation.signal);
     const assets = [...byDigest.values()];
     if (assets.length < 1) fail("internal");
+    const derived = await this.#deriveLastFrame(parsed, assets, operation);
+    if (derived !== null) {
+      await this.#publishOwnership(scope, derived, operation.signal);
+      requireActive(operation.signal);
+      // A provider that returns the same bytes twice must not create a duplicate AssetRef.
+      if (!assets.some((asset) => asset.sha256 === derived.sha256)) assets.push(derived);
+    }
     let cost = UNKNOWN_COST;
     if (this.#costResolver) {
       try {
@@ -1263,6 +1382,48 @@ export class ProductionGateway {
       return jsonResponse(winner.result);
     }
     return jsonResponse(result);
+  }
+
+  /**
+   * §5.3 / §8.6: after the ingest, register the tail frame as a second AssetRef. A provider that
+   * already returned one (`role: "last-frame"`) is authoritative; otherwise the injected extractor
+   * derives it from the single ingested primary video. The derived blob lands in the same CAS the
+   * stage kernel's `cas://` resolver reads, so the next shot can take it as its first frame (§6.4).
+   */
+  async #deriveLastFrame(
+    request: ProductionGatewayIngestRequest,
+    assets: readonly AssetRef[],
+    operation: Operation,
+  ): Promise<AssetMetadata | null> {
+    if (this.#lastFrameExtractor === null) return null;
+    if (request.locators.some((locator) =>
+      locator.source === "provider-output" && locator.role === "last-frame")) return null;
+    // An extractor is configured, so this deployment owes every take a tail frame. Zero or several
+    // primary videos means there is no single frame to derive, and silently registering one asset
+    // fewer would break the continuity chain the next shot reads (§6.4).
+    const videos = assets.filter((asset) => asset.mediaType.startsWith("video/"));
+    if (videos.length !== 1) fail("derivation-failed");
+    const video = videos[0]!;
+    if (assets.length + 1 > this.#maxAssets) fail("derivation-failed");
+    await this.#verifyRoot();
+    const videoPath = join(this.#directories.blobs, video.sha256.slice(0, 2), video.sha256);
+    let bytes: Uint8Array;
+    try {
+      bytes = await raceAbort(Promise.resolve(this.#lastFrameExtractor(Object.freeze({
+        videoPath,
+        mediaType: video.mediaType,
+        byteLength: video.byteLength,
+      }), operation.signal)), operation.signal);
+    } catch (error) {
+      if (error instanceof ProductionGatewayError) throw error;
+      if (operation.signal.aborted) fail("aborted");
+      fail("derivation-failed");
+    }
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength < 1) fail("derivation-failed");
+    if (bytes.byteLength > this.#maxAssetBytes) fail("asset-too-large");
+    const frame = new Blob([bytes]).stream() as ReadableStream<Uint8Array>;
+    const absorbed = await this.#absorb(frame, bytes.byteLength, "image", operation);
+    return absorbed.metadata;
   }
 
   async #openAsset(
@@ -1378,6 +1539,89 @@ export class ProductionGateway {
     this.#shutdown.abort(new Error("shutdown"));
     for (const controller of this.#active) controller.abort(new Error("shutdown"));
   }
+}
+
+export const DEFAULT_PRODUCTION_LAST_FRAME_BYTES = 64 * 1024 * 1024;
+
+export type ProductionFfmpegLastFrameOptions = {
+  /** Absolute path or bare program name resolved through PATH. Never taken from a request. */
+  ffmpegPath?: string;
+  /** Directory for the single temporary PNG. Defaults to the OS temporary directory. */
+  temporaryRoot?: string;
+  timeoutMs?: number;
+  maxFrameBytes?: number;
+};
+
+/**
+ * Default tail-frame extractor: one fixed `ffmpeg` argv over two server-owned paths. `-update 1`
+ * rewrites the same output file for every decoded frame, so what remains is exactly the last frame;
+ * no seek arithmetic is involved and a one-frame clip behaves the same as a long one. Nothing in the
+ * argv comes from a request — only the input blob path the kernel chose and the temporary output.
+ */
+export function productionFfmpegLastFrameExtractor(
+  options: ProductionFfmpegLastFrameOptions = {},
+): ProductionLastFrameExtractor {
+  const program = options.ffmpegPath ?? "ffmpeg";
+  if (typeof program !== "string" || program.length < 1 || /[\u0000-\u001f\u007f]/.test(program)) {
+    throw new TypeError("production gateway ffmpeg path invalid");
+  }
+  const temporaryRoot = options.temporaryRoot ?? tmpdir();
+  const timeoutMs = options.timeoutMs ?? 120_000;
+  const maxFrameBytes = options.maxFrameBytes ?? DEFAULT_PRODUCTION_LAST_FRAME_BYTES;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000 || timeoutMs > 900_000
+    || !Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1_024) {
+    throw new TypeError("production gateway ffmpeg limits invalid");
+  }
+  return async (input, signal) => {
+    const directory = await mkdtemp(join(temporaryRoot, "wl-last-frame-"));
+    const output = join(directory, "last-frame.png");
+    try {
+      await new Promise<void>((resolvePromise, reject) => {
+        const child = execFile(program, [
+          "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+          "-i", input.videoPath,
+          "-an", "-update", "1", "-f", "image2", "-c:v", "png",
+          output,
+        ], { timeout: timeoutMs, maxBuffer: 64 * 1024, signal }, (error) => {
+          if (error) reject(error);
+          else resolvePromise();
+        });
+        child.stdin?.end();
+      });
+      const info = await lstat(output);
+      if (!info.isFile() || info.size < 1 || info.size > maxFrameBytes) {
+        throw new Error("ffmpeg produced no usable tail frame");
+      }
+      return await readFile(output);
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  };
+}
+
+/**
+ * Assembly-time proof that the configured ffmpeg exists and runs. It is a fixed `-version` call with
+ * no input path, so it cannot touch a store; a deployment that fails it would otherwise fail every
+ * ingest at the moment a take is already paid for.
+ */
+export async function probeProductionFfmpeg(
+  options: ProductionFfmpegLastFrameOptions = {},
+): Promise<string> {
+  const program = options.ffmpegPath ?? "ffmpeg";
+  if (typeof program !== "string" || program.length < 1 || /[\u0000-\u001f\u007f]/.test(program)) {
+    throw new TypeError("production gateway ffmpeg path invalid");
+  }
+  const timeoutMs = options.timeoutMs ?? 120_000;
+  return await new Promise<string>((resolvePromise, reject) => {
+    const child = execFile(program, ["-hide_banner", "-version"], {
+      timeout: timeoutMs,
+      maxBuffer: 64 * 1024,
+    }, (error, stdout) => {
+      if (error) reject(error);
+      else resolvePromise(String(stdout).split("\n", 1)[0]!.trim());
+    });
+    child.stdin?.end();
+  });
 }
 
 async function sendNodeResponse(response: Response, target: ServerResponse): Promise<void> {

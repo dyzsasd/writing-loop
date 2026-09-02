@@ -479,8 +479,9 @@ function parseTerritories(value: unknown, subject: string, allowEmpty = false): 
 
 /**
  * 逐镜变量全部由 `inputs[0]` 的 ShotRequest 决定，因此云家族的 `inputs[0]` 必须是 ShotRequest
- * （§4.2、§8.6）。H3 在 graph 契约 v2（Phase 1）落地前保持现状——契约 v1 的 stage 绑定没有 index 0 的
- * `shot-request` slot；届时把该家族改为 true 即可。
+ * （§4.2、§8.6）。H3 不按家族强制：契约 v1 与 v2 并存，而 intent 层看不出一个 profile 用的是哪一版，
+ * 按家族置 true 会连带拒绝全部 v1 intent。v2 的 `inputs[0]` 约束改在 stage profile 上实施——index 0
+ * 的 `shot-request` slot 与其 mediaType 一一对应，是版本感知的（§5.3、§6.5）。
  */
 const FAMILIES_REQUIRING_SHOT_REQUEST_INPUT: Readonly<Record<ProductionModelFamily, boolean>> = {
   generic: false,
@@ -907,6 +908,9 @@ export function parseProductionDispatchIntent(
  * 处理地域是数据实际被处理的物理位置，只接受 ISO-3166 alpha-2 国家/地区代码。集合别名 EU 与非标准码
  * UK 长得像 alpha-2 但不指向单一处理地，显式拒绝——否则 `allowedProcessingRegions: ["EU"]` 会把
  * 「允许 27 个成员国」写成一个既不匹配 FR 也不匹配 DE 的字面量，判定结果与配置意图相反。
+ *
+ * 返回值去重并升序：gateway registry 与 worker runtime config 两侧解析同一份地域数组，只有排序一致
+ * 时 profile digest 才可能相等（§4.2）。
  */
 function parseProcessingRegions(value: unknown, subject: string): string[] {
   if (!Array.isArray(value) || value.length > MAX_PRODUCTION_INTENT_TERRITORIES) {

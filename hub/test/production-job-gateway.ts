@@ -29,6 +29,7 @@ import {
 import type { ProductionStageReceiptClaim, VerifiedStageReceipt } from "../src/production-stage-gateway.ts";
 import {
   DEFAULT_PRODUCTION_JOB_GATEWAY_RECORD_BYTES,
+  PRODUCTION_JOB_DURABLE_RECORDS_PER_SLOT,
   ProductionGatewayAdapter,
   ProductionJobGateway,
   productionJobCancellationKey,
@@ -306,6 +307,10 @@ function capabilities(): BackendCapabilities {
     providerIdempotency: false,
     inputModes: ["image-upload"],
     outputModes: ["download"],
+    modelFamilies: ["generic", "minimax-h3"],
+    processingRegions: ["SG"],
+    providerJobIdMapping: "none",
+    limitsByModelId: {},
   };
 }
 
@@ -620,6 +625,7 @@ function verifiedReceiptForClaim(
     profileDigest: claim.profileDigest,
     execution: Object.freeze({ ...(options.execution ?? H3_EXECUTION) }),
     bindings: Object.freeze(bindings.map((binding) => Object.freeze({ ...binding }))),
+    shotRequest: null,
   });
 }
 
@@ -979,7 +985,8 @@ try {
   "不同 intent 并发抢同一 remote ID 时仅一方提交；loser 的同 intent/new remote 漂移保持 conflict");
   remoteRace.gateway.close();
 
-  const storageRecordBound = DEFAULT_PRODUCTION_JOB_GATEWAY_RECORD_BYTES * 12;
+  const storageRecordBound = DEFAULT_PRODUCTION_JOB_GATEWAY_RECORD_BYTES
+    * PRODUCTION_JOB_DURABLE_RECORDS_PER_SLOT;
   const capacityPolicy = new DurableTestStorageAdmissionPolicy({
     perScopeJobs: 2,
     perScopeBytes: storageRecordBound * 2,

@@ -52,6 +52,52 @@ if (materialized.templateWorkflowSha256 !== workflow.workflowSha256
   throw new Error("packaged H3 template→bound materialization smoke failed");
 }
 
+// 契约 v2：同一骨架、prompt / seed 为 sentinel、index 0 是不绑定 LoadImage 的 shot-request slot。
+const runtimeSourceV2 = JSON.parse(readFileSync(join(exampleRoot, "production-runtime-v2.json"), "utf8"));
+const parsedV2 = parseProductionRuntimeConfig(runtimeSourceV2);
+const workflowV2 = parsedV2.workflows[0];
+const profileV2 = parsedV2.stagingProfiles[0];
+if (workflowV2?.h3GraphContract?.version !== 2 || profileV2?.bindings?.kind !== "h3-graph-bindings") {
+  throw new Error("packaged H3 contract v2 config lost its graph contract or stage bindings");
+}
+const templateSourceV2 = JSON.parse(readFileSync(
+  join(exampleRoot, "workflows", `${profileV2.profileId}.json`), "utf8",
+));
+const stageBindingsV2 = profileV2.bindings.bindings;
+if (stageBindingsV2[0].slot !== "shot-request" || stageBindingsV2[0].source !== null) {
+  throw new Error("packaged H3 contract v2 profile lost its index 0 shot-request slot");
+}
+const generatorNodeV2 = workflowV2.h3GraphContract.generator.nodeId;
+const noiseNodeV2 = workflowV2.h3GraphContract.pipeline.noise.nodeId;
+const promptSentinel = templateSourceV2[generatorNodeV2].inputs.prompt;
+const seedSentinel = templateSourceV2[noiseNodeV2].inputs.noise_seed;
+const shotPrompt = "夜色中的天台，人物背对镜头缓慢后拉";
+const materializedV2 = materializeProductionH3Workflow(
+  templateSourceV2,
+  workflowV2.h3GraphContract,
+  profileV2.execution,
+  stageBindingsV2,
+  stageBindingsV2.map((binding) => ({
+    index: binding.index,
+    slot: binding.slot,
+    assetSha256: String(binding.index + 1).repeat(64),
+    providerObjectKey: binding.source === null
+      ? "scoped/example/0/shot-request.json"
+      : `scoped/example/${binding.index}/frame.png`,
+  })),
+  profileV2.profileId,
+  { prompt: shotPrompt, seed: 4242 },
+);
+if (promptSentinel !== `writing-loop://shot-request/${profileV2.profileId}/prompt`
+  || seedSentinel !== `writing-loop://shot-request/${profileV2.profileId}/seed`
+  || materializedV2.templateWorkflowSha256 !== workflowV2.workflowSha256
+  || materializedV2.workflow[generatorNodeV2].inputs.prompt !== shotPrompt
+  || materializedV2.workflow[noiseNodeV2].inputs.noise_seed !== 4242
+  || templateSourceV2[generatorNodeV2].inputs.prompt !== promptSentinel
+  || templateSourceV2[noiseNodeV2].inputs.noise_seed !== seedSentinel) {
+  throw new Error("packaged H3 contract v2 template→bound materialization smoke failed");
+}
+
 const root = realpathSync(mkdtempSync(join(tmpdir(), "wl-packaged-h3-")));
 let networkCalls = 0;
 const noNetwork = async () => {
