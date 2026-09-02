@@ -51,7 +51,9 @@ for (const script of scripts) {
 // （4003 failed to connect to backend）；回环端口必须经 IAP 的 ssh -L 转发。
 {
   const vmScript = readFileSync(join(repoRoot, "writing-loop-operator", "scripts", "gcp-h3-vm.sh"), "utf8");
-  const tunnelBlock = /cmd_tunnel\(\) \{[\s\S]*?\n\}\n/.exec(vmScript)?.[0] ?? "";
+  const tunnelSource = /cmd_tunnel\(\) \{[\s\S]*?\n\}\n/.exec(vmScript)?.[0] ?? "";
+  // 只看可执行行：注释里允许提到 start-iap-tunnel 来说明为什么不用它。
+  const tunnelBlock = tunnelSource.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
   ok(tunnelBlock.length > 0 && !tunnelBlock.includes("start-iap-tunnel")
     && tunnelBlock.includes("--tunnel-through-iap") && tunnelBlock.includes('-L "127.0.0.1:${port}:127.0.0.1:${port}"')
     && tunnelBlock.includes("ExitOnForwardFailure=yes"),
