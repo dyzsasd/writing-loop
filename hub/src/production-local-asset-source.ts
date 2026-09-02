@@ -9,7 +9,7 @@
 // The identity is checked on the way out, not assumed: the URI must be `cas://<authority>/sha256/
 // <digest>` for the authority this source was configured with, and the bytes read back must hash to
 // that digest and have exactly the length the AssetRef pins.
-import type { AssetRef } from "./production-domain.ts";
+import { PRODUCTION_CAS_AUTHORITY, type AssetRef } from "./production-domain.ts";
 import { ProductionCasError, readProductionCasObjectAsync } from "./production-cas.ts";
 
 /** Bounded read ceiling. A keyframe fits; nothing here streams, so the bound is also a memory bound. */
@@ -45,7 +45,6 @@ export interface ProductionLocalAssetSource {
 }
 
 const SHA256 = /^[a-f0-9]{64}$/;
-const CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 function fail(code: ProductionLocalAssetSourceErrorCode): never {
   throw new ProductionLocalAssetSourceError(code);
@@ -62,7 +61,7 @@ export function productionCasAssetAuthority(asset: Readonly<AssetRef>): string |
   catch { return null; }
   const authority = url.hostname.toLowerCase();
   if (url.protocol !== "cas:" || url.username || url.password || url.port || url.search || url.hash
-    || !CAS_AUTHORITY.test(authority) || typeof asset.sha256 !== "string" || !SHA256.test(asset.sha256)
+    || !PRODUCTION_CAS_AUTHORITY.test(authority) || typeof asset.sha256 !== "string" || !SHA256.test(asset.sha256)
     || url.pathname !== `/sha256/${asset.sha256}`) {
     return null;
   }
@@ -91,7 +90,7 @@ export class WorkspaceCasLocalAssetSource implements ProductionLocalAssetSource 
   constructor(options: WorkspaceCasLocalAssetSourceOptions) {
     if (!options || typeof options !== "object" || typeof options.root !== "string" || !options.root
       || typeof options.project !== "string" || typeof options.casAuthority !== "string"
-      || !CAS_AUTHORITY.test(options.casAuthority)) {
+      || !PRODUCTION_CAS_AUTHORITY.test(options.casAuthority)) {
       throw new TypeError("production local asset source 配置无效");
     }
     const maximum = options.maxObjectBytes ?? DEFAULT_PRODUCTION_LOCAL_ASSET_BYTES;

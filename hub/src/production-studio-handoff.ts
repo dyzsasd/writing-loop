@@ -25,6 +25,10 @@ import {
   type ProductionTask,
   type ShotRevisionRef,
 } from "./production-domain.ts";
+import {
+  productionBatchApprovalIsSample,
+  type ProductionBatchApproval,
+} from "./production-batch-approval.ts";
 import { planProductionTaskEnqueue } from "./production-enqueue.ts";
 import {
   ProductionIngestorError,
@@ -297,8 +301,13 @@ export const VIDEO_STUDIO_HANDOFF_CONTRACT_V2 = "citronetic-video-creation-studi
 export const VIDEO_STUDIO_HANDOFF_V2_PIPELINE = "scripted-drama" as const;
 
 /**
- * 本版只出账本能取证的 `qc-approved`：批次审批指纹与样片门都不落账本，凭空写出另外两个门等于
- * 伪造预授权记录。另外两个值保留在词表里，等 `plan-shots --confirm` 把 batchPlanId 持久化后再出。
+ * 三个门各有各自的取证来源，缺一即不出：
+ *   - `qc-approved` 取账本的 QC 裁决（`approval.decidedBy` / `decidedAt`）；
+ *   - `batch-approved` 取 `plan-shots --confirm` 写下的批次审批记录（`batchPlanId` 即被批准的
+ *     那一份计划的指纹）；
+ *   - `sample-approved` 只对该记录 `sampleShotIds` 指名的样片出，且要该 take 自己已经 approved。
+ * 2b 之前提交的 task 没有批次审批记录，此时只出 `qc-approved`——凭空写出另外两个门等于伪造
+ * 预授权记录。
  */
 export const VIDEO_STUDIO_GATES = ["qc-approved", "batch-approved", "sample-approved"] as const;
 export type VideoStudioGate = typeof VIDEO_STUDIO_GATES[number];
@@ -408,6 +417,11 @@ export type VideoStudioHandoffV2Create = {
 export type VideoStudioHandoffTakeSource = {
   intent: ProductionDispatchIntent;
   shotRequest: ShotRequest;
+  /**
+   * `plan-shots --confirm` 写下的批次审批记录。缺省 / null 表示该 task 由 2b 之前的 `--confirm`
+   * 发布（没有这份记录），此时只出 `qc-approved` 一条门。
+   */
+  batchApproval?: ProductionBatchApproval | null;
 };
 
 export type VideoStudioHandoffSourceResolver = (taskId: string) => VideoStudioHandoffTakeSource;
@@ -619,6 +633,57 @@ function takeAssets(
   };
 }
 
+/**
+ * 批次审批记录派生的两条门（§4.7、§4.8）。
+ *
+ * `batch-approved` 绑定 `batchPlanId`——`--confirm` 时被批准的那一份批次计划的指纹，重算它需要同一份
+ * 快照、runtime config、批次文档与视觉侧四张表，因此这条门是可复核的。本版没有操作者身份输入
+ * （`--confirm` 只接受指纹），所以 `approvedBy` 记的是签发这条门的控制面本身，不冒充人工审批人。
+ *
+ * `sample-approved` 只对 `sampleShotIds` 指名的样片出：样片门的事实是「这一镜是样片，且它的 take
+ * 已经人工 approved」，因此署名与时刻取 QC 裁决——builder 只在 approved take 上运行，条件恒成立。
+ * 不是样片的镜头不出这条门。
+ */
+function takeBatchGates(
+  approval: ProductionBatchApproval | null,
+  context: {
+    taskId: string;
+    shotId: string;
+    requestSha256: string;
+    decidedBy: string;
+    decidedAt: string;
+    subject: string;
+  },
+): VideoStudioGateRecord[] {
+  if (approval === null) return [];
+  if (approval.taskId !== context.taskId) {
+    fail(context.subject, `批次审批记录的 taskId ${approval.taskId} 与 task 不一致`);
+  }
+  if (approval.shotId !== context.shotId) {
+    fail(context.subject, `批次审批记录的 shotId ${approval.shotId} 与 take 的 ${context.shotId} 不一致`);
+  }
+  const bindsTo = { planSha256: approval.batchPlanId, requestSha256: context.requestSha256 };
+  const gates: VideoStudioGateRecord[] = [{
+    version: 1,
+    gate: "batch-approved",
+    bindsTo,
+    approvedBy: "wl-plan-shots",
+    approvedAt: approval.approvedAt,
+    system: "wl-plan-shots",
+  }];
+  if (productionBatchApprovalIsSample(approval)) {
+    gates.push({
+      version: 1,
+      gate: "sample-approved",
+      bindsTo,
+      approvedBy: context.decidedBy,
+      approvedAt: context.decidedAt,
+      system: "wl-sample-gate",
+    });
+  }
+  return gates;
+}
+
 /** 从已批准 take 构建确定性、带来源约束的 scripted-drama 交接包（§4.8）。 */
 export function buildVideoStudioHandoffV2(
   stateValue: ProductionState,
@@ -670,14 +735,23 @@ export function buildVideoStudioHandoffV2(
     }
     const approval = task.approval;
     const { assets, assetRoles } = takeAssets(task, intent, shotRequest, subject);
-    const gate: VideoStudioGateRecord = {
+    const decidedBy = opaque(approval.decidedBy, `${subject}.approval.decidedBy`);
+    const gates: VideoStudioGateRecord[] = [{
       version: 1,
       gate: "qc-approved",
       bindsTo: { planSha256: plan.planId, requestSha256: shotRequestAsset.sha256 },
-      approvedBy: opaque(approval.decidedBy, `${subject}.approval.decidedBy`),
+      approvedBy: decidedBy,
       approvedAt: approval.decidedAt,
       system: "wl-qc",
-    };
+    }];
+    gates.push(...takeBatchGates(source.batchApproval ?? null, {
+      taskId,
+      shotId: shot.shotId,
+      requestSha256: shotRequestAsset.sha256,
+      decidedBy,
+      decidedAt: approval.decidedAt,
+      subject,
+    }));
     const row: VideoStudioHandoffV2Take = {
       version: 1,
       taskId: task.id,
@@ -687,7 +761,7 @@ export function buildVideoStudioHandoffV2(
       assetRoles,
       execution: takeExecution(intent.execution, shotRequest, task.remoteJobId, `${subject}.execution`),
       cost: task.cost,
-      gates: [gate],
+      gates,
       license: takeLicense(intent.license, `${subject}.license`),
       approval,
     };

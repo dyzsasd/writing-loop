@@ -15,6 +15,10 @@ import { parseProductionExecutionProfileSnapshot } from "../src/production-profi
 import { parseShotBatchRequest, parseShotRequestScriptOptions } from "../src/production-shot-plan.ts";
 import { productionCasObjectPath, readProductionCasObject } from "../src/production-cas.ts";
 import {
+  parseProductionBatchApproval,
+  readProductionBatchApproval,
+} from "../src/production-batch-approval.ts";
+import {
   evaluateProductionIntentGates,
   parseProductionLicenseEvidence,
   productionIntentPath,
@@ -512,6 +516,38 @@ const errorOf = (fn: () => unknown): string => {
     .includes("未知：unknownKey"), "script.options 拒绝未知字段");
 }
 
+// —— 批次审批记录的解析面 ——
+{
+  const record = {
+    version: 1, kind: "writing-loop/shot-batch-approval", taskId: "take-EP001-S1-1",
+    shotId: "EP001-S1-1", batchPlanId: SHA.a, taskIdPrefix: "take", phase: "sample",
+    sampleShotIds: ["EP001-S1-1"], approvedAt: AT,
+  };
+  ok(parseProductionBatchApproval(record).batchPlanId === SHA.a, "批次审批记录严格解析");
+  ok(errorOf(() => parseProductionBatchApproval({ ...record, approvedBy: "ops:lead" }))
+    .includes("未知：approvedBy"), "批次审批记录拒绝未知字段");
+  ok(errorOf(() => parseProductionBatchApproval({ ...record, batchPlanId: "not-a-digest" }))
+    .includes("64 位小写 sha256"), "batchPlanId 必须是 sha256");
+  ok(errorOf(() => parseProductionBatchApproval({ ...record, approvedAt: "2026-08-28 00:00:00" }))
+    .includes("规范 UTC ISO-8601"), "approvedAt 必须是规范 UTC ISO（GateRecord 的 isoUtc 判据）");
+  ok(errorOf(() => parseProductionBatchApproval({ ...record, sampleShotIds: [] }))
+    .includes("样片门必须指名样片"), "sampleShotIds 不得为空");
+  ok(errorOf(() => parseProductionBatchApproval({ ...record, phase: "dress-rehearsal" }))
+    .includes("必须是 sample 或 bulk"), "phase 只接受 sample 或 bulk");
+}
+
+// —— 镜头筛选的解析面 ——
+{
+  ok(errorOf(() => parseShotBatchRequest({ ...batchRequest(), shotIds: [] }))
+    .includes("不得为空数组"), "批次文档 shotIds 不接受空数组（不筛选用 null 或省略）");
+  ok(errorOf(() => parseShotBatchRequest({ ...batchRequest(), shotIds: ["EP001-S1-1", "EP001-S1-1"] }))
+    .includes("不得重复"), "批次文档 shotIds 不得重复");
+  ok(errorOf(() => parseShotBatchRequest({ ...batchRequest(), shotIds: ["../escape"] }))
+    .includes("必须是安全 shotId"), "批次文档 shotIds 只接受安全 shotId");
+  ok(parseShotBatchRequest(batchRequest()).shotIds === null,
+    "省略 shotIds 与 null 同义（不筛选）");
+}
+
 // —— --plan 零写入 + batchPlanId 稳定性 ——
 const first = makeWorkspace();
 let batchPlanId = "";
@@ -663,6 +699,62 @@ try {
     ok(plan.validation.errors === 0 && plan.blocked === false,
       `落到 v1 档的镜头 seed 保持 null 且不报错（实得 ${JSON.stringify(plan.validation.shots.map((row: Record<string, any>) => row.issues))}）`);
   } finally { rmSync(mixedFixture.root, { recursive: true, force: true }); }
+}
+
+// —— EP001 场 1-1 的真实形态：4 镜里只有镜头 1 有首帧，其余落 t2v 被拒；--shot 只出镜头 1 ——
+{
+  const fourShots = batchRequest() as {
+    script: { patches: Array<Record<string, any>>; mergedPatches: Array<Record<string, any>> };
+  };
+  // 四条 ▲ 行各自一个机位即不合并（条件 3），得到 4 个存活镜头。
+  fourShots.script.patches = [1, 2, 3, 4].map((index) => ({
+    shotId: `EP001-S1-${index}`,
+    camera: { ...clone(CAMERA), cameraId: `CAM_${index}` },
+    scene: { dressingVariantId: "DRESS_BASE" },
+  }));
+  // prompt 四镜都撰写好了，首帧只有镜头 1 有——其余三镜等前一镜的尾帧。
+  fourShots.script.mergedPatches = [1, 2, 3, 4].map((index) => ({
+    shotId: `EP001-S1-${index}`,
+    prompt: clone(PROMPT_PATCH),
+    ...(index === 1 ? { continuity: { firstFrame: clone(OPERATOR_FIRST_FRAME) } } : {}),
+  }));
+  const fixture = makeWorkspace({ request: fourShots });
+  try {
+    const full = await planJson(fixture);
+    const rejected = (full.validation.shots as Array<Record<string, any>>)
+      .filter((row) => (row.issues as Array<Record<string, string>>)
+        .some((issue) => issue.code === "unsupported_operation"))
+      .map((row) => row.shotId as string);
+    ok(full.totals.shots === 4 && full.blocked === true
+      && rejected.join(",") === "EP001-S1-2,EP001-S1-3,EP001-S1-4",
+    `未筛选时 4 镜里的后三镜因无首帧落 t2v 被拒（实得 ${rejected.join(",") || "无"}）`);
+
+    const sampleOnly = await planJson(fixture, ["--shot", "EP001-S1-1"]);
+    const withPlanId = (sampleOnly.shots as Array<Record<string, any>>)
+      .filter((row) => row.planId !== null).map((row) => row.shotId as string);
+    ok(sampleOnly.blocked === false && sampleOnly.validation.errors === 0
+      && withPlanId.join(",") === "EP001-S1-1" && sampleOnly.totals.shots === 1
+      && sampleOnly.shots.length === 4,
+    `--shot EP001-S1-1 后 blocked=false 且只有镜头 1 有 planId（实得 blocked=${sampleOnly.blocked}`
+      + ` planId=${withPlanId.join(",") || "无"}）`);
+
+    // 筛选只决定这一批跑哪几镜，不改变镜头自身：镜头 1 的 ShotRequest 字节与单 intent 指纹两次一致。
+    const before = (full.shots as Array<Record<string, any>>).find((row) => row.shotId === "EP001-S1-1")!;
+    const after = (sampleOnly.shots as Array<Record<string, any>>).find((row) => row.shotId === "EP001-S1-1")!;
+    ok(before.planId === after.planId && before.shotRequestSha256 === after.shotRequestSha256
+      && before.idempotencyKey === after.idempotencyKey
+      && before.shotRequestSha256 !== null,
+    `筛选前后镜头 1 的 planId 与 ShotRequest digest 不变（实得 ${before.shotRequestSha256} / ${after.shotRequestSha256}）`);
+    ok(full.batchPlanId !== sampleOnly.batchPlanId,
+      "但整批的 batchPlanId 变了：批准的是那一份选中集合，不能互相顶替");
+
+    // --plan 带 --shot 而 --confirm 不带：重算出的是另一份计划，指纹不匹配即拒绝提交。
+    const mismatched = await capture(
+      planArgs(fixture, ["--confirm", sampleOnly.batchPlanId as string, "--json"]), fixture.root,
+    );
+    ok(mismatched.code === 1 && mismatched.err.includes("确认指纹不匹配"),
+      `--plan 带 --shot 而 --confirm 漏掉时被拒（实得 ${mismatched.code}；${mismatched.err}）`);
+  } finally { rmSync(fixture.root, { recursive: true, force: true }); }
 }
 
 // —— 视觉侧默认值：mappings 填灯光/陈设、候选图 shotIds 填首帧 ——
@@ -1029,6 +1121,8 @@ try {
     containsRealFace: false,
   });
 
+  // 批内不成链：ShotRequest 携带尾帧 digest，上游还没出片时那个 digest 只能是猜的，因此
+  // previous-shot-last-frame 一律要求上游 take 已入库并到达 QC。
   const chained = batchRequest({
     script: null,
     shots: [
@@ -1045,9 +1139,15 @@ try {
   const chainFixture = makeWorkspace({ request: chained });
   try {
     const plan = await planJson(chainFixture);
-    ok(plan.waves.length === 2 && plan.waves[0].shotIds.join(",") === "EP001-S1-1"
-      && plan.waves[1].shotIds.join(",") === "EP001-S1-2",
-    `承接链把依赖镜排到后一波（实得 ${JSON.stringify(plan.waves)}）`);
+    const issues = (plan.validation.shots as Array<Record<string, any>>)
+      .flatMap((row) => (row.issues as Array<Record<string, string>>)
+        .filter((issue) => issue.source === "upstream"));
+    ok(plan.blocked === true && issues.length === 1
+      && issues[0]!.code === "upstream-take-unavailable"
+      && issues[0]!.message.includes("批内承接不成立"),
+    `同批次内的尾帧承接不成立，落 error 并写明要先出片（实得 ${JSON.stringify(issues)}）`);
+    ok(plan.waves.length === 1 && plan.waves[0].shotIds.join(",") === "EP001-S1-1,EP001-S1-2",
+      `waves[] 恒为一波（实得 ${JSON.stringify(plan.waves)}）`);
   } finally { rmSync(chainFixture.root, { recursive: true, force: true }); }
 
   const cyclic = batchRequest({
@@ -1071,9 +1171,352 @@ try {
   });
   const cycleFixture = makeWorkspace({ request: cyclic });
   try {
-    const result = await capture(planArgs(cycleFixture, ["--plan"]), cycleFixture.root);
-    ok(result.code === 1 && result.err.includes("环形依赖"), "承接链互相依赖时拒绝出计划");
+    const plan = await planJson(cycleFixture);
+    const issues = (plan.validation.shots as Array<Record<string, any>>)
+      .flatMap((row) => (row.issues as Array<Record<string, string>>)
+        .filter((issue) => issue.source === "upstream"));
+    ok(plan.blocked === true && issues.length === 2
+      && issues.every((issue) => issue.code === "upstream-take-unavailable"),
+    `互相承接的两镜各落一条 error（不再有环形依赖这条路径，实得 ${issues.length} 条）`);
   } finally { rmSync(cycleFixture.root, { recursive: true, force: true }); }
+
+  // —— 按镜头筛选：--shot / 批次文档 shotIds ——
+  const selectFixture = makeWorkspace({
+    request: batchRequest({ script: null, shots: [shotDraft(1), shotDraft(2)] }),
+  });
+  try {
+    const full = await planJson(selectFixture);
+    ok(full.totals.shots === 2 && full.shots.length === 2 && full.estimates.length === 2,
+      `未筛选时两镜都编译（实得 ${full.totals.shots}）`);
+
+    const filtered = await planJson(selectFixture, ["--shot", "EP001-S1-1"]);
+    const entries = new Map((filtered.shots as Array<Record<string, any>>)
+      .map((row) => [row.shotId as string, row] as const));
+    ok(filtered.totals.shots === 1 && filtered.estimates.length === 1 && filtered.decisions.length === 1
+      && filtered.selectedShotIds.join(",") === "EP001-S1-1"
+      && filtered.totals.estimatedAmountMicros === 430_000 * 8,
+    `--shot 只对选中镜头编译、进 intents 与计估算（实得 totals=${filtered.totals.shots}`
+      + ` estimates=${filtered.estimates.length}）`);
+    ok(filtered.shots.length === 2
+      && entries.get("EP001-S1-1")!.selected === true
+      && entries.get("EP001-S1-1")!.selectionReason === null
+      && entries.get("EP001-S1-1")!.planId !== null
+      && entries.get("EP001-S1-2")!.selected === false
+      && entries.get("EP001-S1-2")!.planId === null
+      && entries.get("EP001-S1-2")!.profileId === null
+      && entries.get("EP001-S1-2")!.wave === null
+      && String(entries.get("EP001-S1-2")!.selectionReason).includes("筛选"),
+    `被筛掉的镜头仍在 shots[] 里以 selected: false 列出并注明原因（实得 ${JSON.stringify(entries.get("EP001-S1-2"))}）`);
+    ok(filtered.waves.length === 1 && filtered.waves[0].shotIds.join(",") === "EP001-S1-1",
+      `承接链波次只在选中集合内计算（实得 ${JSON.stringify(filtered.waves)}）`);
+    ok(filtered.blocked === false && filtered.validation.shots.length === 1,
+      `筛选后的批次未被阻断，validation 只覆盖选中镜头（实得 ${JSON.stringify(filtered.validation.shots)}）`);
+    ok(filtered.batchPlanId !== full.batchPlanId, "选中集合计入 batchPlanId：筛选前后不是同一批次");
+
+    const stray = await capture(planArgs(selectFixture, ["--plan", "--shot", "EP001-S1-9"]), selectFixture.root);
+    ok(stray.code === 1 && stray.err.includes("指向不存在的镜头"), "--shot 指向不存在的镜头时拒绝出计划");
+    const twice = await capture(
+      planArgs(selectFixture, ["--plan", "--shot", "EP001-S1-1", "--shot", "EP001-S1-1"]), selectFixture.root,
+    );
+    ok(twice.code === 2 && twice.err.includes("重复指定"), "同一 --shot 重复指定是用法错误");
+
+    // --confirm 只提交选中镜头，并把批次审批记录写在 intent 旁边。
+    const confirmed = await capture(
+      planArgs(selectFixture, ["--confirm", filtered.batchPlanId, "--shot", "EP001-S1-1", "--json"]),
+      selectFixture.root,
+    );
+    const committed = JSON.parse(confirmed.out) as Record<string, any>;
+    ok(confirmed.code === 0 && committed.shots.length === 1
+      && committed.shots[0].shotId === "EP001-S1-1",
+    `--confirm 只提交选中镜头（实得 ${confirmed.code}；${confirmed.err}）`);
+    ok(readProductionIntent(selectFixture.root, "demo", "take-EP001-S1-2") === null
+      && readProductionBatchApproval(selectFixture.root, "demo", "take-EP001-S1-2") === null,
+    "未选中镜头既没有 intent 也没有批次审批记录");
+    const approval = readProductionBatchApproval(selectFixture.root, "demo", "take-EP001-S1-1");
+    ok(approval !== null && approval.batchPlanId === filtered.batchPlanId
+      && approval.taskIdPrefix === "take" && approval.phase === "sample"
+      && approval.shotId === "EP001-S1-1"
+      && approval.sampleShotIds.join(",") === "EP001-S1-1"
+      && approval.approvedAt === AT,
+    `批次审批记录持久化 batchPlanId / samplePolicy / taskIdPrefix（实得 ${JSON.stringify(approval)}）`);
+    ok(committed.shots[0].batchApprovalCreated === true, "首次 --confirm 新建批次审批记录");
+    const replay = await capture(
+      planArgs(selectFixture, ["--confirm", filtered.batchPlanId, "--shot", "EP001-S1-1", "--json"]),
+      selectFixture.root,
+    );
+    const replayed = JSON.parse(replay.out) as Record<string, any>;
+    ok(replay.code === 0 && replayed.shots[0].batchApprovalCreated === false
+      && replayed.shots[0].taskCreated === false
+      && JSON.stringify(readProductionBatchApproval(selectFixture.root, "demo", "take-EP001-S1-1"))
+        === JSON.stringify(approval),
+    `精确重放 blocked=false 且不重复写批次审批记录（实得 ${replay.code}；${replay.err}）`);
+  } finally { rmSync(selectFixture.root, { recursive: true, force: true }); }
+
+  // —— 记录只绑定到实际发布该 task 的批次（major 1） ——
+  // 场景 A：intent 冲突让 enqueue 抛错。此时 task 没有被创建，因此不得留下任何批次审批记录；
+  // 换一份批次文档重新出计划并提交后，记录必须绑定到真正发布这个 task 的那一份。
+  const scenarioA = makeWorkspace({ request: batchRequest({ script: null, shots: [shotDraft(1)] }) });
+  try {
+    const planA = await planJson(scenarioA);
+    const intentDirectory = join(scenarioA.root, ".writing-loop", "demo", "production-intents.v1");
+    mkdirSync(intentDirectory, { recursive: true, mode: 0o700 });
+    const squatter = join(intentDirectory, "take-EP001-S1-1.json");
+    writeFileSync(squatter, JSON.stringify({ version: 1, taskId: "take-EP001-S1-1" }, null, 2) + "\n");
+    const failed = await capture(planArgs(scenarioA, ["--confirm", planA.batchPlanId]), scenarioA.root);
+    ok(failed.code === 1 && failed.err.includes("已存在但不可读"),
+      `intent 冲突时 --confirm 失败（实得 ${failed.code}；${failed.err}）`);
+    ok(readProductionBatchApproval(scenarioA.root, "demo", "take-EP001-S1-1") === null,
+      "enqueue 失败时不残留批次审批记录（task 没被创建）");
+
+    rmSync(squatter);
+    const batchB = batchRequest({ script: null, shots: [shotDraft(1)], createdAt: "2026-08-29T00:00:00.000Z" });
+    writeFileSync(scenarioA.inputFile, JSON.stringify(batchB, null, 2) + "\n");
+    const planB = await planJson(scenarioA);
+    ok(planB.batchPlanId !== planA.batchPlanId, "改过的批次文档得到另一个 batchPlanId");
+    const committed = await capture(planArgs(scenarioA, ["--confirm", planB.batchPlanId, "--json"]), scenarioA.root);
+    const record = readProductionBatchApproval(scenarioA.root, "demo", "take-EP001-S1-1");
+    ok(committed.code === 0 && record !== null && record.batchPlanId === planB.batchPlanId
+      && record.approvedAt === "2026-08-29T00:00:00.000Z",
+    `记录绑定到真正发布该 task 的批次 B（实得 ${record?.batchPlanId}）`);
+  } finally { rmSync(scenarioA.root, { recursive: true, force: true }); }
+
+  // 残留的孤儿记录（上一版实现留下的、或人工放进去的）不被静默沿用：拒绝覆盖并报出两边的指纹。
+  const orphanRecord = makeWorkspace({ request: batchRequest({ script: null, shots: [shotDraft(1)] }) });
+  try {
+    const plan = await planJson(orphanRecord);
+    const directory = join(orphanRecord.root, ".writing-loop", "demo", "production-batch-approvals.v1");
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    writeFileSync(join(directory, "take-EP001-S1-1.json"), JSON.stringify({
+      version: 1, kind: "writing-loop/shot-batch-approval", taskId: "take-EP001-S1-1",
+      shotId: "EP001-S1-1", batchPlanId: SHA.a, taskIdPrefix: "take", phase: "sample",
+      sampleShotIds: ["EP001-S1-1"], approvedAt: AT,
+    }, null, 2) + "\n");
+    const result = await capture(planArgs(orphanRecord, ["--confirm", plan.batchPlanId]), orphanRecord.root);
+    ok(result.code === 1 && result.err.includes("残留的孤儿批次审批记录")
+      && result.err.includes(SHA.a) && result.err.includes(plan.batchPlanId as string),
+    `孤儿记录被拒绝覆盖并报出两边 batchPlanId（实得 ${result.err}）`);
+  } finally { rmSync(orphanRecord.root, { recursive: true, force: true }); }
+
+  // 批次文档 shotIds 与命令行 --shot 等价，两者都给出时取交集。
+  const documentFixture = makeWorkspace({
+    request: batchRequest({ script: null, shots: [shotDraft(1), shotDraft(2)], shotIds: ["EP001-S1-2"] }),
+  });
+  try {
+    const plan = await planJson(documentFixture);
+    ok(plan.selectedShotIds.join(",") === "EP001-S1-2" && plan.totals.shots === 1,
+      `批次文档 shotIds 单独生效（实得 ${plan.selectedShotIds.join(",")}）`);
+    const intersect = await planJson(documentFixture, ["--shot", "EP001-S1-2"]);
+    ok(intersect.selectedShotIds.join(",") === "EP001-S1-2",
+      "--shot 与文档 shotIds 同时给出时取交集");
+    const empty = await capture(
+      planArgs(documentFixture, ["--plan", "--shot", "EP001-S1-1"]), documentFixture.root,
+    );
+    ok(empty.code === 1 && empty.err.includes("没有交集"),
+      "--shot 与文档 shotIds 无交集时拒绝出计划（那样一个镜头也提交不了）");
+  } finally { rmSync(documentFixture.root, { recursive: true, force: true }); }
+
+  // 选中镜头依赖被筛掉、且尚未出片的镜头：error 级 issue，批次被阻断。
+  const orphanChain = batchRequest({
+    script: null,
+    shots: [
+      shotDraft(1),
+      shotDraft(2, {
+        continuity: {
+          stageGroup: "EP001-S1", prevShotId: "EP001-S1-1",
+          firstFrame: carryFrom("EP001-S1-1", "take-EP001-S1-1"),
+          lastFrame: null, references: [], referencePolicy: "trim_by_priority", spatialPasses: [],
+        },
+      }),
+    ],
+  });
+  const orphanFixture = makeWorkspace({ request: orphanChain });
+  try {
+    const plan = await planJson(orphanFixture, ["--shot", "EP001-S1-2"]);
+    const issues = (plan.validation.shots[0].issues as Array<Record<string, string>>)
+      .filter((issue) => issue.source === "upstream");
+    ok(plan.blocked === true && issues.length === 1
+      && issues[0]!.code === "upstream-take-unavailable" && issues[0]!.severity === "error"
+      && issues[0]!.field === "continuity.firstFrame"
+      && issues[0]!.message.includes("批内承接不成立"),
+    `选中镜头依赖同批次内尚未出片的镜头时落 error（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(orphanFixture.root, { recursive: true, force: true }); }
+
+  // —— previous-shot-last-frame 的上游 take 状态与尾帧身份检查 ——
+  const upstreamShot = (frameSha256: string): Record<string, unknown> => shotDraft(2, {
+    continuity: {
+      stageGroup: "EP001-S1", prevShotId: "EP001-S1-0",
+      firstFrame: {
+        asset: asset(frameSha256),
+        origin: { kind: "previous-shot-last-frame", shotId: "EP001-S1-0", taskId: "take-EP001-S1-0" },
+        containsRealFace: false,
+      },
+      lastFrame: null, references: [], referencePolicy: "trim_by_priority", spatialPasses: [],
+    },
+  });
+  const upstreamIssues = (plan: Record<string, any>): Array<Record<string, string>> =>
+    (plan.validation.shots[0].issues as Array<Record<string, string>>)
+      .filter((issue) => issue.source === "upstream");
+
+  /** 把 `take-EP001-S1-0` 推进到目标状态；`assets` 为 null 时停在 planned。 */
+  function seedUpstreamTask(root: string, assets: Array<Record<string, unknown>> | null): void {
+    const store = new ProductionStore(root, WORKSPACE_ID, "demo");
+    let task = store.create({
+      version: 1,
+      id: "take-EP001-S1-0",
+      idempotencyKey: "idem-upstream-EP001-S1-0",
+      subject: {
+        version: 1,
+        kind: "shot",
+        shot: {
+          version: 1,
+          episode: { version: 1, episodeId: "ep-001", revision: 1, source: asset(SHA.e, "text/markdown", 8_192) },
+          shotId: "EP001-S1-0",
+          revision: 1,
+          source: asset(SHA.e, "text/markdown", 8_192),
+        },
+      },
+      createdAt: AT,
+    }).task;
+    if (assets === null) return;
+    const events: Array<Record<string, unknown>> = [
+      { type: "dispatch-requested" },
+      { type: "submission-started", backendInstanceId: "gateway-h3-fl2va", remoteJobId: "22222222-2222-4222-8222-222222222222", requestDigest: SHA.a },
+      { type: "submission-confirmed", backendInstanceId: "gateway-h3-fl2va", remoteJobId: "22222222-2222-4222-8222-222222222222" },
+      { type: "remote-started", backendInstanceId: "gateway-h3-fl2va", remoteJobId: "22222222-2222-4222-8222-222222222222" },
+      { type: "ingestion-started" },
+      { type: "qc-requested", assets, cost: { version: 1, state: "unknown", reason: "provider-not-reported" } },
+    ];
+    for (const event of events) {
+      task = store.apply(parseProductionTaskEvent({
+        version: 1,
+        eventId: `fixture:${String(event.type)}:take-EP001-S1-0`,
+        taskId: "take-EP001-S1-0",
+        expectedRevision: task.revision,
+        occurredAt: new Date(Date.parse(AT) + task.revision * 1_000).toISOString(),
+        ...event,
+      })).task;
+    }
+  }
+
+  const missingFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    const plan = await planJson(missingFixture);
+    const issues = upstreamIssues(plan);
+    ok(plan.blocked === true && issues.length === 1
+      && issues[0]!.code === "upstream-take-unavailable"
+      && issues[0]!.message.includes("不在本项目账本内"),
+    `上游 take 不在账本内时落 error（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(missingFixture.root, { recursive: true, force: true }); }
+
+  const plannedFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    seedUpstreamTask(plannedFixture.root, null);
+    const plan = await planJson(plannedFixture);
+    const issues = upstreamIssues(plan);
+    ok(plan.blocked === true && issues.length === 1
+      && issues[0]!.message.includes("只接受 qc-pending 或 approved"),
+    `上游 take 尚未到 QC 时落 error（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(plannedFixture.root, { recursive: true, force: true }); }
+
+  const UPSTREAM_TAKE = {
+    version: 1, uri: `urn:sha256:${SHA.three}`, sha256: SHA.three, byteLength: 4_096, mediaType: "video/mp4",
+  };
+  // 账本里的尾帧是 ingest 登记的 `urn:sha256:`，批次文档里写成 `cas://`：同一份对象、两种 uri 形态，
+  // 因此一致性判据比 sha256 / byteLength / mediaType，不比 uri。
+  const upstreamLastFrame = (over: Record<string, unknown> = {}) => ({
+    version: 1, uri: `urn:sha256:${SHA.two}`, sha256: SHA.two, byteLength: 512_000,
+    mediaType: "image/png", ...over,
+  });
+
+  const okFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    seedUpstreamTask(okFixture.root, [UPSTREAM_TAKE, upstreamLastFrame()]);
+    const plan = await planJson(okFixture);
+    ok(plan.blocked === false && upstreamIssues(plan).length === 0
+      && plan.waves.length === 1 && plan.waves[0].shotIds.join(",") === "EP001-S1-2",
+    `上游 take 为 qc-pending 且尾帧一致时放行（实得 ${JSON.stringify(plan.validation.shots[0].issues)}）`);
+  } finally { rmSync(okFixture.root, { recursive: true, force: true }); }
+
+  const driftFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    seedUpstreamTask(driftFixture.root, [UPSTREAM_TAKE, upstreamLastFrame({ uri: `urn:sha256:${SHA.one}`, sha256: SHA.one })]);
+    const plan = await planJson(driftFixture);
+    const issues = upstreamIssues(plan);
+    ok(plan.blocked === true && issues.length === 1
+      && issues[0]!.message.includes("sha256"),
+    `上游尾帧换过一张时落 error（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(driftFixture.root, { recursive: true, force: true }); }
+
+  // sha256 相同但字节长度 / mediaType 漂移：同一 digest 不该有两种长度，这是账本或批次文档写错了。
+  const shapeFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    seedUpstreamTask(shapeFixture.root, [UPSTREAM_TAKE, upstreamLastFrame({ byteLength: 4_096, mediaType: "image/jpeg" })]);
+    const issues = upstreamIssues(await planJson(shapeFixture));
+    ok(issues.length === 1 && issues[0]!.message.includes("byteLength")
+      && issues[0]!.message.includes("mediaType"),
+    `尾帧 sha256 相同但 byteLength / mediaType 漂移时逐项报出（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(shapeFixture.root, { recursive: true, force: true }); }
+
+  // uri 形态差异不构成不一致：账本里是 ingest 的 urn:sha256，批次文档里写 cas://。
+  const uriFixture = makeWorkspace({ request: batchRequest({ script: null, shots: [upstreamShot(SHA.two)] }) });
+  try {
+    seedUpstreamTask(uriFixture.root, [UPSTREAM_TAKE, upstreamLastFrame()]);
+    const plan = await planJson(uriFixture);
+    ok(plan.blocked === false && upstreamIssues(plan).length === 0,
+      "账本 urn:sha256 与批次文档 cas:// 的 uri 形态差异不构成尾帧不一致");
+  } finally { rmSync(uriFixture.root, { recursive: true, force: true }); }
+
+  // origin 声明的 shotId 必须就是上游 take 的镜头身份，否则承接指向了另一镜的尾帧。
+  const wrongShotFixture = makeWorkspace({
+    request: batchRequest({
+      script: null,
+      shots: [shotDraft(3, {
+        continuity: {
+          stageGroup: "EP001-S1", prevShotId: "EP001-S1-9",
+          firstFrame: {
+            asset: asset(SHA.two),
+            origin: { kind: "previous-shot-last-frame", shotId: "EP001-S1-9", taskId: "take-EP001-S1-0" },
+            containsRealFace: false,
+          },
+          lastFrame: null, references: [], referencePolicy: "trim_by_priority", spatialPasses: [],
+        },
+      })],
+    }),
+  });
+  try {
+    seedUpstreamTask(wrongShotFixture.root, [UPSTREAM_TAKE, upstreamLastFrame()]);
+    const issues = upstreamIssues(await planJson(wrongShotFixture));
+    ok(issues.length === 1 && issues[0]!.message.includes("与 origin 声明的 EP001-S1-9 不一致"),
+      `上游 take 的镜头身份与 origin 不符时落 error（实得 ${JSON.stringify(issues)}）`);
+  } finally { rmSync(wrongShotFixture.root, { recursive: true, force: true }); }
+
+  // lastFrame 槽位与 firstFrame 同一判据（fl2v 的尾帧也可以承接自上一镜）。
+  const lastFrameFixture = makeWorkspace({
+    request: batchRequest({
+      script: null,
+      shots: [shotDraft(4, {
+        continuity: {
+          stageGroup: "EP001-S1", prevShotId: null,
+          firstFrame: clone(OPERATOR_FIRST_FRAME),
+          lastFrame: {
+            asset: asset(SHA.two),
+            origin: { kind: "previous-shot-last-frame", shotId: "EP001-S1-0", taskId: "take-EP001-S1-0" },
+            containsRealFace: false,
+          },
+          references: [], referencePolicy: "trim_by_priority", spatialPasses: [],
+        },
+      })],
+    }),
+  });
+  try {
+    const before = upstreamIssues(await planJson(lastFrameFixture));
+    ok(before.length === 1 && before[0]!.field === "continuity.lastFrame"
+      && before[0]!.message.includes("不在本项目账本内"),
+    `continuity.lastFrame 槽位同样做上游取证（实得 ${JSON.stringify(before)}）`);
+    seedUpstreamTask(lastFrameFixture.root, [UPSTREAM_TAKE, upstreamLastFrame()]);
+    ok(upstreamIssues(await planJson(lastFrameFixture)).length === 0,
+      "上游入库后 continuity.lastFrame 的承接放行");
+  } finally { rmSync(lastFrameFixture.root, { recursive: true, force: true }); }
 }
 
 // —— 样片门：phase bulk ——
@@ -1135,6 +1578,48 @@ try {
 
   const passed = await capture(bulkArgs(["--confirm", bulkPlan.batchPlanId, "--json"]), third.root);
   ok(passed.code === 0, `样片 approved 后 bulk 放行（实得 ${passed.code}；${passed.err}）`);
+  ok((JSON.parse(passed.out) as Record<string, any>).shots[0].batchApprovalCreated === false
+    && readProductionBatchApproval(third.root, "demo", taskId)?.batchPlanId === samplePlan.batchPlanId,
+  "同一 task 再次出现在 bulk 批次里时不写记录：bulk 没有发布它，记录仍指向发布它的样片批次");
+
+  // 端到端：--confirm 写下的批次审批记录让 handoff v2 逐 take 出三条门。
+  const handoffInput = join(third.root, "handoff-input.json");
+  writeFileSync(handoffInput, JSON.stringify({
+    version: 2,
+    handoffId: "handoff-ep001-s1",
+    studioProjectId: "yujing-jiushi-ep001",
+    pipeline: "scripted-drama",
+    createdAt: readProductionState(third.root, WORKSPACE_ID, "demo").updatedAt ?? AT,
+    delivery: {
+      version: 1, aspectRatio: "9:16", width: 1080, height: 1920,
+      fps: 24, container: "video/mp4", language: "zh-CN",
+    },
+    taskIds: [taskId],
+  }, null, 2) + "\n");
+  const handoff = await capture(
+    ["handoff", "--project", "demo", "--input", handoffInput, "--json"], third.root,
+  );
+  ok(handoff.code === 0, `production handoff 退出 0（实得 ${handoff.code}；${handoff.err}）`);
+  const gates = ((JSON.parse(handoff.out) as Record<string, any>).handoff.takes[0].gates) as Array<Record<string, any>>;
+  ok(gates.map((gate) => gate.gate).join(",") === "qc-approved,batch-approved,sample-approved",
+    `--confirm 之后 handoff 出三条门（实得 ${gates.map((gate) => gate.gate).join(",") || "无"}）`);
+  ok(gates[1]!.bindsTo.planSha256 === samplePlan.batchPlanId
+    && gates[2]!.bindsTo.planSha256 === samplePlan.batchPlanId
+    && gates[1]!.bindsTo.requestSha256 === gates[0]!.bindsTo.requestSha256,
+  "batch-approved / sample-approved 的 planSha256 就是被批准的 batchPlanId");
+
+  // 2b 之前 --confirm 发布的 task 没有这份记录：删掉它就是那一形态。此时再跑一次 bulk 批次的
+  // --confirm 也不会补写——task 已在账本内，这一批没有发布它，凭空补写等于把无关批次的指纹绑上去。
+  rmSync(join(third.root, ".writing-loop", "demo", "production-batch-approvals.v1", `${taskId}.json`));
+  const legacyConfirm = await capture(bulkArgs(["--confirm", bulkPlan.batchPlanId, "--json"]), third.root);
+  ok(legacyConfirm.code === 0
+    && (JSON.parse(legacyConfirm.out) as Record<string, any>).shots[0].batchApprovalCreated === false
+    && readProductionBatchApproval(third.root, "demo", taskId) === null,
+  `2b 之前发布的 task 在 bulk 批次 confirm 后仍然没有批次审批记录（实得 ${legacyConfirm.err}）`);
+  const legacy = await capture(["handoff", "--project", "demo", "--input", handoffInput, "--json"], third.root);
+  const legacyGates = ((JSON.parse(legacy.out) as Record<string, any>).handoff.takes[0].gates) as Array<Record<string, any>>;
+  ok(legacy.code === 0 && legacyGates.length === 1 && legacyGates[0]!.gate === "qc-approved",
+    `没有批次审批记录的旧 task 只出 qc-approved（实得 ${legacyGates.map((gate) => gate.gate).join(",")}）`);
 
   const otherPrefix = batchRequest({
     phase: "bulk", taskIdPrefix: "shot", samplePolicy: { sampleShotIds: ["EP001-S1-1"] },

@@ -20,6 +20,7 @@ import { ProductionStore } from "../src/production-store.ts";
 import { enqueueProductionTask } from "../src/production-enqueue.ts";
 import { createProductionDispatchIntent, readProductionIntent } from "../src/production-intent.ts";
 import { writeProductionCasObject, readProductionCasObject } from "../src/production-cas.ts";
+import { parseProductionBatchApproval } from "../src/production-batch-approval.ts";
 import { WorkspaceCasLocalAssetSource } from "../src/production-local-asset-source.ts";
 import {
   compileShotRequest,
@@ -834,7 +835,61 @@ try {
     && take.gates[0]!.approvedAt === take.approval.decidedAt
     && take.gates[0]!.bindsTo.requestSha256 === take.shotRequest.sha256
     && /^[a-f0-9]{64}$/.test(take.gates[0]!.bindsTo.planSha256),
-    "gates 只出账本有据的 qc-approved，bindsTo 绑定单 intent planId 与 ShotRequest digest");
+    "无批次审批记录的旧 task 只出 qc-approved，bindsTo 绑定单 intent planId 与 ShotRequest digest");
+
+  // —— 批次审批记录派生的两条门（2b） ——
+  {
+    const BATCH_PLAN_ID = "b".repeat(64);
+    const approvalRecord = (over: Record<string, unknown> = {}) => ({
+      version: 1 as const,
+      kind: "writing-loop/shot-batch-approval" as const,
+      taskId: "take-ep001-s1-1",
+      shotId: "EP001-S1-1",
+      batchPlanId: BATCH_PLAN_ID,
+      taskIdPrefix: "take",
+      phase: "sample" as const,
+      sampleShotIds: ["EP001-S1-1"],
+      approvedAt: "2026-08-28T00:00:00.000Z",
+      ...over,
+    });
+    const withApproval = (over: Record<string, unknown> = {}) => buildVideoStudioHandoffV2(
+      store.read(),
+      create,
+      (taskId) => ({
+        ...resolveSource(taskId),
+        batchApproval: parseProductionBatchApproval(approvalRecord(over)),
+      }),
+    ).takes[0]!;
+
+    const sampleTake = withApproval();
+    ok(schemaErrors(buildVideoStudioHandoffV2(store.read(), create, (taskId) => ({
+      ...resolveSource(taskId),
+      batchApproval: parseProductionBatchApproval(approvalRecord()),
+    }))).length === 0,
+    "三条门的 take 仍满足 VCS 的 handoff v2 schema（gateRecord 形状逐字段对齐）");
+    ok(sampleTake.gates.map((gate) => gate.gate).join(",") === "qc-approved,batch-approved,sample-approved",
+      `样片 take 出三条门（实得 ${sampleTake.gates.map((gate) => gate.gate).join(",") || "无"}）`);
+    const batchGate = sampleTake.gates[1]!;
+    ok(batchGate.bindsTo.planSha256 === BATCH_PLAN_ID
+      && batchGate.bindsTo.requestSha256 === sampleTake.shotRequest.sha256
+      && batchGate.approvedAt === "2026-08-28T00:00:00.000Z"
+      && batchGate.approvedBy === "wl-plan-shots" && batchGate.system === "wl-plan-shots",
+    "batch-approved 绑定 batchPlanId 与 ShotRequest digest，署名为签发它的控制面");
+    const sampleGate = sampleTake.gates[2]!;
+    ok(sampleGate.bindsTo.planSha256 === BATCH_PLAN_ID
+      && sampleGate.approvedBy === "qc:lead" && sampleGate.approvedAt === sampleTake.approval.decidedAt
+      && sampleGate.system === "wl-sample-gate",
+    "sample-approved 的署名与时刻取样片自己的 QC 裁决");
+
+    const bulkTake = withApproval({ phase: "bulk", sampleShotIds: ["EP001-S1-9"] });
+    ok(bulkTake.gates.map((gate) => gate.gate).join(",") === "qc-approved,batch-approved",
+      `不在 sampleShotIds 内的 take 不出 sample-approved（实得 ${bulkTake.gates.map((gate) => gate.gate).join(",")}）`);
+
+    ok(errorOf(() => withApproval({ taskId: "take-ep001-s1-9" })).includes("与 task 不一致"),
+      "批次审批记录绑定的 taskId 与 take 不一致时整份交接失败");
+    ok(errorOf(() => withApproval({ shotId: "EP001-S1-9" })).includes("与 take 的 EP001-S1-1 不一致"),
+      "批次审批记录绑定的 shotId 与 take 不一致时整份交接失败");
+  }
   ok(take.license.summary === "MiniMax H3 Community License; attribution required; "
     + "annual revenue below USD 20000000; no model improvement; status verified"
     && take.license.obligations?.attribution === "MiniMax H3"

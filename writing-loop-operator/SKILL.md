@@ -239,11 +239,21 @@ cd "$WRITING_LOOP_WORKSPACE"
 # ① 候选图批准（并行轨道，不阻塞出片；首帧也可先用 operator-upload 绕过）
 writing-loop visual approve-candidate --project yujing-jiushi --candidate K_S08_EST --by art:lead
 
+# ①b 证据登记（一次性，之后批次文档直接引用）：把权利/审核/许可三份文件写进 workspace CAS，
+#     命令按内容嗅探 mediaType 并打印可直接粘进批次文档的片段；重复登记幂等
+writing-loop production evidence register --project yujing-jiushi --kind license \
+  --file evidence/minimax-h3-LICENSE.txt --config "$WRITING_LOOP_PRODUCTION_RUNTIME"
+#     moderation 另需 --status 与 --reviewed-at：审核结论与时刻是文件之外的人工事实，命令不代填
+writing-loop production evidence register --project yujing-jiushi --kind moderation \
+  --file evidence/moderation-record.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME" \
+  --status passed --reviewed-at 2026-09-02T16:54:00.310Z
+
 # ② 出批次计划（严格零写入）。读 runtime config 声明的只读 profile 快照做估算；
-#    --from-script 走剧本预填 + 镜头合并，镜头补齐由 --input 的 script.patches / mergedPatches 提供
+#    --from-script 取集号，走剧本预填 + 镜头合并，镜头补齐由 --input 的 script.patches / mergedPatches 提供；
+#    --shot 按镜头筛选（可重复，与批次文档的 shotIds 等价，两者都给出时取交集）
 writing-loop production plan-shots --plan --project yujing-jiushi \
   --input batches/ep001-s1-sample.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME" \
-  --from-script 1 --scene 1
+  --from-script 1 --scene 1 --shot EP001-S1-1
 ```
 
 计划文档要人工看四项再决定是否批准：每镜估算与总估算、`decisions[]` 的后端与时长档理由、
@@ -251,9 +261,11 @@ writing-loop production plan-shots --plan --project yujing-jiushi \
 不构成阻断条件。有 error 的批次不会给出可提交的计划。
 
 ```bash
-# ③ 批准即提交：逐镜把 ShotRequest 写进 workspace CAS 并 enqueue（仍然零远端网络）
+# ③ 批准即提交：逐镜把 ShotRequest 写进 workspace CAS、写批次审批记录并 enqueue（仍然零远端网络）
+#    --shot 要与 ② 完全一致：选中集合计入 batchPlanId，少写一个 --shot 就不是那份被批准的计划
 writing-loop production plan-shots --confirm <批准的 batchPlanId> --project yujing-jiushi \
-  --input batches/ep001-s1-sample.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME"
+  --input batches/ep001-s1-sample.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME" \
+  --from-script 1 --scene 1 --shot EP001-S1-1
 
 # ④ 跑任务：每轮先自动上传本机 CAS 里 gateway 还没有的输入对象，再提交/轮询/入库一批，
 #    跑到 status 里没有活跃 task 为止
@@ -295,8 +307,19 @@ python skills/video-creation-studio/scripts/studio.py import-handoff yujing-jius
   以 `workflow-invalid` 失败。
 - QC 裁决写的是终态事件，不能改判。改判要重新出镜头、重新走批次。
 - `--export-dir` 缺省走 scripted-drama 契约 v2，逐 take 带 ShotRequest、execution 摘要、成本、
-  资产角色表、`qc-approved` 门与许可摘要；导出目录同时含 `handoff.json`（规范 JSON 字节）、
+  资产角色表、`gates[]` 与许可摘要；导出目录同时含 `handoff.json`（规范 JSON 字节）、
   `handoff.digest` 与全部资产（`<sha256>.<ext>`）。旧四条流水线用 `--contract v1`，它不产资产目录。
+- `gates[]` 逐条都要有取证来源：`qc-approved` 取 QC 裁决，`batch-approved` 取 ③ 写下的批次审批记录
+  （`bindsTo.planSha256` 就是被批准的 `batchPlanId`），`sample-approved` 只对 samplePolicy 指名的样片
+  出。2b 之前提交的 task 没有那份记录，只出 `qc-approved` 一条。
+- 逐镜推进：**同一批次内不能接力**——ShotRequest 不可变且写死了尾帧 digest，上游还没出片时那个
+  digest 只能是猜的，因此 `waves[]` 恒为一波。走法是：镜头 N 出片并 QC 之后，下一个批次用
+  `--shot` 选镜头 N+1，它的 `continuity.firstFrame` 写 `previous-shot-last-frame`，`asset` 填镜头 N
+  的**实际**尾帧 AssetRef（`production status --json` 里那一份），`origin.taskId` 填镜头 N 的 task id。
+  `plan-shots` 在出计划时就核对上游 take 存在、状态 ∈ {qc-pending, approved}、subject 就是那一镜、
+  尾帧的 sha256 / byteLength / mediaType 逐项一致（uri 形态差异不算不一致）。
+- 批次审批记录只在 `--confirm` 确实创建了 task 的那一镜上写。已经入库的 take 再出现在别的批次里时
+  不写也不改，因此它的 `batch-approved` 门永远指向真正发布它的那一份批次。
 - 导出经 gateway 的 assets 路由（GET 方法）取回资产，因此**导出时 GPU VM 与隧道必须在**（§3a 的前提）。
   逐文件校验 sha256 与字节长度，任一不符整次失败并清理，目标目录不会留半份导出；重复导出幂等。
 - 导入前不要手改导出目录里的任何文件：`--expect-digest` 比对的是 `handoff.json` 的规范字节摘要，

@@ -55,7 +55,7 @@ import {
   type ProviderInputSlot,
 } from "./production-provider-adapter.ts";
 import { MAX_PRODUCTION_CAS_DOCUMENT_BYTES, readProductionCasObject } from "./production-cas.ts";
-import { ProductionError } from "./production-domain.ts";
+import { PRODUCTION_CAS_AUTHORITY, ProductionError } from "./production-domain.ts";
 import {
   SHOT_REQUEST_MEDIA_TYPE,
   parseShotRequest,
@@ -534,7 +534,6 @@ function parseBackend(value: unknown, index: number): ProductionRuntimeBackendCo
   schemaError(`${subject}.kind`, "必须是 comfyui 或 production-gateway");
 }
 
-const CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 function parseLocalAssetSource(value: unknown): ProductionRuntimeLocalAssetSourceConfig {
   const subject = "ProductionRuntimeConfig.localAssetSource";
@@ -547,7 +546,7 @@ function parseLocalAssetSource(value: unknown): ProductionRuntimeLocalAssetSourc
   return Object.freeze({
     version: 1,
     kind: "workspace-cas",
-    casAuthority: safeString(row.casAuthority, CAS_AUTHORITY, `${subject}.casAuthority`),
+    casAuthority: safeString(row.casAuthority, PRODUCTION_CAS_AUTHORITY, `${subject}.casAuthority`),
   });
 }
 

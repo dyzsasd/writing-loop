@@ -13,6 +13,7 @@ import { productionCanonicalJson, productionCanonicalJsonSha256 } from "./produc
 import type { BackendKind, ShotCompileCapability, VideoBackendLimits } from "./production-adapter.ts";
 import {
   MAX_PRODUCTION_TEXT_LENGTH,
+  PRODUCTION_CAS_AUTHORITY,
   ProductionError,
   parseAssetRef,
   parseShotRevisionRef,
@@ -472,7 +473,6 @@ export type CompileShotRequestResult = {
 // —— 解析辅助（与 production-domain.ts / production-intent.ts 同一套严格语义） ——
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
-const CAS_AUTHORITY_RE = /^[a-z0-9][a-z0-9.-]{0,62}$/;
 const LANGUAGE_TAG_RE = /^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{2,8})*$/;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1090,7 +1090,7 @@ export function readShotRequestDocument(bytes: Uint8Array): ShotRequestDocument 
 
 /** ShotRequest 写入 workspace CAS 后的 AssetRef —— intent inputs[0]（§4.1 资产 URI）。 */
 export function shotRequestAssetRef(shotRequest: ShotRequest, casAuthority: string): AssetRef {
-  if (!CAS_AUTHORITY_RE.test(casAuthority)) {
+  if (!PRODUCTION_CAS_AUTHORITY.test(casAuthority)) {
     fail("ShotCompilePolicy.casAuthority", "必须是小写 CAS authority（如 wl-sg）");
   }
   const canonical = shotRequestCanonicalJson(shotRequest);
@@ -1111,7 +1111,7 @@ export function shotRequestAssetRef(shotRequest: ShotRequest, casAuthority: stri
  * 其余 scheme（已经是 cas:、或 s3: 等稳定存储）原样保留。
  */
 export function rewriteToCasUri(asset: AssetRef, casAuthority: string): AssetRef {
-  if (!CAS_AUTHORITY_RE.test(casAuthority)) {
+  if (!PRODUCTION_CAS_AUTHORITY.test(casAuthority)) {
     fail("casAuthority", "必须是小写 CAS authority（如 wl-sg）");
   }
   const urnPrefix = `urn:sha256:`;
@@ -1276,7 +1276,7 @@ export function parseShotCompilePolicy(value: unknown, subject = "ShotCompilePol
   ], subject);
   requireVersion(row.version, subject);
   const casAuthority = requireText(row.casAuthority, `${subject}.casAuthority`, 63);
-  if (!CAS_AUTHORITY_RE.test(casAuthority)) fail(`${subject}.casAuthority`, "必须是小写 CAS authority（如 wl-sg）");
+  if (!PRODUCTION_CAS_AUTHORITY.test(casAuthority)) fail(`${subject}.casAuthority`, "必须是小写 CAS authority（如 wl-sg）");
 
   const projectRow = requireRecord(row.project, `${subject}.project`);
   exactKeys(projectRow, [

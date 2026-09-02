@@ -317,6 +317,13 @@ const SAFE_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT_KEY = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/i;
+/**
+ * workspace / gateway CAS 的 authority（`cas://<authority>/sha256/<digest>`）。runtime config、
+ * profile 快照、本机对象源、ShotRequest 装配与证据登记共用这一条判据：同一个字符串在一处放行、
+ * 另一处拒绝，只会让 AssetRef 在管线中途才失败。
+ */
+export const PRODUCTION_CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
 const STABLE_URI_SCHEMES = new Set(["asset:", "az:", "azure:", "cas:", "gs:", "https:", "ipfs:", "r2:", "s3:", "urn:"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

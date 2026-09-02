@@ -25,6 +25,7 @@ import {
   buildShotBatchPlan,
   commitShotBatchPlan,
   parseShotBatchRequest,
+  resolveShotSelection,
   shotBatchBackendInstanceId,
   shotBatchCandidateProfiles,
   shotBatchMaxStoryboardSeconds,
@@ -56,6 +57,13 @@ import {
   type VideoStudioHandoffTakeSource,
 } from "./production-studio-handoff.ts";
 import { MAX_PRODUCTION_CAS_DOCUMENT_BYTES, readProductionCasObject } from "./production-cas.ts";
+import {
+  PRODUCTION_EVIDENCE_KINDS,
+  registerProductionEvidence,
+  type ProductionEvidenceKind,
+} from "./production-evidence.ts";
+import { PRODUCTION_MODERATION_STATUSES } from "./production-intent.ts";
+import { readProductionBatchApproval } from "./production-batch-approval.ts";
 import { WorkspaceCasLocalAssetSource } from "./production-local-asset-source.ts";
 import { MAX_PRODUCTION_INTENT_BYTES, readProductionIntent } from "./production-intent.ts";
 import { projectEntries, requireProjectEntry, resolveRepoPath, requireWorkspace, WsError } from "./workspace.ts";
@@ -67,9 +75,11 @@ function usage(): void {
   writing-loop production status [--project KEY] [--json]
   writing-loop production enqueue --plan --project KEY --input FILE [--json]
   writing-loop production enqueue --project KEY --input FILE --confirm PLAN_ID [--json]
-  writing-loop production plan-shots --plan --project KEY --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]
-  writing-loop production plan-shots --confirm BATCH_PLAN_ID --project KEY --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]
+  writing-loop production plan-shots --plan --project KEY --input FILE --config RUNTIME [--from-script <集号> [--scene N]…] [--shot ID]… [--json]
+  writing-loop production plan-shots --confirm BATCH_PLAN_ID --project KEY --input FILE --config RUNTIME [--from-script <集号> [--scene N]…] [--shot ID]… [--json]
   writing-loop production qc --approve|--reject --project KEY --task ID --by WHO [--note TEXT] [--json]
+  writing-loop production evidence register --project KEY --kind rights|license --file PATH --config RUNTIME [--json]
+  writing-loop production evidence register --project KEY --kind moderation --file PATH --config RUNTIME --status STATUS --reviewed-at ISO [--json]
   writing-loop production handoff --project KEY --input FILE [--contract v1|v2] [--json]
   writing-loop production handoff --project KEY --input FILE --export-dir DIR --config RUNTIME [--json]
 
@@ -77,9 +87,15 @@ status/handoff 只读取本地权威账本；包含暂停项目。
 enqueue --plan 严格零写入；只有匹配 --confirm 才按 intent→task→dispatch-requested 顺序写本地账本。
 plan-shots --plan 同样严格零写入：读 runtime config 声明的只读 execution profile 快照做估算，
 输出含每镜估算、后端理由、承接链波次、退化与校验汇总的批次审批文档与 batchPlanId；
---confirm 才逐镜把 ShotRequest 写入 workspace CAS 并以该镜自身的 planId 提交 enqueue。
+--confirm 才逐镜把 ShotRequest 写入 workspace CAS、写批次审批记录并以该镜自身的 planId 提交 enqueue。
+--from-script 取集号（例：--from-script 1 --scene 1），与 --input 的 script.episode / sceneIndexes 必须一致。
+--shot ID 按镜头筛选（可重复），与批次文档的 shotIds 等价，两者都给出时取交集；被筛掉的镜头
+不编译、不进 intents、不计估算，只在 shots[] 里以 selected: false 列出。
 phase: bulk 的批次在提交前检查 samplePolicy 指名的样片 task 均为 approved。
 qc 写 approved/rejected 事件（approval 绑定审批前的 qc revision）；非 qc-pending 的 task 一律拒绝。
+evidence register 把证据文件写入 workspace CAS（重复登记幂等），按内容嗅探 mediaType，
+输出可直接填入批次文档的对象片段与 sha256；CAS authority 取 runtime config 的 localAssetSource。
+--kind moderation 必须显式给出 --status 与 --reviewed-at：审核结论与时刻是文件之外的人工事实，命令不代填。
 暂停项目可生成计划，但拒绝提交 enqueue 与批次。
 handoff 仅输出已人工 approved take 的版本化 Studio 交接清单，缺省为 scripted-drama 契约 v2
 （takes 带 shotRequest、execution 摘要、cost、assetRoles、gates 与 license）；--contract v1 输出旧四流水线契约。
@@ -231,6 +247,7 @@ type PlanShotsOptions = {
   confirm: string | null;
   fromScript: number | null;
   scenes: number[];
+  shotIds: string[];
 };
 
 function parsePlanShotsArgs(args: string[]): PlanShotsOptions {
@@ -242,6 +259,7 @@ function parsePlanShotsArgs(args: string[]): PlanShotsOptions {
   let confirm: string | null = null;
   let fromScript: number | null = null;
   const scenes: number[] = [];
+  const shotIds: string[] = [];
   const once = (value: unknown, flag: string): void => {
     if (value !== null && value !== false) throw new ProductionUsageError(`production plan-shots: ${flag} 只能指定一次`);
   };
@@ -272,6 +290,13 @@ function parsePlanShotsArgs(args: string[]): PlanShotsOptions {
       const value = Number(args[++index]);
       if (!Number.isSafeInteger(value) || value < 1) throw new ProductionUsageError("production plan-shots: --scene 需要场序");
       scenes.push(value);
+    } else if (arg === "--shot") {
+      const value = args[++index] ?? "";
+      if (!value) throw new ProductionUsageError("production plan-shots: --shot 需要 shotId");
+      if (shotIds.includes(value)) {
+        throw new ProductionUsageError(`production plan-shots: --shot ${value} 重复指定`);
+      }
+      shotIds.push(value);
     } else {
       throw new ProductionUsageError("production plan-shots: 未知参数");
     }
@@ -285,7 +310,99 @@ function parsePlanShotsArgs(args: string[]): PlanShotsOptions {
   if (scenes.length > 0 && fromScript === null) {
     throw new ProductionUsageError("production plan-shots: --scene 必须与 --from-script 一起使用");
   }
-  return { project, input, config, json, plan, confirm, fromScript, scenes };
+  return { project, input, config, json, plan, confirm, fromScript, scenes, shotIds };
+}
+
+type EvidenceOptions = {
+  project: string;
+  kind: ProductionEvidenceKind;
+  file: string;
+  config: string;
+  json: boolean;
+  /** `--kind moderation` 专有：审核结论与审核时刻是文件之外的人工事实，命令不代填。 */
+  moderation: { status: string; reviewedAt: string } | null;
+};
+
+function parseEvidenceArgs(args: string[]): EvidenceOptions {
+  const [sub, ...rest] = args;
+  if (sub !== "register") throw new ProductionUsageError("production evidence: 只支持 register 子命令");
+  let project: string | null = null;
+  let kind: ProductionEvidenceKind | null = null;
+  let file: string | null = null;
+  let config: string | null = null;
+  let json = false;
+  let status: string | null = null;
+  let reviewedAt: string | null = null;
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--project") {
+      if (project !== null) throw new ProductionUsageError("production evidence register: --project 只能指定一次");
+      project = rest[++index] ?? null;
+      if (!project) throw new ProductionUsageError("production evidence register: --project 需要项目 key");
+    } else if (arg === "--kind") {
+      if (kind !== null) throw new ProductionUsageError("production evidence register: --kind 只能指定一次");
+      const value = rest[++index] ?? "";
+      if (!(PRODUCTION_EVIDENCE_KINDS as readonly string[]).includes(value)) {
+        throw new ProductionUsageError(
+          `production evidence register: --kind 只接受 ${PRODUCTION_EVIDENCE_KINDS.join(" | ")}`,
+        );
+      }
+      kind = value as ProductionEvidenceKind;
+    } else if (arg === "--file") {
+      if (file !== null) throw new ProductionUsageError("production evidence register: --file 只能指定一次");
+      file = rest[++index] ?? null;
+      if (!file) throw new ProductionUsageError("production evidence register: --file 需要文件路径");
+    } else if (arg === "--config") {
+      if (config !== null) throw new ProductionUsageError("production evidence register: --config 只能指定一次");
+      config = rest[++index] ?? null;
+      if (!config) throw new ProductionUsageError("production evidence register: --config 需要 runtime config 路径");
+    } else if (arg === "--status") {
+      if (status !== null) throw new ProductionUsageError("production evidence register: --status 只能指定一次");
+      const value = rest[++index] ?? "";
+      if (!(PRODUCTION_MODERATION_STATUSES as readonly string[]).includes(value)) {
+        throw new ProductionUsageError(
+          `production evidence register: --status 只接受 ${PRODUCTION_MODERATION_STATUSES.join(" | ")}`,
+        );
+      }
+      status = value;
+    } else if (arg === "--reviewed-at") {
+      if (reviewedAt !== null) throw new ProductionUsageError("production evidence register: --reviewed-at 只能指定一次");
+      reviewedAt = rest[++index] ?? null;
+      if (!reviewedAt) throw new ProductionUsageError("production evidence register: --reviewed-at 需要规范 UTC ISO 时间");
+    } else if (arg === "--json") {
+      if (json) throw new ProductionUsageError("production evidence register: --json 只能指定一次");
+      json = true;
+    } else {
+      throw new ProductionUsageError("production evidence register: 未知参数");
+    }
+  }
+  if (project === null || kind === null || file === null) {
+    throw new ProductionUsageError("production evidence register: 必须同时提供 --project、--kind 与 --file");
+  }
+  // 审核结论与审核时刻在文件里取不到证：passed / not-reviewed / failed 与复核时刻都是操作者的事实。
+  // 缺省成「passed + 现在」等于凭空写出一次审核记录，因此 moderation 必须显式给出，其余 kind 不接受。
+  if (kind === "moderation" && (status === null || reviewedAt === null)) {
+    throw new ProductionUsageError(
+      "production evidence register: --kind moderation 必须同时提供 --status 与 --reviewed-at"
+        + "（审核结论与时刻是文件之外的人工事实，命令不代填）",
+    );
+  }
+  if (kind !== "moderation" && (status !== null || reviewedAt !== null)) {
+    throw new ProductionUsageError(
+      `production evidence register: --status 与 --reviewed-at 只属于 --kind moderation（本次是 ${kind}）`,
+    );
+  }
+  // AssetRef 的 `cas://<authority>/…` 只有 runtime config 声明 authority（`localAssetSource`）；
+  // 没有它就只能猜一个 authority，而猜错的 AssetRef 会在 worker 的本机对象源上以 authority-mismatch 失败。
+  if (config === null) {
+    throw new ProductionUsageError(
+      "production evidence register: 必须提供 --config（CAS authority 只在 runtime config 的 localAssetSource）",
+    );
+  }
+  return {
+    project, kind, file, config, json,
+    moderation: kind === "moderation" ? { status: status as string, reviewedAt: reviewedAt as string } : null,
+  };
 }
 
 type QcOptions = {
@@ -383,7 +500,12 @@ function handoffTakeSourceResolver(root: string, project: string): (taskId: stri
     catch (error) {
       throw new WsError(`task '${taskId}' 的 ShotRequest 不是有效 JSON：${error instanceof Error ? error.message : String(error)}`);
     }
-    return { intent, shotRequest: parseShotRequest(value, `ShotRequest ${shotRequestAsset.sha256}`) };
+    return {
+      intent,
+      shotRequest: parseShotRequest(value, `ShotRequest ${shotRequestAsset.sha256}`),
+      // 2b 之前 `--confirm` 发布的 task 没有批次审批记录，读回 null：那样的 take 只出 qc-approved。
+      batchApproval: readProductionBatchApproval(root, project, taskId),
+    };
   };
 }
 
@@ -536,6 +658,9 @@ function buildPlanShotsContext(options: PlanShotsOptions, cwd: string): PlanShot
       project: options.project,
       request,
       snapshot,
+      // 只读账本：`previous-shot-last-frame` 的上游 take 状态与尾帧身份只有它能取证（仍然零写入）。
+      ledger: readProductionState(workspace.root, workspaceId, options.project),
+      selection: resolveShotSelection(request.shotIds, options.shotIds),
       authorizedWorkflowSha256,
       projectPolicy: {
         allowedProcessingRegions: runtimeProject.allowedProcessingRegions,
@@ -561,6 +686,17 @@ function renderShotBatchPlan(plan: ShotBatchPlan): string {
     lines.push(`  - ${decision.shotId} → ${decision.profileId} (${decision.modelFamily}/${decision.backendInstanceId})`
       + ` ${decision.durationSeconds}s · 估算 ${formatProductionUsdMicros(estimate.estimatedAmountMicros)}`
       + ` / 上限 ${formatProductionUsdMicros(estimate.maximumAmountMicros)} · ${decision.reason}`);
+  }
+  const excluded = plan.shots.filter((shot) => !shot.selected);
+  if (excluded.length) {
+    // 同一原因的镜头并成一行：逐镜重复同一句话会把真正要看的镜头号淹掉。
+    const byReason = new Map<string, string[]>();
+    for (const shot of excluded) {
+      const reason = shot.selectionReason ?? "";
+      byReason.set(reason, [...(byReason.get(reason) ?? []), shot.shotId]);
+    }
+    lines.push(`  未选中 ${excluded.length} 镜（不编译、不进 intents、不计估算）：`
+      + [...byReason].map(([reason, shotIds]) => `${shotIds.join(",")}（${reason}）`).join("；"));
   }
   lines.push(`  波次：${plan.waves.map((wave) => `w${wave.index}[${wave.shotIds.join(",")}]`).join(" → ")}`);
   lines.push(`  样片：${plan.samplePolicy.sampleShotIds.join("、")}`
@@ -619,13 +755,45 @@ export async function productionMain(argv = process.argv.slice(2), cwd = process
   if (action === "--help" || action === "-h" || action === "help") { usage(); return 0; }
   if (!action) { usage(); return 2; }
   if (action !== "status" && action !== "enqueue" && action !== "handoff"
-    && action !== "plan-shots" && action !== "qc") {
+    && action !== "plan-shots" && action !== "qc" && action !== "evidence") {
     console.error("writing-loop production: 未知操作");
     usage();
     return 2;
   }
 
   try {
+    if (action === "evidence") {
+      const options = parseEvidenceArgs(rest);
+      const workspace = requireWorkspace(cwd);
+      const workspaceId = readWorkspaceIdentity(workspace.root).id;
+      if (!projectEntries(workspace.config).some(([key]) => key === options.project)) {
+        throw new WsError(`没有项目 '${options.project}'`);
+      }
+      const runtime = loadProductionRuntimeConfig(resolve(cwd, options.config));
+      if (runtime.workspaceId !== workspaceId) {
+        throw new WsError("runtime config 的 workspaceId 与本 workspace 身份不一致");
+      }
+      if (runtime.localAssetSource === null) {
+        throw new WsError("runtime config 未声明 localAssetSource；证据 AssetRef 没有可用的 CAS authority");
+      }
+      const registered = registerProductionEvidence({
+        root: workspace.root,
+        project: options.project,
+        kind: options.kind,
+        file: resolve(cwd, options.file),
+        casAuthority: runtime.localAssetSource.casAuthority,
+        ...(options.moderation === null ? {} : { moderation: options.moderation }),
+      });
+      if (options.json) console.log(JSON.stringify(registered, null, 2));
+      else {
+        console.log(`${registered.kind} ${registered.sha256} · ${registered.byteLength} bytes`
+          + ` · ${registered.mediaType} · cas=${registered.casObjectCreated ? "created" : "existing"}`);
+        console.log(`  ${registered.path}`);
+        console.log(`  批次文档 ${registered.kind} 段可直接填入：`);
+        console.log(JSON.stringify(registered.fragment, null, 2).split("\n").map((line) => `  ${line}`).join("\n"));
+      }
+      return 0;
+    }
     if (action === "plan-shots") {
       const options = parsePlanShotsArgs(rest);
       const context = buildPlanShotsContext(options, cwd);
@@ -654,7 +822,9 @@ export async function productionMain(argv = process.argv.slice(2), cwd = process
         console.log(`batch ${result.batchPlanId} · ${result.shots.length} 镜已提交`);
         for (const shot of result.shots) {
           console.log(`  - ${shot.shotId} ${shot.taskId} ${shot.status} · shot-request=${shot.shotRequestSha256.slice(0, 12)} `
-            + `cas=${shot.casObjectCreated ? "created" : "existing"} intent=${shot.intentCreated ? "created" : "existing"} `
+            + `cas=${shot.casObjectCreated ? "created" : "existing"} `
+            + `approval=${shot.batchApprovalCreated ? "created" : "existing"} `
+            + `intent=${shot.intentCreated ? "created" : "existing"} `
             + `task=${shot.taskCreated ? "created" : "existing"} dispatch=${shot.dispatchApplied ? "applied" : "existing"}`);
         }
       }

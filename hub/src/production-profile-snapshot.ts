@@ -8,6 +8,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { hasSymlinkComponent } from "./bounded-fs.ts";
 import { productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
+import { PRODUCTION_CAS_AUTHORITY } from "./production-domain.ts";
 import {
   parseProductionLicenseEvidence,
   parseProductionProcessingRegions,
@@ -52,7 +53,6 @@ export class ProductionProfileSnapshotError extends Error {
   }
 }
 
-const CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
@@ -186,7 +186,7 @@ export function parseProductionExecutionProfileSnapshot(
   if (root.kind !== PRODUCTION_EXECUTION_PROFILE_SNAPSHOT_KIND) {
     fail("kind", `必须是 ${PRODUCTION_EXECUTION_PROFILE_SNAPSHOT_KIND}`);
   }
-  if (typeof root.casAuthority !== "string" || !CAS_AUTHORITY.test(root.casAuthority)) {
+  if (typeof root.casAuthority !== "string" || !PRODUCTION_CAS_AUTHORITY.test(root.casAuthority)) {
     fail("casAuthority", "必须是小写 CAS authority（如 wl-sg）");
   }
   if (!Array.isArray(root.profiles) || root.profiles.length < 1

@@ -102,17 +102,24 @@ const usage = (): void => {
   production enqueue --project K --input FILE --confirm PLAN_ID [--json]
                               以匹配指纹持久化 immutable intent + task + dispatch；零远端网络
   production plan-shots --plan --project K --input FILE --config RUNTIME
-      [--from-script EP [--scene N]…] [--json]
+      [--from-script <集号> [--scene N]…] [--shot ID]… [--json]
                               零写入批次审批文档：读 runtime config 声明的只读 execution profile
                               快照做估算，输出每镜估算与后端理由、承接链波次、退化与校验汇总、
-                              samplePolicy 与 batchPlanId
+                              samplePolicy 与 batchPlanId。--from-script 取集号
+                              （例：--from-script 1 --scene 1）；--shot 按镜头筛选（可重复），
+                              与批次文档 shotIds 等价，两者都给出时取交集
   production plan-shots --confirm BATCH_PLAN_ID --project K --input FILE --config RUNTIME
-      [--from-script EP [--scene N]…] [--json]
-                              以匹配指纹逐镜把 ShotRequest 写入 workspace CAS 并 enqueue；
+      [--from-script <集号> [--scene N]…] [--shot ID]… [--json]
+                              以匹配指纹逐镜把 ShotRequest 写入 workspace CAS、写批次审批记录
+                              （batchPlanId / samplePolicy / taskIdPrefix）并 enqueue；
                               phase: bulk 先检查 samplePolicy 指名的样片 task 均为 approved
   production qc --approve|--reject --project K --task ID --by WHO [--note TEXT] [--json]
                               人工 QC 裁决：写 approved/rejected 事件并绑定审批前的 qc revision；
                               非 qc-pending 的 task 一律拒绝
+  production evidence register --project K --kind rights|moderation|license --file PATH
+      --config RUNTIME [--json]
+                              把权利/审核/许可证据写入 workspace CAS（重复登记幂等），按内容嗅探
+                              mediaType，输出可直接填入批次文档的对象片段与 sha256
   production handoff --project K --input FILE [--contract v1|v2] [--json]
                               输出仅含人工 approved take 的 Studio 交接清单；缺省 scripted-drama
                               契约 v2（takes 带 shotRequest / execution / cost / assetRoles /

@@ -937,7 +937,7 @@ worker 侧解析器（`hub/src/production-profile-snapshot.ts`）与导出端逐
 批次审批文档的输入是一份普通 JSON（非 owner-only），顶层 exact keys：`version`、`kind`
 （`writing-loop/shot-batch-request`）、`phase`、`capability`、`anchorPreference`、`compiler`、
 `taskIdPrefix`、`createdAt`、`useTerritories`、`rights`、`moderation`、`license`、`profileId`、
-`samplePolicy`、`gpuEstimate`、`shots`、`script`。
+`samplePolicy`、`gpuEstimate`、`shots`、`script`，外加一个可选键 `shotIds`。
 
 - `phase`：`sample` 或 `bulk`。`bulk` 必须显式声明 `samplePolicy.sampleShotIds`——样片门检查的是
   先前批次的样片，不能由本批次自证。`sample` 的 `samplePolicy` 可为 null，缺省取每个被选 profile
@@ -968,18 +968,102 @@ worker 侧解析器（`hub/src/production-profile-snapshot.ts`）与导出端逐
   （origin `approved-candidate`，`containsRealFace` 原样带入）。排到该镜但尚未批准的候选图不填，
   只记一条 `source: visual` 的 warning。这四张视觉侧表全部纳入 `policyDigest`。
 - `taskIdPrefix`：每镜 `taskId = <taskIdPrefix>-<shotId>`。确定性 taskId 让同一批次的精确重放成为
-  幂等操作（CAS 对象、intent 与 task 都不重复写）。
+  幂等操作（CAS 对象、intent、批次审批记录与 task 都不重复写）。
 - `gpuEstimate{spotUsdPerHour, estimatedHours}`：plan 文档的 GPU 小时附注，不构成阻断条件（§4.7）。
+- `shotIds`（可选，缺省与 `null` 都表示不筛选）：按镜头筛选的存活集合，与命令行 `--shot <id>`
+  （可重复）等价，两者都给出时取交集，交集为空即拒绝出计划。筛选在预填、合并与视觉填充**之后**、
+  编译**之前**生效：被筛掉的镜头不编译、不进 intents、不计估算，只在 `shots[]` 里以
+  `selected: false` 与 `selectionReason` 列出（`planId` / `profileId` / `wave` 均为 null）。
+  指向不存在镜头的筛选直接拒绝——合并会改变存活 shotId，静默少跑几镜比报错更难发现。
 
-`--plan` 严格零写入，输出 `ShotBatchPlan`：`batchPlanId`、`policyDigest`、每镜 `decisions` 与
-`estimates`、承接链 `waves[]`、`droppedReferences`、`degradations`、`validation` 汇总与总估算。
+`--plan` 严格零写入，输出 `ShotBatchPlan`：`batchPlanId`、`policyDigest`、`createdAt`、
+`selectedShotIds`、每镜 `decisions` 与 `estimates`、承接链 `waves[]`、`droppedReferences`、
+`degradations`、`validation` 汇总与总估算。
 `batchPlanId = sha256(canonicalJson({workspace, project, intents[], policyDigest, degradations[]}))`；
-策略（价目、capability、项目声明、samplePolicy、intent 脚手架、视觉侧表）或任一镜头输入变化即失效。
-`--confirm <batchPlanId>` 重算同一计划后逐镜按 CAS → intent → task → dispatch-requested 发布；带
-error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文档，但退出码为 1）。
+策略（价目、capability、项目声明、samplePolicy、intent 脚手架、视觉侧表、选中集合）或任一镜头输入
+变化即失效。`--confirm <batchPlanId>` 重算同一计划后逐镜按 CAS → 批次审批记录 → intent → task →
+dispatch-requested 发布；带 error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文档，但退出码
+为 1）。`--confirm` 只提交选中镜头。
+
+`validation.shots[].issues[]` 的 `source` 取 `prefill | merge | visual | upstream | compile` 五者之一。
+前三者是装配期提示（见上），`compile` 是 §4.1 的编译错误码表，`upstream` 只有一个码：
+
+| 码 | 级别 | 判据 |
+| --- | --- | --- |
+| `upstream-take-unavailable` | error | `continuity.firstFrame` / `lastFrame` 的 origin 为 `previous-shot-last-frame`，但上游 take 在账本里不可用 |
+
+尾帧承接只有一种成立方式，全部满足才放行：
+
+1. `origin.taskId` 已在本项目账本里；
+2. 该 task 状态 ∈ `{qc-pending, approved}`——`dispatch-pending` / `running` / `failed` / `rejected`
+   的 take 没有可用尾帧，「跑过」不等于「跑出来了」；
+3. 该 task 的 subject 就是 `origin.shotId` 那一镜；
+4. 该 take 的尾帧资产（`assets[]` 里唯一的 `image/*`）与本镜声明的那一张 `sha256` / `byteLength` /
+   `mediaType` 逐项相同。`uri` 不参与比对：同一份对象在账本里是 ingest 登记的 `urn:sha256:`，在批次
+   文档里可以写成 `cas://`。
+
+**批内不成链。** ShotRequest 不可变且携带尾帧的 `asset.sha256`，上游还没出片时那个 digest 只能是猜的；
+即便猜对，`--confirm` 之后的精确重放也会看到上游落在 `dispatch-pending` 而被判不可用，与「精确重放
+幂等」矛盾。因此本版没有「同一批次内先跑 A 再跑 B」这条路径，`waves[]` 的形状保留给消费方，但依赖
+集合恒为空，**每个批次只有一波**。
+
+逐镜推进的走法：镜头 N 出片并 QC 之后，下一个批次用 `--shot` 选镜头 N+1，它的
+`continuity.firstFrame` 写 `previous-shot-last-frame`，`asset` 填镜头 N 的**实际**尾帧 AssetRef
+（`production status --json` 或账本里的那一份），`origin.taskId` 填镜头 N 的 task id。
 
 样片门按 taskId 查本地权威账本，而 taskId 由 `<taskIdPrefix>-<shotId>` 拼出：**sample 批次与 bulk
 批次必须使用同一个 `taskIdPrefix`**，否则 bulk 会去找一批根本不存在的 task 而永远被阻断。
+
+### 批次审批记录（`production-batch-approvals.v1/<taskId>.json`）
+
+`--confirm` 逐镜提交时，在 immutable intent 旁边写一份可读记录，exact keys：`version`、`kind`
+（`writing-loop/shot-batch-approval`）、`taskId`、`shotId`、`batchPlanId`、`taskIdPrefix`、`phase`、
+`sampleShotIds`、`approvedAt`。它是账本外的第三份不可变伴生文件（前两份是 intent 与 CAS 里的
+ShotRequest）：账本事件的 payload 与 digest 一个字节都不改，2b 之前发布的 task 没有这个文件，
+读回为 null。
+
+- **只在本次确实创建了 task 的那一镜上写。** 记录回答的是「这个 task 是在哪一份批次审批下发布的」，
+  而 task 只被创建一次：精确重放、样片批次里的镜头又出现在 bulk 批次里、2b 之前发布的旧 task，这些
+  情形下本次 `--confirm` 没有发布任何东西，一律不写也不改。否则一份只是路过的批次会把自己的
+  `batchPlanId` 绑到别人发布的 take 上，handoff 会据此发出两条无据的门。
+- `approvedAt` 取批次文档的 `createdAt`——进入 `batchPlanId` 计算体的同一时刻。不取 `--confirm` 的
+  墙上时钟：那样精确重放会写出另一份字节，幂等性随之失效。
+- 发布纪律与 intent 相同（同目录临时文件 → fsync → `link(2)` 定名），定名冲突的判据也相同：逐字段
+  相同即认作精确重放；不同即拒绝覆盖，并报出两边的 `batchPlanId` 与文件路径——那是一条残留的孤儿
+  记录，只能由操作者核对后删除。
+- 崩溃窗口：task 已创建、记录尚未落盘时进程死亡，该 take 退化为只出 `qc-approved` 一条门（重跑
+  `--confirm` 也不会补写，因为 task 已在账本内）。这是有意的：宁可少一条门，也不发出可能绑错批次的门。
+- 这份记录是 handoff v2 的 `batch-approved` / `sample-approved` 两条门的唯一取证来源（见下）。
+
+## 证据登记（`production evidence register`，不属于 workspace config）
+
+```
+writing-loop production evidence register --project K --kind rights|license \
+  --file PATH --config RUNTIME [--json]
+writing-loop production evidence register --project K --kind moderation \
+  --file PATH --config RUNTIME --status passed|not-reviewed|failed --reviewed-at <规范 UTC ISO> [--json]
+```
+
+把一份权利 / 审核 / 许可证据文件写入 workspace CAS
+（`.writing-loop/<project>/production-cas.v1/sha256/<digest>`），并输出可直接填入批次文档对应段落的
+对象片段与 sha256。内容寻址，重复登记同一份文件是幂等的（`casObjectCreated: false`）。
+
+- `mediaType` 按内容判定，不看扩展名：`%PDF-` 魔数 ⇒ `application/pdf`；可往返的 UTF-8 且去空白后以
+  `{` / `[` 开头并能 JSON 解析 ⇒ `application/json`；其余可往返的 UTF-8 且除制表 / 换行 / 回车外无
+  控制字符 ⇒ `text/plain`。以 `{` / `[` 开头却解析失败的**回落到文本判据**（带 BOM 的 JSON、以
+  `[Exhibit A]` 开头的许可证正文都长这样）。三者都判不出即拒绝登记，而不是退化成
+  `application/octet-stream`——AssetRef 的 `mediaType` 会随 intent 固化进不可变证据，写错一次就永远
+  错在那里。
+- 单份证据上限 4 MiB；空文件、非单链接普通文件、读取期间被替换的文件一律拒绝。
+- 输出片段按 kind：`rights` 给 `{evidence}`；`moderation` 给 `{status, reviewedAt, evidence}`；
+  `license` 给 `{licenseSha256, evidence}`。片段只填这份文件能取证的部分——rights 的地域与有效期、
+  license 的签发方与义务、moderation 的审核结论与审核时刻都是文件之外的人工事实。
+- 因此 `--kind moderation` 必须显式给出 `--status`（取值与 intent 侧 `moderation.status` 同一词表：
+  `passed` / `not-reviewed` / `failed`）与 `--reviewed-at`（规范 UTC ISO）；缺一即拒绝。缺省成
+  「passed + 登记时刻」等于凭空写出一次审核记录。其余两个 kind 不接受这两个参数。
+- `--config` 是必需的：AssetRef 的 `cas://<authority>/sha256/<digest>` 里的 authority 只在 runtime
+  config 的 `localAssetSource.casAuthority`，猜错的 authority 会让 worker 的本机对象源以
+  authority-mismatch 失败。
 
 ## 交接输入（`production handoff --input`，不属于 workspace config）
 
@@ -998,10 +1082,20 @@ error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文�
 v2 的每个 take 另带 `shotRequest`（不可变 ShotRequest 的 AssetRef）、`execution` 摘要、账本
 `cost`、`assetRoles[]`、`gates[]` 与 `license` 摘要。这些字段的事实来源是账本外的两份不可变伴生
 文件——`production-intents.v1/<taskId>.json` 与 `production-cas.v1/sha256/<ShotRequest digest>`；
-任一缺失即整份交接失败，不做推断。`gates[]` 只出账本能取证的 `qc-approved`：`approvedBy` /
-`approvedAt` 取 QC 裁决，`bindsTo.requestSha256` 是 ShotRequest 的 digest，`bindsTo.planSha256` 由
-不可变 intent 重算出的单 intent 确认指纹（`plan-shots --confirm` 逐镜提交时用的就是它）。批次审批
-指纹与样片门目前不落账本，因此 `batch-approved` / `sample-approved` 不出现在 gates 中。
+任一缺失即整份交接失败，不做推断。`gates[]` 逐条都要有取证来源：
+
+| gate | 取证来源 | `bindsTo.planSha256` | `approvedBy` / `approvedAt` | `system` |
+| --- | --- | --- | --- | --- |
+| `qc-approved` | 账本的 QC 裁决 | 不可变 intent 重算出的单 intent 确认指纹（`--confirm` 逐镜提交时用的就是它） | QC 裁决人与裁决时刻 | `wl-qc` |
+| `batch-approved` | 批次审批记录 | 该记录的 `batchPlanId` | `wl-plan-shots` / 批次文档的 `createdAt` | `wl-plan-shots` |
+| `sample-approved` | 批次审批记录，且 `shotId ∈ sampleShotIds` | 该记录的 `batchPlanId` | QC 裁决人与裁决时刻 | `wl-sample-gate` |
+
+三条门的 `bindsTo.requestSha256` 都是该镜 ShotRequest 的 digest。批次审批记录不存在（2b 之前提交的
+task）时只出 `qc-approved`；不在 `sampleShotIds` 内的镜头不出 `sample-approved`。记录绑定的 `taskId`
+或 `shotId` 与 take 对不上时整份交接失败。
+
+`batch-approved` 的 `approvedBy` 记的是签发这条门的本机控制面，不是人：本版 `--confirm` 只接受
+批次指纹，没有操作者身份输入，因此没有可取证的人工署名可填。
 
 `--export-dir DIR` 另写三类文件，写入前先落到同级临时目录、成功后才 rename 到位：
 

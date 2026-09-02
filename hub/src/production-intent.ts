@@ -357,7 +357,9 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const TERRITORY = /^(?:[A-Z]{2}|WORLDWIDE)$/;
 const PROCESSING_REGION = /^[A-Z]{2}$/;
 const RIGHTS_STATUSES = new Set(["cleared", "unknown", "expired", "blocked"]);
-const MODERATION_STATUSES = new Set(["passed", "not-reviewed", "failed"]);
+/** intent 侧 moderation 的取值词表；`production evidence register --status` 与它同源。 */
+export const PRODUCTION_MODERATION_STATUSES = ["passed", "not-reviewed", "failed"] as const;
+const MODERATION_STATUSES = new Set<string>(PRODUCTION_MODERATION_STATUSES);
 const LICENSE_STATUSES = new Set(["verified", "unknown", "blocked"]);
 const LICENSE_BASES = new Set(["community", "provider-terms", "written-license"]);
 const H3_VARIANT_SET = new Set<string>(H3_VARIANTS);
@@ -1044,9 +1046,9 @@ export function evaluateProductionIntentGates(
     deny("budget-available-exceeded", "不可变单任务上限超过本次 gate 的可用预算快照");
   }
 
-  // 处理地域门（§4.7）。runtime config 目前还不供给这两组地域（§8.6 的 runtime-config 行），因此空集合的
-  // 语义按家族分裂：云家族的处理地在境外，未声明即 deny；minimax-h3 / generic 暂放行。runtime-config
-  // 供给 regions 后改为全家族 deny（EXECUTION-PLAN 的「0-C 审查后的两处遗留」(b)）。
+  // 处理地域门（§4.7）。runtime config 自 0-D 起供给 allowedProcessingRegions（§8.6 的 runtime-config 行），
+  // 空集合对全部家族都是 deny（FAMILIES_REQUIRING_PROCESSING_REGIONS 四个家族均为 true）；
+  // 表保留为逐家族开关只是为了让新家族接入时显式声明。
   if (policy.allowedProcessingRegions.length === 0) {
     if (FAMILIES_REQUIRING_PROCESSING_REGIONS[intent.execution.modelFamily]) {
       deny(

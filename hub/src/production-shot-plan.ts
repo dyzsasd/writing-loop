@@ -5,8 +5,14 @@
 // workspace, the project, every resulting intent, the policy digest and the degradations. Changing
 // any of those invalidates the fingerprint, so an approval can never be replayed against a
 // different batch. `--confirm <batchPlanId>` recomputes the same plan from the same inputs and only
-// then publishes: per shot it writes the immutable ShotRequest into the workspace CAS and calls
-// `commitProductionTaskEnqueue` with that shot's own single-intent planId (§4.7 的批次/单镜两层指纹).
+// then publishes: per shot it writes the immutable ShotRequest into the workspace CAS, records the
+// batch approval next to the immutable intent, and calls `commitProductionTaskEnqueue` with that
+// shot's own single-intent planId (§4.7 的批次/单镜两层指纹).
+//
+// 两条与「这一批到底跑哪几镜」有关的判据也在这里：`shotIds` / `--shot` 的按镜头筛选在编译之前生效
+// （被筛掉的镜头仍在 `plan.shots[]` 里以 `selected: false` 列出，但不编译、不进 intents、不计估算）；
+// `previous-shot-last-frame` 的上游 take 取证读本地权威账本——承接只成立于已入库且到达 QC 的 take，
+// 批内不成链，`waves[]` 因此恒为一波。
 import { createHash } from "node:crypto";
 import { productionCanonicalJson, productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
 import { parseBackendCapabilities } from "./production-provider-adapter.ts";
@@ -43,6 +49,10 @@ import type {
   ProductionExecutionProfileSnapshotReadEntry,
 } from "./production-profile-snapshot.ts";
 import { writeProductionCasObject } from "./production-cas.ts";
+import {
+  PRODUCTION_BATCH_APPROVAL_KIND,
+  writeProductionBatchApproval,
+} from "./production-batch-approval.ts";
 import { commitProductionTaskEnqueue, planProductionTaskEnqueue } from "./production-enqueue.ts";
 import type { ProductionState, ProductionTask } from "./production-domain.ts";
 import type { VisualCompileInputs } from "./visual-production.ts";
@@ -72,9 +82,14 @@ function requireRecord(value: unknown, subject: string): Record<string, unknown>
   return value;
 }
 
-function exactKeys(row: Record<string, unknown>, expected: readonly string[], subject: string): void {
+function exactKeys(
+  row: Record<string, unknown>,
+  expected: readonly string[],
+  subject: string,
+  optional: readonly string[] = [],
+): void {
   const missing = expected.filter((key) => !Object.prototype.hasOwnProperty.call(row, key));
-  const extras = Object.keys(row).filter((key) => !expected.includes(key));
+  const extras = Object.keys(row).filter((key) => !expected.includes(key) && !optional.includes(key));
   if (missing.length || extras.length) {
     fail(subject, `字段无效（缺少：${missing.join("、") || "无"}；未知：${extras.join("、") || "无"}）`);
   }
@@ -260,7 +275,45 @@ export type ShotBatchRequest = {
   gpuEstimate: ShotBatchGpuEstimate | null;
   shots: unknown[];
   script: ShotBatchScriptSource | null;
+  /**
+   * 按镜头筛选（可选键；缺省与 null 都表示不筛选）。与命令行 `--shot <id>` 等价，两者都给出时取交集。
+   * 筛选在预填、合并与视觉填充之后、编译之前生效：被筛掉的镜头不编译、不进 intents、不计估算。
+   */
+  shotIds: string[] | null;
 };
+
+function parseShotIdSelection(value: unknown, subject: string): string[] | null {
+  if (value === undefined || value === null) return null;
+  const shotIds = requireArray(value, subject, MAX_SHOT_BATCH_SHOTS).map((entry, index) => {
+    const shotId = requireText(entry, `${subject}[${index}]`, 128);
+    if (!SAFE_ID.test(shotId)) fail(`${subject}[${index}]`, "必须是安全 shotId");
+    return shotId;
+  });
+  if (shotIds.length === 0) fail(subject, "不得为空数组（不筛选用 null 或省略）");
+  if (new Set(shotIds).size !== shotIds.length) fail(subject, "不得重复");
+  return shotIds;
+}
+
+/**
+ * 命令行 `--shot` 与批次文档 `shotIds` 的交集（§4.7 按镜头筛选）。两者都不给出即不筛选；
+ * 交集为空是操作者错误——那样的批次一个镜头也提交不了，直接拒绝而不是出一份空计划。
+ */
+export function resolveShotSelection(
+  documentShotIds: readonly string[] | null,
+  commandShotIds: readonly string[],
+): string[] | null {
+  if (commandShotIds.length === 0) return documentShotIds === null ? null : [...documentShotIds];
+  if (new Set(commandShotIds).size !== commandShotIds.length) {
+    fail("plan-shots --shot", "同一 shotId 不得指定两次");
+  }
+  if (documentShotIds === null) return [...commandShotIds];
+  const declared = new Set(documentShotIds);
+  const intersection = commandShotIds.filter((shotId) => declared.has(shotId));
+  if (intersection.length === 0) {
+    fail("plan-shots --shot", `与批次文档 shotIds（${[...declared].join("、")}）没有交集`);
+  }
+  return intersection;
+}
 
 function parseSamplePolicy(value: unknown, subject: string): ShotBatchSamplePolicy | null {
   if (value === null) return null;
@@ -361,7 +414,7 @@ export function parseShotBatchRequest(value: unknown, subject = "ShotBatchReques
     "version", "kind", "phase", "capability", "backendInstanceId", "arcId", "anchorPreference",
     "compiler", "taskIdPrefix", "createdAt", "useTerritories", "rights", "moderation", "license",
     "profileId", "samplePolicy", "gpuEstimate", "shots", "script",
-  ], subject);
+  ], subject, ["shotIds"]);
   if (row.version !== 1) fail(`${subject}.version`, "必须是 1");
   if (row.kind !== SHOT_BATCH_REQUEST_KIND) fail(`${subject}.kind`, `必须是 ${SHOT_BATCH_REQUEST_KIND}`);
   if (row.phase !== "sample" && row.phase !== "bulk") fail(`${subject}.phase`, "必须是 sample 或 bulk");
@@ -404,6 +457,7 @@ export function parseShotBatchRequest(value: unknown, subject = "ShotBatchReques
     gpuEstimate: parseGpuEstimate(row.gpuEstimate, `${subject}.gpuEstimate`),
     shots,
     script,
+    shotIds: parseShotIdSelection(row.shotIds, `${subject}.shotIds`),
   };
 }
 
@@ -443,7 +497,7 @@ export function applyShotDraftPatches(
 // —— 视觉侧默认值（§6.1 字段来源、§6.2 关键帧来源） ——
 
 export type ShotBatchIssue = {
-  source: "compile" | "prefill" | "merge" | "visual";
+  source: "compile" | "prefill" | "merge" | "visual" | "upstream";
   code: string;
   field: string;
   severity: "error" | "warning";
@@ -550,18 +604,29 @@ export type ShotBatchEntry = {
   shotId: string;
   taskId: string;
   /**
+   * 是否落在本次镜头筛选内。未选中的镜头仍然在这份清单里列出（连同 `selectionReason`），
+   * 但不编译、不进 intents、不计估算，因此 `planId` / `profileId` / `wave` 等都为 null。
+   */
+  selected: boolean;
+  /** 未选中时说明为什么被筛掉；选中时为 null。 */
+  selectionReason: string | null;
+  /**
    * 单 intent 确认指纹；`--confirm` 逐 intent 用它调用 `commitProductionTaskEnqueue`。
    * 带 error 级 issue 的镜头不产出 ShotRequest 与 intent，这四项为 null（整批也随之 blocked）。
    */
   planId: string | null;
-  profileId: string;
-  wave: number;
+  profileId: string | null;
+  wave: number | null;
   isSample: boolean;
   shotRequestSha256: string | null;
   shotRequestAsset: AssetRef | null;
   idempotencyKey: string | null;
 };
 
+/**
+ * 承接链波次。承接只成立于已入库的上游 take（见 `resolveCarryChain`），批次内部没有顺序约束，
+ * 因此本版恒为一波；形状保留给消费方（`--confirm` 的提交顺序与 §4.7 的计划文档）。
+ */
 export type ShotBatchWave = { index: number; shotIds: string[] };
 
 export type ShotBatchPlan = {
@@ -573,6 +638,10 @@ export type ShotBatchPlan = {
   policyDigest: string;
   phase: ShotBatchPhase;
   taskIdPrefix: string;
+  /** 批次文档的 `createdAt`；`--confirm` 把它写进批次审批记录作 `approvedAt`。 */
+  createdAt: string;
+  /** 本次筛选命中的镜头（升序）；未筛选时为全部镜头。计入 `policyDigest`。 */
+  selectedShotIds: string[];
   samplePolicy: ShotBatchSamplePolicy;
   /** 有任一镜头带 error 级 issue 时为 true：`--confirm` 拒绝提交整批。 */
   blocked: boolean;
@@ -613,6 +682,16 @@ export type BuildShotBatchPlanInputs = {
   projectPolicy: ShotBatchProjectPolicy;
   visual: VisualCompileInputs;
   drafts: readonly ShotRequestDraft[];
+  /**
+   * 本项目的本地权威账本。`--plan` 只读它：`previous-shot-last-frame` 的上游 take 是否已存在、
+   * 是否还活着、尾帧是不是当前这一张，只有账本能取证（§4.7）。
+   */
+  ledger: ProductionState;
+  /**
+   * 按镜头筛选后的存活集合（命令行 `--shot` 与文档 `shotIds` 的交集）；null = 不筛选。
+   * 指向不存在镜头的筛选是操作者错误，直接拒绝出计划。
+   */
+  selection?: readonly string[] | null;
   /** 预填 / 合并 / 视觉侧装配阶段的提示，进入每镜 validation 并计入 warnings。 */
   draftIssues?: readonly ShotBatchDraftIssue[];
   /**
@@ -825,37 +904,67 @@ function taskIdFor(prefix: string, shotId: string): string {
 }
 
 /**
- * 承接链顺序（§4.7 `waves[]`）：首帧 / 尾帧来自本批次另一镜的尾帧时，该镜必须排在来源镜之后。
- * 环形依赖是配置错误——批次里没有可先执行的镜头，拒绝出计划。
+ * `previous-shot-last-frame` 的上游取证（§4.7）。承接只有一种成立方式：上游 take 已在本项目账本里、
+ * 状态 ∈ {qc-pending, approved}、该 take 的尾帧资产就是本镜声明的这一张（sha256 / byteLength /
+ * mediaType 逐项相同；`uri` 不比——同一份对象在账本里是 `urn:sha256:`，在批次文档里可以写成
+ * `cas://`），且该 take 的 shot 身份确实是 origin 声明的那一镜。
+ *
+ * 不存在「批内承接」：ShotRequest 不可变且携带尾帧的 `asset.sha256`，上游还没出片时这个 digest
+ * 只能是猜的；即便猜对，`--confirm` 之后的精确重放也会看到上游落在 dispatch-pending 而被判不可用。
+ * 因此逐镜推进的走法是——镜头 N 出片并 QC 之后，下一批次用它**实际**的尾帧 AssetRef 出镜头 N+1。
+ *
+ * dispatch-requested / running / failed / rejected 的 take 没有可用尾帧：「跑过」不等于「跑出来了」。
  */
-function computeWaves(compiled: readonly CompiledShot[]): ShotBatchWave[] {
-  const inBatch = new Set(compiled.map((row) => row.draft.shotId));
-  const dependencies = new Map<string, string[]>();
-  for (const row of compiled) {
-    const needs = new Set<string>();
-    for (const keyframe of [row.draft.continuity.firstFrame, row.draft.continuity.lastFrame]) {
-      if (keyframe !== null && keyframe.origin.kind === "previous-shot-last-frame"
-        && inBatch.has(keyframe.origin.shotId) && keyframe.origin.shotId !== row.draft.shotId) {
-        needs.add(keyframe.origin.shotId);
-      }
+function resolveCarryChain(
+  draft: ShotRequestDraft,
+  context: { ledgerByTaskId: ReadonlyMap<string, ProductionTask>; inBatch: ReadonlySet<string> },
+): ShotBatchIssue[] {
+  const byTaskId = context.ledgerByTaskId;
+  const issues: ShotBatchIssue[] = [];
+  const slots = [
+    ["continuity.firstFrame", draft.continuity.firstFrame] as const,
+    ["continuity.lastFrame", draft.continuity.lastFrame] as const,
+  ];
+  for (const [field, keyframe] of slots) {
+    if (keyframe === null || keyframe.origin.kind !== "previous-shot-last-frame") continue;
+    const origin = keyframe.origin;
+    const error = (message: string): void => {
+      issues.push({
+        source: "upstream", code: "upstream-take-unavailable", field, severity: "error", message,
+      });
+    };
+    const task = byTaskId.get(origin.taskId);
+    if (task === undefined) {
+      error(`上游 take ${origin.taskId} 不在本项目账本内`
+        + (context.inBatch.has(origin.shotId)
+          ? `（${origin.shotId} 在本批次里，但批内承接不成立：上游必须先出片并到 QC，下一批次才能引用它的实际尾帧）`
+          : ""));
+      continue;
     }
-    dependencies.set(row.draft.shotId, [...needs]);
-  }
-  const waveByShotId = new Map<string, number>();
-  const waves: ShotBatchWave[] = [];
-  let remaining = compiled.map((row) => row.draft.shotId);
-  while (remaining.length > 0) {
-    const ready = remaining.filter((shotId) =>
-      dependencies.get(shotId)!.every((need) => waveByShotId.has(need)));
-    if (ready.length === 0) {
-      fail("ShotBatchPlan.waves", `承接链存在环形依赖：${remaining.join("、")}`);
+    if (task.status !== "qc-pending" && task.status !== "approved") {
+      error(`上游 take ${origin.taskId} 处于 ${task.status}；尾帧承接只接受 qc-pending 或 approved`);
+      continue;
     }
-    const index = waves.length;
-    for (const shotId of ready) waveByShotId.set(shotId, index);
-    waves.push({ index, shotIds: ready });
-    remaining = remaining.filter((shotId) => !waveByShotId.has(shotId));
+    if (task.subject.kind !== "shot" || task.subject.shot.shotId !== origin.shotId) {
+      error(`上游 take ${origin.taskId} 的镜头是 `
+        + `${task.subject.kind === "shot" ? task.subject.shot.shotId : `整集 ${task.subject.episode.episodeId}`}`
+        + `，与 origin 声明的 ${origin.shotId} 不一致`);
+      continue;
+    }
+    const lastFrames = task.assets.filter((asset) => asset.mediaType.startsWith("image/"));
+    if (lastFrames.length !== 1) {
+      error(`上游 take ${origin.taskId} 有 ${lastFrames.length} 个尾帧资产，无法确定承接来源`);
+      continue;
+    }
+    const upstream = lastFrames[0]!;
+    const drift = (["sha256", "byteLength", "mediaType"] as const)
+      .filter((key) => upstream[key] !== keyframe.asset[key]);
+    if (drift.length) {
+      error(`上游 take ${origin.taskId} 的尾帧与本镜声明的不一致（${drift.map((key) =>
+        `${key} ${String(upstream[key])} ≠ ${String(keyframe.asset[key])}`).join("；")}）`);
+    }
   }
-  return waves;
+  return issues;
 }
 
 function defaultSamplePolicy(compiled: readonly CompiledShot[], phase: ShotBatchPhase): ShotBatchSamplePolicy {
@@ -890,11 +999,26 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
         `provenance.visualProductionSha256 ${declared} 与当前 visual/production.v1.json ${inputs.visual.visualProductionSha256 ?? "（不存在）"} 不一致`);
     }
   }
+  // 按镜头筛选：命令行 `--shot` 与文档 `shotIds` 的交集，在预填 / 合并 / 视觉填充之后、编译之前
+  // 生效。指向不存在镜头的筛选是操作者错误（合并会改变存活 shotId），拒绝出计划而不是静默少跑。
+  const allShotIds = drafts.map((draft) => draft.shotId);
+  const requested = inputs.selection ?? null;
+  if (requested !== null) {
+    const known = new Set(allShotIds);
+    const stray = requested.filter((shotId) => !known.has(shotId));
+    if (stray.length) {
+      fail("ShotBatchPlan 的镜头筛选",
+        `指向不存在的镜头：${stray.join("、")}（本批次存活镜头：${allShotIds.join("、")}）`);
+    }
+  }
+  const selectedShotIds = new Set(requested ?? allShotIds);
+  const selectedDrafts = drafts.filter((draft) => selectedShotIds.has(draft.shotId));
+  if (selectedDrafts.length === 0) fail("ShotBatchPlan", "镜头筛选之后至少要留下一个镜头");
   const backendInstanceId = shotBatchBackendInstanceId(inputs.snapshot, request);
   const usedProfiles = new Map<string, ShotBatchSnapshotProfile>();
   const usedCapabilities = new Map<string, ShotCompileCapability>();
 
-  const compiled: CompiledShot[] = drafts.map((selected) => {
+  const compiled: CompiledShot[] = selectedDrafts.map((selected) => {
     const { entry, reason } = selectProfile(selected, inputs, backendInstanceId);
     const capability = capabilityFor(entry, request);
     if (!inputs.authorizedWorkflowSha256.has(entry.execution.workflowSha256)) {
@@ -963,7 +1087,16 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
     };
   });
 
-  const waves = computeWaves(compiled);
+  // 承接链取证：上游 take 的账本状态与尾帧身份。承接只成立于已入库的 take，因此本批次内部没有
+  // 顺序约束——`waves[]` 保留给消费方，但恒为一波。
+  const carryContext = {
+    ledgerByTaskId: new Map(inputs.ledger.tasks.map((task) => [task.id, task] as const)),
+    inBatch: new Set(allShotIds),
+  };
+  const carryChain = new Map<string, ShotBatchIssue[]>(
+    compiled.map((row) => [row.draft.shotId, resolveCarryChain(row.draft, carryContext)]),
+  );
+  const waves: ShotBatchWave[] = [{ index: 0, shotIds: compiled.map((row) => row.draft.shotId) }];
   const waveByShotId = new Map(waves.flatMap((wave) => wave.shotIds.map((shotId) => [shotId, wave.index] as const)));
   const samplePolicy = request.samplePolicy ?? defaultSamplePolicy(compiled, request.phase);
   const batchShotIds = new Set(compiled.map((row) => row.draft.shotId));
@@ -983,6 +1116,8 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
     taskIdPrefix: request.taskIdPrefix,
     backendInstanceId,
     arcId: request.arcId,
+    // 选中集合进入指纹：同一份批次文档筛出不同镜头就是不同的批次，批准不可互相顶替。
+    selectedShotIds: sorted([...selectedShotIds]),
     project: {
       allowedProcessingRegions: [...inputs.projectPolicy.allowedProcessingRegions],
       licenseCompliance: {
@@ -1028,41 +1163,71 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
   }), "utf8").digest("hex");
 
   const sampleShotIds = new Set(samplePolicy.sampleShotIds);
-  const shots: ShotBatchEntry[] = compiled.map((row) => ({
-    shotId: row.draft.shotId,
-    taskId: taskIdFor(request.taskIdPrefix, row.draft.shotId),
-    planId: row.intentDraft === null ? null : planProductionTaskEnqueue({
-      workspaceId: inputs.workspaceId,
-      project: inputs.project,
-      draft: row.intentDraft,
-    }).planId,
-    profileId: row.entry.profileId,
-    wave: waveByShotId.get(row.draft.shotId)!,
-    isSample: sampleShotIds.has(row.draft.shotId),
-    shotRequestSha256: row.shotRequest === null ? null : productionCanonicalJsonSha256(row.shotRequest),
-    shotRequestAsset: row.shotRequest === null
-      ? null
-      : shotRequestAssetRef(row.shotRequest, inputs.snapshot.casAuthority),
-    idempotencyKey: row.intent?.idempotencyKey ?? null,
-  }));
+  const compiledByShotId = new Map(compiled.map((row) => [row.draft.shotId, row] as const));
+  // 未选中的镜头也列出：操作者要能一眼看到这一批到底少跑了哪几镜、为什么少跑。
+  const shots: ShotBatchEntry[] = drafts.map((draft) => {
+    const row = compiledByShotId.get(draft.shotId);
+    if (row === undefined) {
+      return {
+        shotId: draft.shotId,
+        taskId: taskIdFor(request.taskIdPrefix, draft.shotId),
+        selected: false,
+        selectionReason: "未在本次镜头筛选内（--shot / 批次文档 shotIds）",
+        planId: null,
+        profileId: null,
+        wave: null,
+        isSample: false,
+        shotRequestSha256: null,
+        shotRequestAsset: null,
+        idempotencyKey: null,
+      };
+    }
+    return {
+      shotId: row.draft.shotId,
+      taskId: taskIdFor(request.taskIdPrefix, row.draft.shotId),
+      selected: true,
+      selectionReason: null,
+      planId: row.intentDraft === null ? null : planProductionTaskEnqueue({
+        workspaceId: inputs.workspaceId,
+        project: inputs.project,
+        draft: row.intentDraft,
+      }).planId,
+      profileId: row.entry.profileId,
+      wave: waveByShotId.get(row.draft.shotId)!,
+      isSample: sampleShotIds.has(row.draft.shotId),
+      shotRequestSha256: row.shotRequest === null ? null : productionCanonicalJsonSha256(row.shotRequest),
+      shotRequestAsset: row.shotRequest === null
+        ? null
+        : shotRequestAssetRef(row.shotRequest, inputs.snapshot.casAuthority),
+      idempotencyKey: row.intent?.idempotencyKey ?? null,
+    };
+  });
 
   // 预填 / 合并 / 视觉侧装配的提示与编译 issue 汇入同一份 per-shot 清单，一起计入 warnings。
+  // 被筛掉的镜头没有编译结果，因此也没有 validation 行；指向它们的装配期提示随之落地。
   const draftIssues = inputs.draftIssues ?? [];
-  const orphanIssues = draftIssues.filter((issue) => !batchShotIds.has(issue.shotId));
+  const knownShotIds = new Set(allShotIds);
+  const orphanIssues = draftIssues.filter((issue) => !knownShotIds.has(issue.shotId));
   if (orphanIssues.length) {
     fail("ShotBatchPlan.draftIssues", `提示指向不在批次内的镜头：${orphanIssues.map((issue) => issue.shotId).join("、")}`);
   }
   const shotValidation: ShotBatchShotValidation[] = compiled.map((row) => {
     const extra = draftIssues.filter((issue) => issue.shotId === row.draft.shotId);
+    const carry = carryChain.get(row.draft.shotId)!;
     const issues: ShotBatchIssue[] = [
       ...extra.map(({ shotId: _shotId, ...issue }) => issue),
+      ...carry,
       ...row.validation.issues.map((issue) => ({ source: "compile" as const, ...issue })),
     ];
+    const extraErrors = extra.filter((issue) => issue.severity === "error").length
+      + carry.filter((issue) => issue.severity === "error").length;
+    const extraWarnings = extra.filter((issue) => issue.severity === "warning").length
+      + carry.filter((issue) => issue.severity === "warning").length;
     return {
       shotId: row.draft.shotId,
       mode: row.validation.mode,
-      errors: row.validation.errors + extra.filter((issue) => issue.severity === "error").length,
-      warnings: row.validation.warnings + extra.filter((issue) => issue.severity === "warning").length,
+      errors: row.validation.errors + extraErrors,
+      warnings: row.validation.warnings + extraWarnings,
       issues,
     };
   });
@@ -1078,6 +1243,8 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
     policyDigest,
     phase: request.phase,
     taskIdPrefix: request.taskIdPrefix,
+    createdAt: request.createdAt,
+    selectedShotIds: sorted([...selectedShotIds]),
     samplePolicy,
     blocked: errors > 0,
     shots,
@@ -1129,6 +1296,8 @@ export type CommitShotBatchResult = {
     taskId: string;
     shotRequestSha256: string;
     casObjectCreated: boolean;
+    /** 批次审批记录（batchPlanId / samplePolicy / taskIdPrefix）是否本次新建。 */
+    batchApprovalCreated: boolean;
     intentCreated: boolean;
     taskCreated: boolean;
     dispatchApplied: boolean;
@@ -1200,11 +1369,30 @@ export function commitShotBatchPlan(options: CommitShotBatchOptions): CommitShot
       draft: row.intentDraft,
       confirm: entry.planId,
     });
+    // 批次审批记录只在本次确实创建了 task 时写：它回答的是「这个 task 是在哪一份批次审批下发布的」。
+    // task 已在账本内（精确重放、或 2b 之前发布）时本次没有发布任何东西，一律不写也不改——否则一份
+    // 只是路过的批次会把自己的 batchPlanId 绑到别人发布的 take 上，handoff 会据此发出两条无据的门。
+    // 崩溃窗口（task 已建、记录未写）退化为该 take 只出 qc-approved，不会出现错绑。
+    let batchApprovalCreated = false;
+    if (result.taskCreated) {
+      batchApprovalCreated = writeProductionBatchApproval(options.root, options.project, {
+        version: 1,
+        kind: PRODUCTION_BATCH_APPROVAL_KIND,
+        taskId: entry.taskId,
+        shotId,
+        batchPlanId: plan.batchPlanId,
+        taskIdPrefix: plan.taskIdPrefix,
+        phase: plan.phase,
+        sampleShotIds: plan.samplePolicy.sampleShotIds,
+        approvedAt: plan.createdAt,
+      }).created;
+    }
     shots.push({
       shotId,
       taskId: result.task.id,
       shotRequestSha256: written.sha256,
       casObjectCreated: written.created,
+      batchApprovalCreated,
       intentCreated: result.intentCreated,
       taskCreated: result.taskCreated,
       dispatchApplied: result.dispatchApplied,
