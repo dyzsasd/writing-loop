@@ -15,7 +15,7 @@
 #   gcp-h3-vm.sh status            # 状态、内网 IP、启动盘与 autoDelete
 #   gcp-h3-vm.sh ssh [-- CMD...]   # 登录或远程执行
 #   gcp-h3-vm.sh egress on|off     # 临时挂/摘外网 IP（只在装包、拉模型时 on）
-#   gcp-h3-vm.sh tunnel [PORT...]  # 把端口经 IAP 转到本机（默认同时转 gateway 8790 与 ComfyUI 8188）
+#   gcp-h3-vm.sh tunnel [PORT...]  # 经 IAP 的 ssh -L 把 VM 回环端口转到本机（默认 gateway 8790 与 ComfyUI 8188）
 #
 # 删除实例前先对启动盘做快照：`gcloud compute disks snapshot <INSTANCE> --zone <ZONE>`。
 #
@@ -180,35 +180,29 @@ cmd_egress() {
 # 任一子进程退出后一并收敛，避免留下半条隧道。
 cmd_tunnel() {
   require_auth
-  exists || fail "实例 $INSTANCE 不存在。"
+  exists || fail "实例 ${INSTANCE} 不存在。"
   local ports=()
   if [ "$#" -gt 0 ]; then
     ports=("$@")
   else
     ports=("$GATEWAY_PORT" "$COMFY_PORT")
   fi
-  local pids=()
-  local pid
-  trap 'for pid in ${pids[*]:-}; do kill "$pid" 2>/dev/null || true; done' EXIT INT TERM
+  # IAP 的 TCP 转发（start-iap-tunnel）只能连到 VM 网卡内网地址上的监听端口；gateway 与 ComfyUI 只绑
+  # 127.0.0.1，直接转发会报 4003 failed to connect to backend。因此走经 IAP 的 ssh 连接做 -L 端口转发：
+  # 由 VM 上的 sshd 连到回环地址，VM 网卡上仍然没有任何对外监听面，也不需要为这些端口开防火墙。
+  local forwards=()
   local port
   for port in "${ports[@]}"; do
     case "$port" in
-      ''|*[!0-9]*) fail "端口必须是十进制数字：$port" ;;
+      ''|*[!0-9]*) fail "端口必须是十进制数字：${port}" ;;
     esac
-    say "IAP 隧道 127.0.0.1:${port} → ${INSTANCE}:${port}"
-    gc compute start-iap-tunnel "$INSTANCE" "$port" --zone "$ZONE" --local-host-port="localhost:${port}" &
-    pids+=("$!")
+    say "ssh 端口转发（经 IAP）127.0.0.1:${port} → ${INSTANCE} 回环 ${port}"
+    forwards+=(-L "127.0.0.1:${port}:127.0.0.1:${port}")
   done
-  say "隧道已建立（Ctrl-C 结束）。worker 的 baseUrl 用 http://127.0.0.1:${GATEWAY_PORT}。"
-  # 轮询而非 wait：任一隧道退出就整体收敛（EXIT trap 杀掉其余），避免只剩半条隧道时 worker 静默失败。
-  while :; do
-    for pid in "${pids[@]}"; do
-      if ! kill -0 "$pid" 2>/dev/null; then
-        fail "IAP 隧道子进程已退出，收敛其余隧道；重新执行 tunnel 重建。"
-      fi
-    done
-    sleep 2
-  done
+  say "隧道建立中（Ctrl-C 结束）。worker 的 baseUrl 用 http://127.0.0.1:${GATEWAY_PORT}。"
+  # 单个 ssh 进程承载全部端口：-o ExitOnForwardFailure=yes 让任一端口转发失败时整体退出，不留半条隧道。
+  gc compute ssh "$INSTANCE" --zone "$ZONE" --tunnel-through-iap -- \
+    -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 "${forwards[@]}"
 }
 
 action="${1:-}"

@@ -47,5 +47,16 @@ for (const script of scripts) {
     "gcp-h3-vm.sh：启动盘类型默认 hyperdisk-balanced 且可用 WL_GPU_BOOT_DISK_TYPE 覆盖（G4 机型不接受 pd-*）");
 }
 
+// 2026-09-02 回归：IAP TCP 转发（start-iap-tunnel）连不到只绑 127.0.0.1 的 gateway / ComfyUI
+// （4003 failed to connect to backend）；回环端口必须经 IAP 的 ssh -L 转发。
+{
+  const vmScript = readFileSync(join(repoRoot, "writing-loop-operator", "scripts", "gcp-h3-vm.sh"), "utf8");
+  const tunnelBlock = /cmd_tunnel\(\) \{[\s\S]*?\n\}\n/.exec(vmScript)?.[0] ?? "";
+  ok(tunnelBlock.length > 0 && !tunnelBlock.includes("start-iap-tunnel")
+    && tunnelBlock.includes("--tunnel-through-iap") && tunnelBlock.includes('-L "127.0.0.1:${port}:127.0.0.1:${port}"')
+    && tunnelBlock.includes("ExitOnForwardFailure=yes"),
+    "gcp-h3-vm.sh tunnel：回环端口经 IAP 的 ssh -L 转发（start-iap-tunnel 连不到只绑 127.0.0.1 的服务）");
+}
+
 console.log(fails === 0 ? "\nOPERATOR_SCRIPTS_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

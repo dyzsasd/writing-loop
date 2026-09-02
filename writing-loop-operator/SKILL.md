@@ -100,11 +100,12 @@ writing-loop project enable <KEY> && systemctl --user restart writing-loop@<KEY>
 | 本机（macOS） | 全部控制面：workspace 与账本、`plan-shots` / `qc` / `handoff`、`production-worker`、VCS 合成与 Blender 候选图；worker runtime config `production-runtime.json`（0400/0600）与凭据环境变量 | 无常驻单元；worker 按批次手动跑 `--once` |
 | writing-loop-sg（可选） | 备选方案：worker 作为常驻 systemd user 单元跑在服务器上，此时三处 `baseUrl` 改指 GPU VM 内网 IP，并按下文「网络与磁盘纪律」补 VPC 入站规则 | `writing-loop-production-worker.service` + `.timer`（**user 单元**，`~/.config/systemd/user/`） |
 
-本机不在 GPU VM 的 VPC 里，gateway 只绑 VM 上的 `127.0.0.1`，经 IAP 隧道映射到本机同端口。
-一条命令起两个端口的隧道，占一个前台窗口；任一条隧道退出会整体收敛，不留半条：
+本机不在 GPU VM 的 VPC 里，gateway 只绑 VM 上的 `127.0.0.1`，经 IAP 的 ssh 连接做 `-L` 端口转发映射到本机同端口
+（IAP 的 TCP 转发只能连到 VM 网卡上的监听端口，连不到回环地址，所以不用 `start-iap-tunnel`）。
+一条命令、一个 ssh 进程承载两个端口，占一个前台窗口；任一端口转发失败整体退出，不留半条：
 
 ```bash
-bash scripts/gcp-h3-vm.sh tunnel        # 默认同时转 gateway 8790 与 ComfyUI 8188
+bash scripts/gcp-h3-vm.sh tunnel        # 默认同时转 gateway 8790 与 ComfyUI 8188（ssh -L，经 IAP）
 bash scripts/gcp-h3-vm.sh tunnel 8790   # 只要 gateway 时给端口
 ```
 
@@ -182,7 +183,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $WRITING_LOOP
 # GPU VM 本机：ComfyUI loopback 可达
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8188/queue                               # 期望 200
 
-# 本机：隧道通了（同样打 127.0.0.1:8790，走的是 IAP 转发）
+# 本机：隧道通了（同样打 127.0.0.1:8790，走的是经 IAP 的 ssh -L 转发）
 curl -s -o /dev/null -w '%{http_code}\n' \
   "http://127.0.0.1:8790/v1/scopes/<WS>/<PROJECT>/jobs/00000000-0000-4000-8000-000000000000"       # 期望 401
 curl -s -H "Authorization: Bearer $WRITING_LOOP_GATEWAY_TOKEN" \
@@ -194,8 +195,8 @@ writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --onc
 
 ### 网络与磁盘纪律
 
-- 本机经 IAP 隧道访问，gateway 端口不需要任何 VPC 入站规则：registry 的 `listen.host` 绑
-  `127.0.0.1`，隧道把它转发到本机同端口。不要为它开防火墙。
+- 本机经 IAP 的 ssh `-L` 转发访问，gateway 端口不需要任何 VPC 入站规则：registry 的 `listen.host` 绑
+  `127.0.0.1`，VM 上的 sshd 把转发连到回环地址。不要为它开防火墙，也不要改成绑内网 IP。
 - gateway 只绑 registry 配置里的字面地址，进程拒绝 `0.0.0.0` 与公网地址；不给实例加
   `http-server` / `https-server` 标签，端口不对公网开放。
 - 只有改用「worker 在 writing-loop-sg」的备选方案时才涉及 VPC 入站：依赖 `default-allow-internal`
