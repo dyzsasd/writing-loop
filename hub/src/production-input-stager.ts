@@ -16,6 +16,11 @@ import {
   type ProductionIntentExecution,
 } from "./production-intent.ts";
 import type { FetchLike } from "./production-adapter.ts";
+import {
+  ProductionLocalAssetSourceError,
+  productionCasAssetAuthority,
+  type ProductionLocalAssetSource,
+} from "./production-local-asset-source.ts";
 import { assertProjectKey } from "./workspace.ts";
 import { productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
 
@@ -31,7 +36,9 @@ export type ProductionInputStagerErrorCode =
   | "gateway-unavailable"
   | "gateway-rejected"
   | "invalid-response"
-  | "response-too-large";
+  | "response-too-large"
+  /** A `cas://` input the local object source could not produce as the exact object it names. */
+  | "local-asset-unavailable";
 
 const ERROR_MESSAGES: Readonly<Record<ProductionInputStagerErrorCode, string>> = Object.freeze({
   aborted: "production input staging aborted",
@@ -42,6 +49,7 @@ const ERROR_MESSAGES: Readonly<Record<ProductionInputStagerErrorCode, string>> =
   "gateway-rejected": "production input staging gateway rejected request",
   "invalid-response": "production input staging gateway response invalid",
   "response-too-large": "production input staging gateway response too large",
+  "local-asset-unavailable": "production input staging local asset unavailable",
 });
 
 /** Persistence-safe error: raw URL/body/token/cause/provider text is intentionally discarded. */
@@ -70,9 +78,10 @@ export type ProductionInputBinding = {
 };
 
 /**
- * The per-shot projection of the staged `inputs[0]` ShotRequest (§5.3 contract v2). It is read from
- * the receipt, not a second source of truth: the object it projects is pinned by
- * `bindings[0].assetSha256`, which the bindings digest already covers.
+ * The per-shot projection of the staged `inputs[0]` ShotRequest (§5.3 contract v2). The object it
+ * projects is pinned by `bindings[0].assetSha256`, which the bindings digest already covers; before
+ * the worker will submit, it re-derives `prompt` and `seed` from its own copy of that object (its
+ * local asset source, §6.4) and refuses a receipt whose projection disagrees.
  */
 export type ProductionStagedShotRequest = {
   version: 1;
@@ -160,10 +169,20 @@ export type HttpProductionInputStagerOptions = {
   /** Development-only escape hatch. HTTP remains limited to loopback and cannot carry a bearer. */
   allowInsecureLoopback?: boolean;
   transport?: ProductionInputStagerTransport;
+  /**
+   * The control-plane copy of the workspace CAS (§6.4). With it, a `cas://` input the gateway does
+   * not yet hold is uploaded before staging; without it, the objects must already be in the
+   * gateway's own store and a `cas://` input it cannot resolve fails the stage.
+   */
+  localAssetSource?: ProductionLocalAssetSource;
   fetch?: FetchLike;
   timeoutMs?: number;
+  /** Per-object deadline for the `assets` HEAD/PUT round trips; separate from the stage deadline. */
+  uploadTimeoutMs?: number;
   maxResponseBytes?: number;
 };
+
+export const DEFAULT_PRODUCTION_INPUT_UPLOAD_TIMEOUT_MS = 120_000;
 
 const SAFE_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -444,6 +463,15 @@ function endpoint(base: URL, scope: ProductionInputStageScope, stageKey: string)
   );
 }
 
+/** §6.4 content-addressed object resource: the same URL the gateway reads, probes and publishes at. */
+function assetEndpoint(base: URL, scope: ProductionInputStageScope, digest: string): URL {
+  return new URL(
+    `v1/scopes/${encodeURIComponent(scope.workspaceId)}/${encodeURIComponent(scope.project)}`
+    + `/assets/sha256/${digest}`,
+    base,
+  );
+}
+
 function authorizationToken(value: unknown): string | null {
   if (value === null) return null;
   if (typeof value !== "string" || value.length < 1 || value.length > 8_192 || !/^[\x21-\x7e]+$/.test(value)) {
@@ -520,8 +548,10 @@ export class HttpProductionInputStager implements ProductionInputStager {
   readonly #baseUrl: URL;
   readonly #scope: ProductionInputStageScope;
   readonly #credentialResolver: ProductionInputStagerCredentialResolver | null;
+  readonly #localAssetSource: ProductionLocalAssetSource | null;
   readonly #fetch: FetchLike;
   readonly #timeoutMs: number;
+  readonly #uploadTimeoutMs: number;
   readonly #maxResponseBytes: number;
 
   constructor(options: HttpProductionInputStagerOptions) {
@@ -538,15 +568,137 @@ export class HttpProductionInputStager implements ProductionInputStager {
     );
     this.#scope = parseScope(options.workspaceId, options.project);
     this.#credentialResolver = options.credentialResolver ?? null;
+    if (options.localAssetSource !== undefined
+      && (options.localAssetSource === null || typeof options.localAssetSource.read !== "function"
+        || typeof options.localAssetSource.casAuthority !== "string")) {
+      fail("invalid-config");
+    }
+    this.#localAssetSource = options.localAssetSource ?? null;
     this.#fetch = options.fetch ?? fetch;
     this.#timeoutMs = boundedInteger(options.timeoutMs, DEFAULT_PRODUCTION_INPUT_STAGE_TIMEOUT_MS, 50, 300_000);
+    this.#uploadTimeoutMs = boundedInteger(
+      options.uploadTimeoutMs, DEFAULT_PRODUCTION_INPUT_UPLOAD_TIMEOUT_MS, 50, 900_000,
+    );
     this.#maxResponseBytes = boundedInteger(
       options.maxResponseBytes, DEFAULT_PRODUCTION_INPUT_STAGE_RESPONSE_BYTES, 1_024, 16 * 1024 * 1024,
     );
   }
 
+  /** Server-owned bearer for one request; the raw secret never leaves this call. */
+  async #credential(
+    signal: AbortSignal,
+    timedOut: () => boolean,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<string | null> {
+    if (!this.#credentialResolver) return null;
+    try {
+      return authorizationToken(await raceAbort(
+        Promise.resolve(this.#credentialResolver(signal)), signal,
+      ));
+    } catch (error) {
+      if (error instanceof ProductionInputStagerError) throw error;
+      if (callerSignal?.aborted) fail("aborted");
+      if (timedOut()) fail("gateway-unavailable");
+      fail("credential-unavailable");
+    }
+  }
+
+  /** One bounded request against the gateway, with its own deadline and the caller's abort honoured. */
+  async #sendBounded(
+    url: URL,
+    init: { method: "HEAD" | "PUT"; headers: Record<string, string>; body?: Uint8Array },
+    callerSignal: AbortSignal | undefined,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    let timedOut = false;
+    const onCallerAbort = (): void => controller.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) onCallerAbort();
+    else callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(new Error("deadline"));
+    }, this.#uploadTimeoutMs);
+    try {
+      if (controller.signal.aborted) fail("aborted");
+      const credential = await this.#credential(controller.signal, () => timedOut, callerSignal);
+      const headers = { ...init.headers };
+      if (credential !== null) headers.authorization = `Bearer ${credential}`;
+      let response: Response;
+      try {
+        response = await raceAbort(Promise.resolve(this.#fetch(url, {
+          method: init.method,
+          redirect: "error",
+          headers,
+          ...(init.body === undefined ? {} : { body: init.body }),
+          signal: controller.signal,
+        })), controller.signal);
+      } catch (error) {
+        if (error instanceof ProductionInputStagerError) throw error;
+        if (callerSignal?.aborted) fail("aborted");
+        fail("gateway-unavailable");
+      }
+      return response;
+    } finally {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
+    }
+  }
+
+  /**
+   * §6.4: publish every `cas://` input the gateway does not already hold, before the stage that will
+   * ask it to resolve them. The probe and the publication share one content-addressed URL, so a
+   * concurrent worker that published first is observed as "already there" rather than as a conflict.
+   *
+   * Fail-closed throughout: an object this host cannot produce, or a publication the gateway refuses,
+   * ends the stage. A partially staged intent must never reach the submission path.
+   */
+  async #publishLocalInputs(
+    intent: ProductionDispatchIntent,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<void> {
+    const source = this.#localAssetSource;
+    if (source === null) return;
+    const seen = new Set<string>();
+    for (const [index, input] of intent.inputs.entries()) {
+      const asset = parseAssetRef(input, `ProductionInputStageRequest.inputs[${index}].asset`);
+      // Only this port's own scheme: `urn:`/`s3:` inputs are the gateway's to resolve, not ours.
+      if (!asset.uri.startsWith("cas://")) continue;
+      const authority = productionCasAssetAuthority(asset);
+      // A `cas://` object in another CAS cannot be staged by this gateway either, so it is refused
+      // here rather than left to fail as an opaque resolver error after the receipt claim is built.
+      if (authority === null || authority !== source.casAuthority) fail("invalid-input");
+      if (seen.has(asset.sha256)) continue;
+      seen.add(asset.sha256);
+
+      const url = assetEndpoint(this.#baseUrl, this.#scope, asset.sha256);
+      const probe = await this.#sendBounded(url, { method: "HEAD", headers: {} }, callerSignal);
+      void probe.body?.cancel().catch(() => undefined);
+      if (probe.status === 200) continue;
+      if (probe.status !== 404) {
+        fail(probe.status >= 400 && probe.status < 500 ? "gateway-rejected" : "gateway-unavailable", probe.status);
+      }
+      let bytes: Uint8Array;
+      try { bytes = await source.read(asset, callerSignal); }
+      catch (error) {
+        if (callerSignal?.aborted) fail("aborted");
+        if (error instanceof ProductionLocalAssetSourceError) fail("local-asset-unavailable");
+        throw error;
+      }
+      const upload = await this.#sendBounded(url, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: bytes,
+      }, callerSignal);
+      void upload.body?.cancel().catch(() => undefined);
+      if (!upload.ok) {
+        fail(upload.status >= 400 && upload.status < 500 ? "gateway-rejected" : "gateway-unavailable", upload.status);
+      }
+    }
+  }
+
   async stage(intentValue: ProductionDispatchIntent, callerSignal?: AbortSignal): Promise<ProductionInputStageResult> {
     const intent = parseIntent(intentValue);
+    await this.#publishLocalInputs(intent, callerSignal);
     const identity = canonicalStageIdentity(this.#scope, intent);
     const stageKey = productionInputStageIdentityKey(identity);
     const request: ProductionInputStageRequest = { ...identity, stageKey };
@@ -562,19 +714,7 @@ export class HttpProductionInputStager implements ProductionInputStager {
 
     try {
       if (controller.signal.aborted) fail("aborted");
-      let credential: string | null = null;
-      if (this.#credentialResolver) {
-        try {
-          credential = authorizationToken(await raceAbort(
-            Promise.resolve(this.#credentialResolver(controller.signal)), controller.signal,
-          ));
-        } catch (error) {
-          if (error instanceof ProductionInputStagerError) throw error;
-          if (callerSignal?.aborted) fail("aborted");
-          if (timedOut) fail("gateway-unavailable");
-          fail("credential-unavailable");
-        }
-      }
+      const credential = await this.#credential(controller.signal, () => timedOut, callerSignal);
       const headers: Record<string, string> = {
         "content-type": "application/json",
         accept: "application/json",

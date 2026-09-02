@@ -685,7 +685,8 @@ episodes/   evaluation/   source/（改编立项）
 [`docs/design/phase-3-remote-production/AI-SPEC.md`](https://github.com/dyzsasd/writing-loop/blob/main/docs/design/phase-3-remote-production/AI-SPEC.md#9b-phase-3c-%E9%83%A8%E7%BD%B2%E4%B8%8E-runtime-contract)。
 
 顶层 exact keys：`version`、`workspaceId`、`projects`、`backends`、`gateway`、`workflows`、
-`stagingProfiles`、`runner`，外加可选的 `executionProfileSnapshotFile`。文件必须是当前 euid 所有、
+`stagingProfiles`、`runner`，外加可选的 `executionProfileSnapshotFile` 与 `localAssetSource`。
+文件必须是当前 euid 所有、
 单链接普通文件，mode 只能 `0400`/`0600`；
 workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/digest。配置只允许保存 `credentialEnv`
 环境变量名，不允许保存 token、Authorization header、任意请求 URL 或签名资产 URL。
@@ -704,6 +705,20 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
 - `executionProfileSnapshotFile`（可选）：gateway 导出的只读 execution profile 快照路径，相对本
   runtime config 文件，解析规则同 `workflows[].file`（无 `..`、无空段、非绝对路径）。缺省为 null，
   此时 `production plan-shots` 拒绝出计划——没有价目与时长档就无法给出可审批的批次估算。
+- `localAssetSource`（`stagingProfiles` 非空时必填，否则可缺省为 null）exact keys：`version`、
+  `kind`、`casAuthority`。`kind` 本版只有 `workspace-cas`：本机 workspace CAS
+  （`.writing-loop/<project>/production-cas.v1/sha256/<digest>`）即 `cas://` 输入的正本持有方，
+  路径由装配层按 workspace root 与 project 推出，不写进配置文件。`casAuthority` 必须与 gateway
+  registry 的 `casAuthority` 和 execution profile 快照里的同名字段相等。worker 用它做两件事（§6.4）：
+  - staging 之前逐个 `cas://` 输入向 gateway `HEAD /v1/scopes/<ws>/<project>/assets/sha256/<digest>`，
+    404 即 `PUT` 上传原始字节。上传失败或本机取不到该对象时，该次 stage 直接失败，不带着缺失输入继续。
+    上传目标取 `stagingProfiles[].baseUrl`（不是顶层 `gateway.baseUrl`）：对象必须落到解析 `cas://`
+    的那台主机上，而 `cas://` 由 stage kernel 解析。这条前提是「stage kernel 与 `assets` 路由在同一
+    进程、共用同一个 ingest CAS」——本版的 gateway 装配即如此（§8.0）。若将来把 stage 与 ingest 拆到
+    不同进程或不同 CAS，必须重新裁定上传目标；
+  - H3 graph 契约 v2 提交前，从本机正本重新读出 `prompt.text` 与 `output.seed`，与 stage 回执的
+    `shotRequest` 投影逐字比对，不一致即 `workflow-invalid`，不提交。
+  声明另一个 authority 的 `cas://` 输入在上传前即被拒——它不可能被本 gateway 解析。
 - `production-gateway` backend：credentialed HTTPS、固定 safe path、server profile alias；按 project
   构造 scope-bound adapter。
 - direct `comfyui` backend：仅无凭据 literal-loopback HTTP development endpoint；正式远程部署禁止。
@@ -842,7 +857,14 @@ parser 执行验证的 v1 fixture 见
   `source` 与 `consumer` 同为 `null`（该 slot 不绑定 LoadImage），其余 LoadImage 绑定 index 顺延一位。
   `shot-request` 这个 slot 名与该 mediaType 一一对应：任何一边单独出现都被拒。
 - `casAuthority`：stage 资产只接受 `cas://<casAuthority>/sha256/<digest>`，解析到本机 ingest CAS
-  （承接链的尾帧因此不需要跨主机取回）。
+  （承接链的尾帧因此不需要跨主机取回）。同一个 ingest CAS 也是 `assets` 路由的对象空间：
+  `GET|HEAD|PUT /v1/scopes/<workspaceId>/<project>/assets/sha256/<digest>` 是同一个内容寻址对象的
+  三种方法（bearer 与其余路由相同）。`PUT` 的请求体是原始字节，服务端重算 sha256 必须等于路径中的
+  digest，否则 400 且不落盘；同字节重放为幂等 200，同名不同字节为 409（内容寻址下不可能由该路由
+  产生，仍拒绝覆盖）。媒体类型由字节嗅探判定，只接受图片（上限取 `backends[].maxInputImageBytes`）
+  与 ShotRequest 正本（嗅探不出媒体类型时按内容校验，上限 1 MiB，判据与 stage 内核相同）；视频 /
+  音频等 provider 产物只经 ingest 内核入库，在该路由上被 415 拒绝。`HEAD` 只答存在性（200/404，
+  无响应体），worker 用它决定是否上传（§6.4）。
 - `objectsRoot` / `ingestRoot` / `jobStateRoot`：持久化启动盘上的三个独立绝对路径。stage 内核把资产
   硬链接到 `<objectsRoot>/objects/<namespace>/<sha256>`（ComfyUI 必须能读该目录）；ingest CAS 在
   `<ingestRoot>/blobs/sha256/`；`jobStateRoot` 下由 gateway 划分 `jobs/`（不可变 job record）与

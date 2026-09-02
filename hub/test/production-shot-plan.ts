@@ -584,6 +584,86 @@ try {
   rmSync(first.root, { recursive: true, force: true });
 }
 
+// —— 契约 v2 派生 seed：逐镜按选定档判定（§4.1 seed-derived） ——
+{
+  // 剧本预填给不出 seed；本批次的档 capability seed=uint32（契约 v2），因此每镜按最终内容派生。
+  const nullSeed = batchRequest() as { script: { options: Record<string, any> } };
+  nullSeed.script.options.output = { ...nullSeed.script.options.output, seed: null };
+  const derivedFixture = makeWorkspace({ request: nullSeed });
+  const explicitFixture = makeWorkspace();
+  try {
+    const derivedPlan = planJson(derivedFixture);
+    const explicitPlan = planJson(explicitFixture);
+    const seedDegradations = (derivedPlan.degradations as Array<Record<string, unknown>>)
+      .filter((entry) => entry.code === "seed-derived");
+    ok(derivedPlan.validation.errors === 0 && seedDegradations.length === 1
+      && seedDegradations[0]!.shotId === "EP001-S1-1"
+      && seedDegradations[0]!.from === "output.seed=null"
+      && seedDegradations[0]!.requiresReapproval === false,
+    `--from-script 且 output.seed 为 null 时逐镜记一条 seed-derived（实得 ${JSON.stringify(derivedPlan.degradations)}）`);
+    ok(derivedPlan.batchPlanId !== explicitPlan.batchPlanId,
+      "派生 seed 计入 batchPlanId：与显式 seed 的同一批次指纹不同");
+    const confirmed = capture(
+      planArgs(derivedFixture, ["--confirm", derivedPlan.batchPlanId, "--json"]), derivedFixture.root,
+    );
+    const shot = (JSON.parse(confirmed.out) as Record<string, any>).shots[0];
+    const shotRequest = JSON.parse(
+      readProductionCasObject(derivedFixture.root, "demo", shot.shotRequestSha256)!.toString("utf8"),
+    ) as Record<string, any>;
+    const seed = shotRequest.output.seed as number;
+    ok(Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffff_ffff
+      && shotRequest.continuity.fingerprint.seed === seed
+      && String(seedDegradations[0]!.to).startsWith(String(seed)),
+    `落盘的 ShotRequest 带 uint32 派生 seed，且与退化记录的取值一致（实得 ${String(seed)}）`);
+  } finally {
+    rmSync(derivedFixture.root, { recursive: true, force: true });
+    rmSync(explicitFixture.root, { recursive: true, force: true });
+  }
+
+  // v1 + v2 混合快照：门槛逐镜生效——落到 v1 档（seed unsupported）的镜头不派生，也不报警。
+  const V1_PROFILE_ID = "h3-fl2va-portrait-v1";
+  const mixedSnapshot = snapshotOf([
+    snapshotEntry({ limits: limits() }),
+    snapshotEntry({
+      profileId: V1_PROFILE_ID,
+      execution: execution({ profileId: V1_PROFILE_ID, durationSeconds: 12 }),
+      durationGrid: [12],
+      limits: limits({
+        seed: "unsupported",
+        durationSeconds: { min: 12, max: 12, grid: [12], gridByResolution: null },
+      }),
+    }),
+  ]);
+  // 两镜不同机位即不合并（条件 3）：首镜 3 s 落 8 s 档（v2），其余三镜合并成 9 s 落 12 s 档（v1）。
+  const mixed = batchRequest({ capability: null }) as {
+    script: { options: Record<string, any>; patches: Array<Record<string, any>>; mergedPatches: Array<Record<string, any>> };
+  };
+  mixed.script.options.output = { ...mixed.script.options.output, seed: null };
+  mixed.script.options.defaultStoryboardDurationSeconds = 3;
+  for (const patch of mixed.script.patches) {
+    if (patch.shotId !== "EP001-S1-1") patch.camera = { ...clone(CAMERA), cameraId: "CAM_B" };
+  }
+  mixed.script.mergedPatches = [
+    { ...clone(mixed.script.mergedPatches[0]!), shotId: "EP001-S1-1" },
+    { ...clone(mixed.script.mergedPatches[0]!), shotId: "EP001-S1-2" },
+  ];
+  const mixedFixture = makeWorkspace({ request: mixed, snapshotDoc: mixedSnapshot });
+  try {
+    const plan = planJson(mixedFixture);
+    const byShot = new Map((plan.decisions as Array<Record<string, string>>)
+      .map((row) => [row.shotId, row.profileId] as const));
+    const derived = (plan.degradations as Array<Record<string, string>>)
+      .filter((entry) => entry.code === "seed-derived").map((entry) => entry.shotId);
+    ok(plan.totals.shots === 2 && byShot.get("EP001-S1-1") === PROFILE_ID
+      && byShot.get("EP001-S1-2") === V1_PROFILE_ID,
+    `混合快照下两镜分别落到 v2 与 v1 档（实得 ${JSON.stringify([...byShot])}）`);
+    ok(derived.join(",") === "EP001-S1-1",
+      `只有落到 v2 档的镜头派生 seed（实得 ${derived.join(",") || "无"}）`);
+    ok(plan.validation.errors === 0 && plan.blocked === false,
+      `落到 v1 档的镜头 seed 保持 null 且不报错（实得 ${JSON.stringify(plan.validation.shots.map((row: Record<string, any>) => row.issues))}）`);
+  } finally { rmSync(mixedFixture.root, { recursive: true, force: true }); }
+}
+
 // —— 视觉侧默认值：mappings 填灯光/陈设、候选图 shotIds 填首帧 ——
 {
   const noFirstFrame = batchRequest() as { script: { mergedPatches: Array<Record<string, any>> } };

@@ -54,13 +54,19 @@ import {
   providerSlotSequenceViolation,
   type ProviderInputSlot,
 } from "./production-provider-adapter.ts";
-import { readProductionCasObject } from "./production-cas.ts";
+import { MAX_PRODUCTION_CAS_DOCUMENT_BYTES, readProductionCasObject } from "./production-cas.ts";
 import { ProductionError } from "./production-domain.ts";
 import {
   SHOT_REQUEST_MEDIA_TYPE,
   parseShotRequest,
+  readShotRequestDocument,
   type ShotRequest,
 } from "./production-shot-request.ts";
+import {
+  ProductionLocalAssetSourceError,
+  WorkspaceCasLocalAssetSource,
+  type ProductionLocalAssetSource,
+} from "./production-local-asset-source.ts";
 import {
   hasSymlinkComponent,
   readRegularTextExact,
@@ -221,6 +227,18 @@ export type ProductionRuntimeRunnerConfig = Readonly<{
   perBackendConcurrency: number;
 }>;
 
+/**
+ * §6.4 本机对象源。scoped-staging 的输入（`inputs[0]` 的 ShotRequest、操作者上传的首帧、已批准候选图）
+ * 正本在本机 workspace CAS 里，gateway 的 `cas://` resolver 只看 GPU VM 自己的 ingest CAS，因此 worker
+ * 需要一条把它们送过去、并在提交前独立复核回执投影的读路径。`casAuthority` 必须与 gateway registry
+ * 和 execution profile 快照声明的同一个 authority 相等。
+ */
+export type ProductionRuntimeLocalAssetSourceConfig = Readonly<{
+  version: 1;
+  kind: "workspace-cas";
+  casAuthority: string;
+}>;
+
 export type ProductionRuntimeConfig = Readonly<{
   version: 1;
   workspaceId: string;
@@ -229,6 +247,8 @@ export type ProductionRuntimeConfig = Readonly<{
   gateway: ProductionRuntimeGatewayConfig;
   workflows: readonly ProductionRuntimeWorkflowConfig[];
   stagingProfiles: readonly ProductionRuntimeStagingProfileConfig[];
+  /** scoped-staging 存在时必填；只有 static-pre-staged 的部署可以缺省为 null。 */
+  localAssetSource: ProductionRuntimeLocalAssetSourceConfig | null;
   runner: ProductionRuntimeRunnerConfig;
   /**
    * gateway 导出的只读 execution profile 快照（§4.2），相对本 runtime config 文件，解析规则同
@@ -514,6 +534,23 @@ function parseBackend(value: unknown, index: number): ProductionRuntimeBackendCo
   schemaError(`${subject}.kind`, "必须是 comfyui 或 production-gateway");
 }
 
+const CAS_AUTHORITY = /^[a-z0-9][a-z0-9-]{0,62}$/;
+
+function parseLocalAssetSource(value: unknown): ProductionRuntimeLocalAssetSourceConfig {
+  const subject = "ProductionRuntimeConfig.localAssetSource";
+  const row = record(value, subject);
+  exactKeys(row, ["version", "kind", "casAuthority"], subject);
+  version(row.version, subject);
+  if (row.kind !== "workspace-cas") {
+    schemaError(`${subject}.kind`, "本版只支持 workspace-cas 一种本机对象源");
+  }
+  return Object.freeze({
+    version: 1,
+    kind: "workspace-cas",
+    casAuthority: safeString(row.casAuthority, CAS_AUTHORITY, `${subject}.casAuthority`),
+  });
+}
+
 function parseGateway(value: unknown): ProductionRuntimeGatewayConfig {
   const subject = "ProductionRuntimeConfig.gateway";
   const row = record(value, subject);
@@ -773,7 +810,7 @@ export function parseProductionRuntimeConfig(value: unknown): ProductionRuntimeC
   const row = record(value, subject);
   exactKeys(row, [
     "version", "workspaceId", "projects", "backends", "gateway", "workflows", "stagingProfiles", "runner",
-  ], subject, ["executionProfileSnapshotFile"]);
+  ], subject, ["executionProfileSnapshotFile", "localAssetSource"]);
   version(row.version, subject);
   if (!Array.isArray(row.projects) || row.projects.length > MAX_PRODUCTION_RUNTIME_PROJECTS) {
     schemaError(`${subject}.projects`, `最多包含 ${MAX_PRODUCTION_RUNTIME_PROJECTS} 项`);
@@ -859,6 +896,14 @@ export function parseProductionRuntimeConfig(value: unknown): ProductionRuntimeC
   if (usedProfiles.size !== stagingProfiles.length) {
     schemaError(`${subject}.stagingProfiles`, "不得注册未被 scoped-staging workflow 引用的 profile");
   }
+  const localAssetSource = row.localAssetSource === undefined || row.localAssetSource === null
+    ? null
+    : parseLocalAssetSource(row.localAssetSource);
+  // scoped-staging 的输入正本在本机 workspace CAS 里（§6.4）；没有对象源的 worker 既送不上去、
+  // 也复核不了回执投影，这不是一种可运行的降级形态，因此在解析层就拒绝。
+  if (stagingProfiles.length > 0 && localAssetSource === null) {
+    schemaError(`${subject}.localAssetSource`, "存在 scoped-staging staging profile 时必填");
+  }
   return Object.freeze({
     version: 1,
     workspaceId: safeString(row.workspaceId, WORKSPACE_ID_PATTERN, `${subject}.workspaceId`),
@@ -867,6 +912,7 @@ export function parseProductionRuntimeConfig(value: unknown): ProductionRuntimeC
     gateway: parseGateway(row.gateway),
     workflows: Object.freeze(workflows),
     stagingProfiles: Object.freeze(stagingProfiles),
+    localAssetSource,
     runner: parseRunner(row.runner),
     executionProfileSnapshotFile: row.executionProfileSnapshotFile === undefined
       || row.executionProfileSnapshotFile === null
@@ -1146,11 +1192,68 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
   readonly #profile: ProductionRuntimeStagingProfileConfig;
   readonly #workflowConfig: ProductionRuntimeWorkflowConfig;
   readonly #executionKey: string;
+  readonly #localAssetSource: ProductionLocalAssetSource | null;
 
-  constructor(profile: ProductionRuntimeStagingProfileConfig, workflowConfig: ProductionRuntimeWorkflowConfig) {
+  constructor(
+    profile: ProductionRuntimeStagingProfileConfig,
+    workflowConfig: ProductionRuntimeWorkflowConfig,
+    localAssetSource: ProductionLocalAssetSource | null,
+  ) {
     this.#profile = profile;
     this.#workflowConfig = workflowConfig;
     this.#executionKey = executionIdentityKey(profile.execution);
+    this.#localAssetSource = localAssetSource;
+  }
+
+  /**
+   * 契约 v2 的独立复核（§5.3、§6.4）：逐镜 prompt / seed 是 gateway 回执给出的投影，worker 不把它当
+   * 唯一事实源——它按 `intent.inputs[0]` 从本机对象源取回同一份 ShotRequest 正本，重新读出 prompt 与
+   * seed 逐字比对。两边不一致即回执与本机正本描述的不是同一个镜头，拒绝提交而不是按回执材料化。
+   */
+  #shotBindingFromLocalObject(
+    intent: ProductionDispatchIntent,
+    staged: ProductionInputStageResult,
+    signal: AbortSignal | undefined,
+  ): Promise<ProductionH3ShotBinding> {
+    const projection = staged.shotRequest;
+    const asset = intent.inputs[0];
+    if (projection === null || projection.seed === null || asset === undefined
+      || projection.assetSha256 !== asset.sha256) {
+      throw new ProductionRuntimeConfigError(
+        "workflow-invalid", "H3 契约 v2 需要 inputs[0] ShotRequest 的 prompt 与非空 seed",
+      );
+    }
+    const source = this.#localAssetSource;
+    if (source === null) {
+      throw new ProductionRuntimeConfigError(
+        "workflow-invalid", "H3 契约 v2 需要本机对象源复核回执投影，但 runtime config 未声明 localAssetSource",
+      );
+    }
+    return (async () => {
+      let bytes: Uint8Array;
+      try { bytes = await source.read(asset, signal); }
+      catch (error) {
+        throw new ProductionRuntimeConfigError(
+          "workflow-invalid",
+          `无法从本机对象源取回 inputs[0] ShotRequest 正本复核回执：${
+            error instanceof ProductionLocalAssetSourceError ? error.code : "read-failed"}`,
+        );
+      }
+      const document = readShotRequestDocument(bytes);
+      if (!document.ok) {
+        throw new ProductionRuntimeConfigError(
+          "workflow-invalid", `本机 inputs[0] 对象不是可材料化的 ShotRequest 正本（${document.reason}）`,
+        );
+      }
+      const local = document.shotRequest;
+      const seed = local.output.seed;
+      if (seed === null || local.prompt.text !== projection.prompt || seed !== projection.seed) {
+        throw new ProductionRuntimeConfigError(
+          "workflow-invalid", "stage 回执的 prompt / seed 投影与本机 ShotRequest 正本不一致",
+        );
+      }
+      return { prompt: local.prompt.text, seed };
+    })();
   }
 
   async verify(
@@ -1201,17 +1304,13 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
     }
     const contract = this.#workflowConfig.h3GraphContract;
     if (contract === null) throw new ProductionRuntimeConfigError("workflow-invalid", "H3 graph contract 缺失");
-    // 契约 v2 的逐镜 prompt / seed 从 stage 回执的投影读取（§5.3）：该对象由 bindings[0].assetSha256 钉住，
-    // 已计入 bindingsDigest；gateway 侧按同一 receipt 独立复算 bound digest，两边不一致即拒绝提交。
+    // 契约 v2 的逐镜 prompt / seed 由 worker 从本机对象源复核（§5.3、§6.4）：回执的投影只作为待核对的
+    // 一方，材料化取的是本机 ShotRequest 正本的值；gateway 侧按同一 receipt 独立复算 bound digest，
+    // 三方（本机正本、回执投影、gateway 重建）任意两方不一致即拒绝提交。
     let shotBinding: ProductionH3ShotBinding | null = null;
     if (contract.version === 2) {
-      if (staged.shotRequest === null || staged.shotRequest.seed === null
-        || staged.shotRequest.assetSha256 !== intent.inputs[0]?.sha256) {
-        throw new ProductionRuntimeConfigError(
-          "workflow-invalid", "H3 契约 v2 需要 inputs[0] ShotRequest 的 prompt 与非空 seed",
-        );
-      }
-      shotBinding = { prompt: staged.shotRequest.prompt, seed: staged.shotRequest.seed };
+      shotBinding = await this.#shotBindingFromLocalObject(intent, staged, signal);
+      throwIfAborted(signal);
     } else if (staged.shotRequest !== null) {
       throw new ProductionRuntimeConfigError("workflow-invalid", "H3 契约 v1 没有 shot-request slot");
     }
@@ -1281,7 +1380,7 @@ function realFaceInputsFromIntent(
 ): ProductionIntentRealFaceDeclaration {
   const head = intent.inputs[0];
   if (head === undefined || head.mediaType !== SHOT_REQUEST_MEDIA_TYPE) return "undeclared";
-  const bytes = readProductionCasObject(root, project, head.sha256);
+  const bytes = readProductionCasObject(root, project, head.sha256, MAX_PRODUCTION_CAS_DOCUMENT_BYTES);
   if (bytes === null) return "undeclared";
   let shotRequest: ShotRequest;
   // 这是运行期的账本内容，不是配置：CAS 里的 ShotRequest 坏掉属于该次 dispatch 的事实缺失，
@@ -1527,6 +1626,15 @@ export function createProductionRuntimeRegistry(
         workspaceId: config.workspaceId,
         project: project.project,
       });
+      // §6.4：本机 workspace CAS 的读路径，每个项目一份（对象目录按项目分开）。stager 用它上传
+      // gateway 还没有的 `cas://` 输入，binding verifier 用它复核回执的 prompt / seed 投影。
+      const localAssetSource: ProductionLocalAssetSource | null = config.localAssetSource === null
+        ? null
+        : new WorkspaceCasLocalAssetSource({
+          root,
+          project: project.project,
+          casAuthority: config.localAssetSource.casAuthority,
+        });
       const stagedPipelines = new Map<string, ProductionInputPipeline>();
       const inputPipelineResolver = new ConfiguredInputPipelineResolver(authorizedWorkflows.map((workflow) => {
         if (workflow.inputPolicy === "static-pre-staged") {
@@ -1562,6 +1670,7 @@ export function createProductionRuntimeRegistry(
               && new URL(profile.baseUrl).protocol === "http:",
             transport: profile.transport,
             fetch: configuredStageFetch ?? fetch,
+            ...(localAssetSource === null ? {} : { localAssetSource }),
             credentialResolver: profile.credentialEnv === null ? undefined : (signal) => {
               throwIfAborted(signal);
               return secretFromEnvironment(env, profile.credentialEnv);
@@ -1571,7 +1680,7 @@ export function createProductionRuntimeRegistry(
             version: 1,
             policy: "scoped-staging",
             inputStager,
-            workflowBindingVerifier: new ExactWorkflowBindingVerifier(profile, workflow),
+            workflowBindingVerifier: new ExactWorkflowBindingVerifier(profile, workflow, localAssetSource),
           });
           stagedPipelines.set(profile.profileId, pipeline);
         }

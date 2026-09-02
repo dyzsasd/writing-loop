@@ -43,15 +43,29 @@ import {
   type ProductionIngestScope,
   type ProductionIngestResult,
 } from "./production-ingestor.ts";
+import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  readShotRequestDocument,
+} from "./production-shot-request.ts";
 
 export const DEFAULT_PRODUCTION_GATEWAY_TIMEOUT_MS = 120_000;
 export const DEFAULT_PRODUCTION_GATEWAY_REQUEST_BYTES = 256 * 1024;
 export const DEFAULT_PRODUCTION_GATEWAY_ASSET_BYTES = 4 * 1024 * 1024 * 1024;
+/**
+ * §6.4 upload route ceiling for one ShotRequest document. It is the same 1 MiB the workspace CAS
+ * (`production-cas.ts`) and the stage kernel apply, so the three bounds cannot drift apart.
+ */
+export const MAX_PRODUCTION_GATEWAY_UPLOAD_DOCUMENT_BYTES = 1024 * 1024;
+/**
+ * Fallback ceiling for an uploaded image. The deployed process passes the registry's
+ * `backends[].maxInputImageBytes` instead — the same number the capability route quotes (§4.3).
+ */
+export const DEFAULT_PRODUCTION_GATEWAY_UPLOAD_IMAGE_BYTES = 64 * 1024 * 1024;
 
 export type ProductionGatewayCredentialContext = {
   workspaceId: string;
   project: string;
-  operation: "ingest" | "asset-read" | "comfy-output-read";
+  operation: "ingest" | "asset-read" | "asset-write" | "comfy-output-read";
 };
 
 export type ProductionGatewayCredentialResolver = (
@@ -105,6 +119,8 @@ export type ProductionGatewayOptions = {
   timeoutMs?: number;
   maxRequestBytes?: number;
   maxAssetBytes?: number;
+  /** §6.4 `assets` PUT ceiling for a sniffed image; the ShotRequest bound is fixed at 1 MiB. */
+  maxUploadImageBytes?: number;
   maxAssets?: number;
   bindHost?: string;
   bindPort?: number;
@@ -214,7 +230,8 @@ const SAFE_PROJECT = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const LOCATOR_KINDS = new Set(["image", "video", "audio", "file"]);
 const FOLDER_TYPES = new Set(["output", "temp"]);
-const ALLOWED_MEDIA_TYPES = new Set([
+/** Media types this kernel can recognise from a magic number, i.e. everything an ingest can yield. */
+const SNIFFABLE_MEDIA_TYPES = new Set([
   "audio/flac",
   "audio/mpeg",
   "audio/ogg",
@@ -226,6 +243,12 @@ const ALLOWED_MEDIA_TYPES = new Set([
   "video/mp4",
   "video/webm",
 ]);
+/**
+ * Everything the store may hold. The ShotRequest is a JSON document with no magic number: it only
+ * enters the store through the `assets` upload route (§6.4), which identifies it by content check
+ * rather than by sniffing, so it is representable in metadata but never in a sniff result.
+ */
+const ALLOWED_MEDIA_TYPES = new Set([...SNIFFABLE_MEDIA_TYPES, SHOT_REQUEST_MEDIA_TYPE]);
 const UNKNOWN_COST: ProductionCost = Object.freeze({
   version: 1,
   state: "unknown",
@@ -536,7 +559,7 @@ function sniffMediaType(header: Uint8Array): string | null {
 }
 
 function mediaMatchesKind(mediaType: string, kind: "image" | "video" | "audio" | "file"): boolean {
-  if (!ALLOWED_MEDIA_TYPES.has(mediaType)) return false;
+  if (!SNIFFABLE_MEDIA_TYPES.has(mediaType)) return false;
   if (kind === "file") return true;
   return mediaType.startsWith(`${kind}/`);
 }
@@ -841,7 +864,9 @@ function errorResponse(error: ProductionGatewayError): Response {
 
 type GatewayRoute =
   | { kind: "ingest"; scope: ProductionIngestScope; ingestKey: string }
-  | { kind: "asset"; scope: ProductionIngestScope; digest: string };
+  | { kind: "asset"; scope: ProductionIngestScope; digest: string }
+  | { kind: "asset-head"; scope: ProductionIngestScope; digest: string }
+  | { kind: "asset-upload"; scope: ProductionIngestScope; digest: string };
 
 function canonicalScopeSegment(raw: string, pattern: RegExp): string | null {
   let decoded: string;
@@ -864,8 +889,12 @@ function parseGatewayRoute(url: URL, method: string): GatewayRoute {
     if (method !== "PUT") fail("not-found");
     return { kind: "ingest", scope, ingestKey: match[4]! };
   }
-  if (method !== "GET") fail("not-found");
-  return { kind: "asset", scope, digest: match[4]! };
+  // One URL per CAS object, three methods: the worker publishes a workspace-side input with PUT,
+  // probes for it with HEAD before deciding to upload, and reads a registered take back with GET.
+  if (method === "GET") return { kind: "asset", scope, digest: match[4]! };
+  if (method === "HEAD") return { kind: "asset-head", scope, digest: match[4]! };
+  if (method === "PUT") return { kind: "asset-upload", scope, digest: match[4]! };
+  fail("not-found");
 }
 
 function comfyOutputUrl(base: URL, locator: ComfyViewOutputLocator): URL {
@@ -902,6 +931,7 @@ export class ProductionGateway {
   readonly #timeoutMs: number;
   readonly #maxRequestBytes: number;
   readonly #maxAssetBytes: number;
+  readonly #maxUploadImageBytes: number;
   readonly #maxAssets: number;
   readonly #bindHost: string;
   readonly #bindPort: number;
@@ -930,6 +960,10 @@ export class ProductionGateway {
     );
     this.#maxAssetBytes = boundedInteger(
       options.maxAssetBytes, DEFAULT_PRODUCTION_GATEWAY_ASSET_BYTES, 1_024, Number.MAX_SAFE_INTEGER,
+    );
+    this.#maxUploadImageBytes = boundedInteger(
+      options.maxUploadImageBytes, DEFAULT_PRODUCTION_GATEWAY_UPLOAD_IMAGE_BYTES,
+      1_024, 4 * 1024 * 1024 * 1024,
     );
     this.#maxAssets = boundedInteger(
       options.maxAssets, MAX_PRODUCTION_ASSETS_PER_TASK, 1, MAX_PRODUCTION_ASSETS_PER_TASK,
@@ -1029,15 +1063,21 @@ export class ProductionGateway {
     }
   }
 
+  /**
+   * `mismatchCode` separates "the store is corrupt" from "the caller's bytes are not the bytes this
+   * digest already names". Only the two content comparisons take it; every identity/replacement
+   * check stays `internal`, because those can only mean the store itself was tampered with.
+   */
   async #validateExistingBlob(
     path: string,
     digest: string,
     length: number,
     signal: AbortSignal,
+    mismatchCode: ProductionGatewayErrorCode = "internal",
   ): Promise<void> {
     const pathInfo = await waitForSingleLink(path, signal);
-    if (!pathInfo.isFile() || pathInfo.isSymbolicLink() || pathInfo.nlink !== 1n
-      || pathInfo.size !== BigInt(length)) fail("internal");
+    if (!pathInfo.isFile() || pathInfo.isSymbolicLink() || pathInfo.nlink !== 1n) fail("internal");
+    if (pathInfo.size !== BigInt(length)) fail(mismatchCode);
     const handle = await open(path, READ_FLAGS);
     try {
       const opened = await handle.stat({ bigint: true });
@@ -1053,8 +1093,9 @@ export class ProductionGateway {
       }
       const end = await handle.stat({ bigint: true });
       const finalPath = await lstat(path, { bigint: true });
-      if (hash.digest("hex") !== digest || !sameFile(opened, end) || !sameFile(end, finalPath)
+      if (!sameFile(opened, end) || !sameFile(end, finalPath)
         || end.size !== opened.size || end.nlink !== 1n) fail("internal");
+      if (hash.digest("hex") !== digest) fail(mismatchCode);
     } finally {
       await handle.close();
     }
@@ -1065,6 +1106,7 @@ export class ProductionGateway {
     digest: string,
     length: number,
     signal: AbortSignal,
+    mismatchCode: ProductionGatewayErrorCode = "internal",
   ): Promise<string> {
     await this.#verifyRoot();
     const shard = join(this.#directories.blobs, digest.slice(0, 2));
@@ -1084,7 +1126,7 @@ export class ProductionGateway {
       if (!installed.isFile() || installed.isSymbolicLink() || installed.nlink !== 1n
         || installed.size !== BigInt(length)) fail("internal");
     } else {
-      await this.#validateExistingBlob(destination, digest, length, signal);
+      await this.#validateExistingBlob(destination, digest, length, signal, mismatchCode);
     }
     return destination;
   }
@@ -1426,6 +1468,118 @@ export class ProductionGateway {
     return absorbed.metadata;
   }
 
+  /**
+   * §6.4 input upload. The worker's staging inputs — the ShotRequest `inputs[0]` and any keyframe
+   * the operator supplied — originate in the workspace CAS on the control-plane host, which has no
+   * path into the GPU VM's store. This route is that path, and it is content-addressed end to end:
+   * the digest in the URL is the object's whole identity, the server recomputes it from the bytes it
+   * actually received, and a body that hashes to anything else is refused before publication. What
+   * lands is therefore always the object the caller named, so a replay is a no-op and no caller can
+   * choose what a digest resolves to.
+   */
+  async #uploadAsset(
+    request: Request,
+    scope: ProductionIngestScope,
+    digest: string,
+    operation: Operation,
+  ): Promise<Response> {
+    // One hard ceiling for the transfer; the type-specific bound is applied once the bytes identify
+    // themselves, because nothing before the first 64 bytes says which of the two this is.
+    const ceiling = Math.max(this.#maxUploadImageBytes, MAX_PRODUCTION_GATEWAY_UPLOAD_DOCUMENT_BYTES);
+    const declared = parseContentLength(
+      request.headers.get("content-length"), ceiling, "asset-too-large", "bad-request",
+    );
+    if (!request.body) fail("bad-request");
+    await this.#verifyRoot();
+    const temporary = await createTempFile(this.#directories, "upload");
+    const reader = request.body.getReader();
+    const hash = createHash("sha256");
+    const sniff = Buffer.alloc(64);
+    // The ShotRequest is content-checked, so its bytes are kept; anything past the document ceiling
+    // cannot be one and the buffer is dropped rather than grown to the image ceiling.
+    const documentChunks: Buffer[] = [];
+    let document = true;
+    let sniffed = 0;
+    let length = 0;
+    let closed = false;
+    try {
+      while (true) {
+        const part = await raceAbort(reader.read(), operation.signal);
+        if (part.done) break;
+        length += part.value.byteLength;
+        if (length > ceiling) {
+          void reader.cancel().catch(() => undefined);
+          fail("asset-too-large");
+        }
+        const take = Math.min(sniff.length - sniffed, part.value.byteLength);
+        if (take > 0) {
+          sniff.set(part.value.subarray(0, take), sniffed);
+          sniffed += take;
+        }
+        if (document) {
+          if (length > MAX_PRODUCTION_GATEWAY_UPLOAD_DOCUMENT_BYTES) {
+            documentChunks.length = 0;
+            document = false;
+          } else {
+            documentChunks.push(Buffer.from(part.value));
+          }
+        }
+        hash.update(part.value);
+        await writeAll(temporary.handle, part.value);
+        if (operation.signal.aborted) fail("aborted");
+      }
+      if (length < 1 || (declared !== null && declared !== length)) fail("bad-request");
+      // Identity before admission: a body that is not the named object never reaches the store, so a
+      // rejected upload leaves the digest exactly as unresolvable as it was.
+      if (hash.digest("hex") !== digest) fail("bad-request");
+      const sniffedMediaType = sniffMediaType(sniff.subarray(0, sniffed));
+      let mediaType: string;
+      if (sniffedMediaType !== null) {
+        // Only staging inputs travel this way. A video or audio object is a provider output and
+        // reaches the store through the ingest kernel, which records its provenance.
+        if (!sniffedMediaType.startsWith("image/")) fail("unsupported-media");
+        if (length > this.#maxUploadImageBytes) fail("asset-too-large");
+        mediaType = sniffedMediaType;
+      } else {
+        // No magic number: the only other admissible object is the ShotRequest document, and past
+        // its ceiling there is nothing left it could be.
+        if (!document) fail("asset-too-large");
+        if (!readShotRequestDocument(Buffer.concat(documentChunks, length)).ok) fail("unsupported-media");
+        mediaType = SHOT_REQUEST_MEDIA_TYPE;
+      }
+      await temporary.handle.sync();
+      requireActive(operation.signal);
+      await temporary.handle.chmod(0o400);
+      await temporary.handle.close();
+      closed = true;
+      // A digest already holding different bytes is a corrupted store, not a losable race: content
+      // addressing makes it unreachable through this route, and it is still refused rather than
+      // overwritten.
+      await this.#publishBlob(temporary.path, digest, length, operation.signal, "conflict");
+      requireActive(operation.signal);
+      const metadata: AssetMetadata = {
+        version: 1,
+        uri: `urn:sha256:${digest}`,
+        sha256: digest,
+        byteLength: length,
+        mediaType,
+      };
+      await this.#publishMetadata(metadata, operation.signal);
+      requireActive(operation.signal);
+      await this.#publishOwnership(scope, metadata, operation.signal);
+      // Identical for a first publication and for a replay: the object is its bytes, and the route
+      // has no other outcome to report.
+      return jsonResponse({ version: 1, sha256: digest, byteLength: length, mediaType });
+    } catch (error) {
+      void reader.cancel().catch(() => undefined);
+      if (!closed) await temporary.handle.close().catch(() => undefined);
+      await unlink(temporary.path).catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
   async #openAsset(
     scope: ProductionIngestScope,
     digest: string,
@@ -1500,10 +1654,40 @@ export class ProductionGateway {
     });
   }
 
+  /**
+   * Existence probe on the same URL the object is read from, so a caller that gets 200 here and a
+   * caller that GETs the object are answering the same question (§6.4: the worker asks before it
+   * decides to upload). It opens the asset exactly as GET does and then closes it, rather than
+   * testing for a file: a blob without its scope claim or its metadata is not a resolvable object.
+   */
+  async #assetHead(
+    scope: ProductionIngestScope,
+    digest: string,
+    operation: Operation,
+  ): Promise<Response> {
+    const asset = await this.#openAsset(scope, digest, operation.signal);
+    await asset.handle.close();
+    return new Response(null, {
+      status: 200,
+      headers: {
+        "cache-control": "private, max-age=31536000, immutable",
+        "content-length": String(asset.metadata.byteLength),
+        "content-type": asset.metadata.mediaType,
+        etag: `\"sha256:${digest}\"`,
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
+
   /** Handle one Fetch-compatible private request; useful both in tests and non-Node hosts. */
   async handle(request: Request): Promise<Response> {
     let operation: Operation | null = null;
     let deferredFinish = false;
+    // Node's HTTP server drops a HEAD response body on its own; strip it here too so the in-process
+    // Fetch boundary answers a HEAD identically to the socket.
+    const answer = (response: Response): Response => request.method !== "HEAD"
+      ? response
+      : new Response(null, { status: response.status, headers: response.headers });
     try {
       const route = parseGatewayRoute(new URL(request.url), request.method);
       operation = this.#operation(request.signal);
@@ -1511,11 +1695,19 @@ export class ProductionGateway {
       const credentialContext: ProductionGatewayCredentialContext = {
         workspaceId: route.scope.workspaceId,
         project: route.scope.project,
-        operation: route.kind === "ingest" ? "ingest" : "asset-read",
+        operation: route.kind === "ingest"
+          ? "ingest"
+          : route.kind === "asset-upload" ? "asset-write" : "asset-read",
       };
       await this.#authorize(request, credentialContext, operation);
       if (route.kind === "ingest") {
         return await this.#ingest(request, route.scope, route.ingestKey, operation);
+      }
+      if (route.kind === "asset-upload") {
+        return await this.#uploadAsset(request, route.scope, route.digest, operation);
+      }
+      if (route.kind === "asset-head") {
+        return answer(await this.#assetHead(route.scope, route.digest, operation));
       }
       if (route.kind === "asset") {
         const response = await this.#assetResponse(route.scope, route.digest, operation);
@@ -1524,9 +1716,9 @@ export class ProductionGateway {
       }
       throw new ProductionGatewayError("not-found");
     } catch (error) {
-      if (error instanceof ProductionGatewayError) return errorResponse(error);
-      if (operation?.signal.aborted) return errorResponse(new ProductionGatewayError("aborted"));
-      return errorResponse(new ProductionGatewayError("internal"));
+      if (error instanceof ProductionGatewayError) return answer(errorResponse(error));
+      if (operation?.signal.aborted) return answer(errorResponse(new ProductionGatewayError("aborted")));
+      return answer(errorResponse(new ProductionGatewayError("internal")));
     } finally {
       if (!deferredFinish) operation?.finish();
     }

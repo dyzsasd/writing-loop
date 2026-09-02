@@ -20,6 +20,20 @@ import {
   type ProductionInputStageResult,
 } from "../src/production-input-stager.ts";
 import { productionCanonicalJsonSha256 } from "../src/production-canonical-json.ts";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  MAX_PRODUCTION_CAS_DOCUMENT_BYTES,
+  MAX_PRODUCTION_CAS_OBJECT_BYTES,
+  productionCasObjectPath,
+  writeProductionCasObject,
+} from "../src/production-cas.ts";
+import {
+  ProductionLocalAssetSourceError,
+  WorkspaceCasLocalAssetSource,
+  productionCasAssetAuthority,
+} from "../src/production-local-asset-source.ts";
 
 let fails = 0;
 const ok = (condition: boolean, message: string): void => {
@@ -417,6 +431,109 @@ ok(!stagerConstructed({
 ok(!stagerConstructed({
   baseUrl: "http://10.148.0.9:8790", credentialResolver: () => "PRIVATE_NET_TOKEN",
 }), "input stager：缺省 transport 仍要求 HTTPS，私网明文 http 被拒");
+
+// —— §6.4 本机对象源：只答自己那个 CAS，且读回逐项核对 AssetRef ——
+{
+  const workspaceRoot = mkdtempSync(join(tmpdir(), "writing-loop-local-asset-"));
+  try {
+    mkdirSync(join(workspaceRoot, ".writing-loop", PROJECT), { recursive: true, mode: 0o700 });
+    const bytes = Buffer.from("{\"kind\":\"local-object\"}", "utf8");
+    const written = writeProductionCasObject(workspaceRoot, PROJECT, bytes);
+    const source = new WorkspaceCasLocalAssetSource({
+      root: workspaceRoot, project: PROJECT, casAuthority: "wl-sg",
+    });
+    const ref = (over: Partial<AssetRef> = {}): AssetRef => ({
+      version: 1,
+      uri: `cas://wl-sg/sha256/${written.sha256}`,
+      sha256: written.sha256,
+      byteLength: bytes.byteLength,
+      mediaType: "application/vnd.writing-loop.shot-request+json",
+      ...over,
+    });
+    const code = async (asset: AssetRef): Promise<string> => {
+      try { await source.read(asset); return "ok"; }
+      catch (error) {
+        return error instanceof ProductionLocalAssetSourceError ? error.code : "other";
+      }
+    };
+    ok(Buffer.from(await source.read(ref())).equals(bytes),
+      "本机对象源按 cas://<authority>/sha256/<digest> 返回逐字节正本");
+    ok(productionCasAssetAuthority(ref()) === "wl-sg"
+      && productionCasAssetAuthority(ref({ uri: `cas://wl-sg/sha256/${SHA.a}` })) === null
+      && productionCasAssetAuthority(ref({ uri: `urn:sha256:${written.sha256}` })) === null,
+    "cas URI 解析要求 authority 合法且路径 digest 与 AssetRef 的 sha256 相等");
+    ok(await code(ref({ uri: `cas://wl-other/sha256/${written.sha256}` })) === "authority-mismatch",
+      "另一个 CAS authority 的对象不由本机对象源作答");
+    ok(await code(ref({ uri: `urn:sha256:${written.sha256}` })) === "unsupported-uri",
+      "非 cas:// 的 AssetRef 不由本机对象源作答");
+    ok(await code(ref({ byteLength: bytes.byteLength + 1 })) === "asset-integrity",
+      "读回长度与 AssetRef 的 byteLength 不一致时报 asset-integrity");
+    const absent = createHash("sha256").update("never-written").digest("hex");
+    ok(await code(ref({ uri: `cas://wl-sg/sha256/${absent}`, sha256: absent })) === "not-found",
+      "本机 CAS 没有该对象时报 not-found");
+    const boundedSource = new WorkspaceCasLocalAssetSource({
+      root: workspaceRoot, project: PROJECT, casAuthority: "wl-sg", maxObjectBytes: 1_024,
+    });
+    let boundedCode = "ok";
+    try { await boundedSource.read(ref({ byteLength: 2_048 })); }
+    catch (error) {
+      boundedCode = error instanceof ProductionLocalAssetSourceError ? error.code : "other";
+    }
+    ok(boundedCode === "asset-too-large",
+      "AssetRef 声明的长度超过读取上限时在读盘之前拒绝");
+
+    // 首帧 / 候选图按同一套 CAS 存取，写入上限与读取上限同为 64 MiB（各类型的真实上限由上传路由
+    // 与 registry 的 maxInputImageBytes 控制），1 MiB 以上的图片必须能写进去也能原样读回。
+    const bigImage = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(2 * 1024 * 1024, 0x5a),
+    ]);
+    const bigWritten = writeProductionCasObject(workspaceRoot, PROJECT, bigImage);
+    const bigBytes = await source.read({
+      version: 1,
+      uri: `cas://wl-sg/sha256/${bigWritten.sha256}`,
+      sha256: bigWritten.sha256,
+      byteLength: bigImage.byteLength,
+      mediaType: "image/png",
+    });
+    ok(bigWritten.created && Buffer.from(bigBytes).equals(bigImage)
+      && bigImage.byteLength > MAX_PRODUCTION_CAS_DOCUMENT_BYTES
+      && MAX_PRODUCTION_CAS_OBJECT_BYTES === 64 * 1024 * 1024,
+    "超过 1 MiB 文档上限的图片可以写入 workspace CAS 并逐字节读回");
+
+    // 存在性与完整性是两件事：目录不存在是「本机没有」，对象被改坏是「有但不是它自称的那个」。
+    const emptyRoot = mkdtempSync(join(tmpdir(), "writing-loop-local-asset-empty-"));
+    try {
+      mkdirSync(join(emptyRoot, ".writing-loop"), { recursive: true, mode: 0o700 });
+      const absentProject = new WorkspaceCasLocalAssetSource({
+        root: emptyRoot, project: PROJECT, casAuthority: "wl-sg",
+      });
+      let absentProjectCode = "ok";
+      try { await absentProject.read(ref()); }
+      catch (error) {
+        absentProjectCode = error instanceof ProductionLocalAssetSourceError ? error.code : "other";
+      }
+      ok(absentProjectCode === "not-found",
+        "项目状态目录不存在时报 not-found，而不是当成完整性错误");
+    } finally {
+      rmSync(emptyRoot, { recursive: true, force: true });
+    }
+    writeFileSync(
+      productionCasObjectPath(workspaceRoot, PROJECT, written.sha256),
+      Buffer.from("tampered"),
+      { mode: 0o600 },
+    );
+    let tamperedCode = "ok";
+    try { await source.read(ref()); }
+    catch (error) {
+      tamperedCode = error instanceof ProductionLocalAssetSourceError ? error.code : "other";
+    }
+    ok(tamperedCode === "asset-integrity",
+      "对象内容与对象名的 digest 不一致时报 asset-integrity，而不是 not-found");
+  } finally {
+    rmSync(workspaceRoot, { recursive: true, force: true });
+  }
+}
 
 console.log(fails === 0 ? "\nPRODUCTION_INPUT_STAGER_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

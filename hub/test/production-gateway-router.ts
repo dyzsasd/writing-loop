@@ -42,6 +42,8 @@ for (const [method, suffix, expected] of [
   ["PUT", "stages/" + "b".repeat(64), stages],
   ["PUT", "ingests/" + "c".repeat(64), artifacts],
   ["GET", "assets/sha256/" + "d".repeat(64), artifacts],
+  ["HEAD", "assets/sha256/" + "d".repeat(64), artifacts],
+  ["PUT", "assets/sha256/" + "d".repeat(64), artifacts],
 ] as const) {
   const before = expected.calls.length;
   const request = new Request(`${base}/${suffix}`, { method });
@@ -55,7 +57,8 @@ const totalCalls = (): number => jobs.calls.length + stages.calls.length + artif
 for (const [method, url] of [
   ["POST", `${base}/jobs/job-1`],
   ["DELETE", `${base}/stages/${"a".repeat(64)}`],
-  ["HEAD", `${base}/assets/sha256/${"a".repeat(64)}`],
+  ["DELETE", `${base}/assets/sha256/${"a".repeat(64)}`],
+  ["HEAD", `${base}/ingests/${"a".repeat(64)}`],
   ["PUT", `${base}/jo%62s/job-1`],
   ["PUT", `${base}/%2Fjobs/job-1`],
   ["PUT", `${base}/prompts/job-1`],

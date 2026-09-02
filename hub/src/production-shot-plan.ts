@@ -26,6 +26,7 @@ import {
   selectH3ProfileForDuration,
   shotRequestAssetRef,
   shotRequestCanonicalJson,
+  withDerivedShotSeed,
   type Degradation,
   type ReferenceInput,
   type ShotAspectRatio,
@@ -614,6 +615,12 @@ export type BuildShotBatchPlanInputs = {
   drafts: readonly ShotRequestDraft[];
   /** 预填 / 合并 / 视觉侧装配阶段的提示，进入每镜 validation 并计入 warnings。 */
   draftIssues?: readonly ShotBatchDraftIssue[];
+  /**
+   * `--from-script` 批次置 true：剧本预填给不出 `output.seed`，而落到 H3 graph 契约 v2 档
+   * （capability `seed: "uint32"`）的镜头必须有一个具体整数才能材料化（§5.3）。逐镜按选定的档判定，
+   * 落到 v1 档的镜头不派生也不报警。`shots[]` 直接给出的 draft 不适用：那里的 seed 由操作者写死。
+   */
+  deriveSeedWhenNull?: boolean;
 };
 
 type ShotBatchSnapshotProfile = ProductionExecutionProfileSnapshotReadEntry;
@@ -887,8 +894,8 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
   const usedProfiles = new Map<string, ShotBatchSnapshotProfile>();
   const usedCapabilities = new Map<string, ShotCompileCapability>();
 
-  const compiled: CompiledShot[] = drafts.map((draft) => {
-    const { entry, reason } = selectProfile(draft, inputs, backendInstanceId);
+  const compiled: CompiledShot[] = drafts.map((selected) => {
+    const { entry, reason } = selectProfile(selected, inputs, backendInstanceId);
     const capability = capabilityFor(entry, request);
     if (!inputs.authorizedWorkflowSha256.has(entry.execution.workflowSha256)) {
       fail(`execution profile ${entry.profileId}`,
@@ -896,6 +903,16 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
     }
     usedProfiles.set(entry.profileId, entry);
     usedCapabilities.set(entry.profileId, capability);
+    // §5.3 契约 v2 的 seed：按该镜实际选定的档判定，落到 v1 档的镜头不派生。派生在选档之后、
+    // 编译之前，draft 此时已经过合并、mergedPatches 与视觉填充，取值因此由最终镜头内容决定。
+    const seedDegradations: Degradation[] = [];
+    let draft = selected;
+    if (inputs.deriveSeedWhenNull === true && draft.output.seed === null
+      && capability.limitsByModelId[executionLimitsKey(entry.execution)]?.seed === "uint32") {
+      const derived = withDerivedShotSeed(draft);
+      draft = derived.draft;
+      if (derived.degradation !== null) seedDegradations.push(derived.degradation);
+    }
     const estimate = estimateFor(draft, entry);
     const policy: ShotCompilePolicy = {
       version: 1,
@@ -942,7 +959,7 @@ export function buildShotBatchPlan(inputs: BuildShotBatchPlanInputs): ShotBatchC
       intent: result.intentDraft === null ? null : createProductionDispatchIntent(result.intentDraft),
       estimate,
       validation: result.validation,
-      degradations: result.degradations,
+      degradations: [...seedDegradations, ...result.degradations],
     };
   });
 

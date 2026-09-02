@@ -226,6 +226,13 @@ writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --onc
 前置：§3a 的 ①–④ 已完成（VM 起、gateway 起、隧道开、快照已取回并被 runtime config 的
 `executionProfileSnapshotFile` 指到）。全部命令在本机 workspace 内跑，不 ssh 到任何服务器。
 
+输入素材不需要手工送到 VM：runtime config 声明 `localAssetSource`（`kind: "workspace-cas"` +
+与 gateway 相同的 `casAuthority`）之后，worker 在每次 stage 之前会对本批次每个 `cas://` 输入向
+gateway 探一次 `HEAD .../assets/sha256/<digest>`，缺失的自动 `PUT` 上传（内容寻址，重放幂等）。
+操作者要做的只是把首帧 / 候选图与 ShotRequest 一样放进本机 workspace CAS
+（`.writing-loop/<project>/production-cas.v1/sha256/<digest>`）；上传失败时该镜头的 stage 直接失败，
+不会带着缺失输入继续提交。
+
 ```bash
 cd "$WRITING_LOOP_WORKSPACE"
 
@@ -248,7 +255,8 @@ writing-loop production plan-shots --plan --project yujing-jiushi \
 writing-loop production plan-shots --confirm <批准的 batchPlanId> --project yujing-jiushi \
   --input batches/ep001-s1-sample.json --config "$WRITING_LOOP_PRODUCTION_RUNTIME"
 
-# ④ 跑任务：每轮提交/轮询/入库一批，跑到 status 里没有活跃 task 为止
+# ④ 跑任务：每轮先自动上传本机 CAS 里 gateway 还没有的输入对象，再提交/轮询/入库一批，
+#    跑到 status 里没有活跃 task 为止
 writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --once --json
 writing-loop production status --project yujing-jiushi
 
@@ -272,6 +280,9 @@ writing-loop production handoff --project yujing-jiushi --input handoff.json > h
   都会让 `batchPlanId` 失效，`--confirm` 会拒绝。这是设计如此：批准的是那一份计划，不是命令本身。
 - `--confirm` 精确重放是幂等的（CAS 对象、intent、task 都不重复写），中途失败重跑同一条命令即可。
 - 样片门只认 task 状态：样片没跑过、或还不是 approved，`phase: bulk` 一律拒绝提交。
+- 输入对象的上传由 worker 负责，不要用 scp 往 VM 的 CAS 目录里放对象：worker 提交前还会按同一份
+  本机正本复核 gateway 回执里的逐镜 prompt / seed，手工放进去的对象绕不过这道复核，只会让该镜头
+  以 `workflow-invalid` 失败。
 - QC 裁决写的是终态事件，不能改判。改判要重新出镜头、重新走批次。
 
 ## §4 进展判读（日常监控口径）

@@ -23,6 +23,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { ProductionError } from "./production-domain.ts";
@@ -30,8 +31,38 @@ import { assertProjectKey } from "./workspace.ts";
 
 export const PRODUCTION_CAS_DIRECTORY = "production-cas.v1";
 export const PRODUCTION_CAS_ALGORITHM_DIRECTORY = "sha256";
+/**
+ * Safety ceiling for one stored object, matched to the read ceiling so anything this store accepts
+ * can be read back. It is deliberately a bound on the store, not a per-type limit: the ShotRequest
+ * document, an operator-uploaded first frame and an approved candidate image all live here, and each
+ * type's real limit is enforced where it is admitted — the gateway `assets` route against the
+ * registry's `maxInputImageBytes` for images and `MAX_PRODUCTION_CAS_DOCUMENT_BYTES` for documents.
+ */
+export const MAX_PRODUCTION_CAS_OBJECT_BYTES = 64 * 1024 * 1024;
 /** One ShotRequest document; the intent envelope itself is bounded by MAX_PRODUCTION_INTENT_BYTES. */
-export const MAX_PRODUCTION_CAS_OBJECT_BYTES = 1024 * 1024;
+export const MAX_PRODUCTION_CAS_DOCUMENT_BYTES = 1024 * 1024;
+
+/**
+ * Why a CAS operation failed, as a stable code callers can map to their own vocabulary. The
+ * distinction that matters to them is "this store has no such object" (`store-absent` — the
+ * workspace state or project directory is not there at all) versus "the object is there but is not
+ * what it claims to be" (`object-integrity`): the first is a miss, the second is corruption.
+ */
+export type ProductionCasErrorCode =
+  | "store-absent"
+  | "store-invalid"
+  | "object-integrity"
+  | "object-too-large";
+
+export class ProductionCasError extends ProductionError {
+  readonly code: ProductionCasErrorCode;
+
+  constructor(code: ProductionCasErrorCode, message: string) {
+    super(message);
+    this.name = "ProductionCasError";
+    this.code = code;
+  }
+}
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -40,17 +71,17 @@ const errno = (error: unknown): string | undefined =>
     ? String((error as NodeJS.ErrnoException).code)
     : undefined;
 
-function fail(message: string, cause?: unknown): never {
+function fail(code: ProductionCasErrorCode, message: string, cause?: unknown): never {
   const suffix = cause === undefined ? "" : `：${cause instanceof Error ? cause.message : String(cause)}`;
-  throw new ProductionError(`production CAS ${message}${suffix}`);
+  throw new ProductionCasError(code, `production CAS ${message}${suffix}`);
 }
 
-function assertRealDirectory(path: string, label: string): void {
+function assertRealDirectory(path: string, label: string, absentCode: ProductionCasErrorCode): void {
   let info: ReturnType<typeof lstatSync>;
   try { info = lstatSync(path); }
-  catch (error) { fail(`${label} 目录不存在：${path}`, error); }
+  catch (error) { fail(absentCode, `${label} 目录不存在：${path}`, error); }
   if (!info.isDirectory() || info.isSymbolicLink()) {
-    fail(`${label} 必须是真实目录（拒绝 symlink/FIFO/device）：${path}`);
+    fail("store-invalid", `${label} 必须是真实目录（拒绝 symlink/FIFO/device）：${path}`);
   }
 }
 
@@ -59,16 +90,16 @@ export function productionCasDirectory(root: string, project: string, create: bo
   assertProjectKey(project);
   let canonicalRoot: string;
   try { canonicalRoot = realpathSync(resolve(root)); }
-  catch (error) { fail(`workspace root 不存在：${resolve(root)}`, error); }
+  catch (error) { fail("store-absent", `workspace root 不存在：${resolve(root)}`, error); }
   const writingLoop = join(canonicalRoot, ".writing-loop");
-  assertRealDirectory(writingLoop, "workspace state");
+  assertRealDirectory(writingLoop, "workspace state", "store-absent");
   const projectPath = join(writingLoop, project);
-  assertRealDirectory(projectPath, `项目 '${project}'`);
+  assertRealDirectory(projectPath, `项目 '${project}'`, "store-absent");
   const directory = join(projectPath, PRODUCTION_CAS_DIRECTORY, PRODUCTION_CAS_ALGORITHM_DIRECTORY);
   try {
     const info = lstatSync(directory);
     if (!info.isDirectory() || info.isSymbolicLink()) {
-      fail(`objects 目录必须是真实目录（拒绝 symlink/FIFO/device）：${directory}`);
+      fail("store-invalid", `objects 目录必须是真实目录（拒绝 symlink/FIFO/device）：${directory}`);
     }
     return directory;
   } catch (error) {
@@ -77,15 +108,15 @@ export function productionCasDirectory(root: string, project: string, create: bo
     if (!create) return null;
     try { mkdirSync(directory, { mode: 0o700, recursive: true }); }
     catch (mkdirError) {
-      if (errno(mkdirError) !== "EEXIST") fail(`无法创建 ${directory}`, mkdirError);
+      if (errno(mkdirError) !== "EEXIST") fail("store-invalid", `无法创建 ${directory}`, mkdirError);
     }
-    assertRealDirectory(directory, "objects");
+    assertRealDirectory(directory, "objects", "store-invalid");
     return directory;
   }
 }
 
 function requireDigest(sha256: string): string {
-  if (!SHA256.test(sha256)) fail("对象名必须是 64 位小写 sha256");
+  if (!SHA256.test(sha256)) fail("store-invalid", "对象名必须是 64 位小写 sha256");
   return sha256;
 }
 
@@ -118,7 +149,7 @@ export function writeProductionCasObject(
   bytes: Uint8Array,
 ): WriteProductionCasObjectResult {
   if (bytes.length > MAX_PRODUCTION_CAS_OBJECT_BYTES) {
-    fail(`对象超过 ${MAX_PRODUCTION_CAS_OBJECT_BYTES} bytes 安全上限`);
+    fail("object-too-large", `对象超过 ${MAX_PRODUCTION_CAS_OBJECT_BYTES} bytes 安全上限`);
   }
   const digest = createHash("sha256").update(bytes).digest("hex");
   const directory = productionCasDirectory(root, project, true)!;
@@ -133,14 +164,14 @@ export function writeProductionCasObject(
         constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
         0o600,
       );
-    } catch (error) { fail(`无法创建临时文件 ${temporary}`, error); }
+    } catch (error) { fail("store-invalid", `无法创建临时文件 ${temporary}`, error); }
     const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.nlink !== 1) fail(`${temporary} 创建后不是单链接普通文件`);
+    if (!opened.isFile() || opened.nlink !== 1) fail("store-invalid", `${temporary} 创建后不是单链接普通文件`);
     let offset = 0;
     while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
     const written = fstatSync(fd);
     if (!written.isFile() || written.nlink !== 1 || written.size !== bytes.length) {
-      fail(`${temporary} 写入后 identity/长度异常`);
+      fail("store-invalid", `${temporary} 写入后 identity/长度异常`);
     }
     fsyncSync(fd);
   } catch (error) {
@@ -155,10 +186,10 @@ export function writeProductionCasObject(
     // link 是原子的且不覆盖：赢的一方发布完整对象，输的一方读回比对。
     try { linkSync(temporary, file); }
     catch (error) {
-      if (errno(error) !== "EEXIST") fail(`无法把 ${temporary} 发布为 ${file}`, error);
+      if (errno(error) !== "EEXIST") fail("store-invalid", `无法把 ${temporary} 发布为 ${file}`, error);
       // 已存在的对象必须逐字节等于本次内容；崩溃残留的截断文件会在这里以可操作错误暴露。
       const existing = readProductionCasObject(root, project, digest);
-      if (existing === null) fail(`${file} 已存在但不可读（拒绝覆盖；请人工核对后删除该文件再重试）`);
+      if (existing === null) fail("object-integrity", `${file} 已存在但不可读（拒绝覆盖；请人工核对后删除该文件再重试）`);
       return { created: false, path: file, sha256: digest };
     }
   } finally {
@@ -168,6 +199,49 @@ export function writeProductionCasObject(
   return { created: true, path: file, sha256: digest };
 }
 
+type CasObjectStat = { isFile: boolean; isSymbolicLink: boolean; nlink: number; size: number };
+
+const objectStat = (info: {
+  isFile(): boolean; isSymbolicLink(): boolean; nlink: number; size: number;
+}): CasObjectStat => ({
+  isFile: info.isFile(),
+  isSymbolicLink: info.isSymbolicLink(),
+  nlink: Number(info.nlink),
+  size: Number(info.size),
+});
+
+/** `<objects>/<digest>`, or null when this workspace/project has no object directory at all. */
+function locateObject(
+  root: string,
+  project: string,
+  sha256: string,
+): { file: string; digest: string } | null {
+  const digest = requireDigest(sha256);
+  const directory = productionCasDirectory(root, project, false);
+  return directory === null ? null : { file: join(directory, digest), digest };
+}
+
+function assertObjectPath(file: string, info: CasObjectStat, maxBytes: number): void {
+  if (!info.isFile || info.isSymbolicLink || info.nlink !== 1) {
+    fail("object-integrity", `${file} 必须是单链接普通文件（拒绝 symlink/hardlink/FIFO/device）`);
+  }
+  if (info.size > maxBytes) fail("object-too-large", `${file} 超过 ${maxBytes} bytes 安全读取上限`);
+}
+
+function assertObjectOpened(file: string, before: CasObjectStat, opened: CasObjectStat): void {
+  if (!opened.isFile || opened.nlink !== 1 || opened.size !== before.size) {
+    fail("object-integrity", `${file} 在 lstat/open 间被替换`);
+  }
+}
+
+function assertObjectDigest(file: string, body: Buffer, digest: string): Buffer {
+  const actual = createHash("sha256").update(body).digest("hex");
+  if (actual !== digest) {
+    fail("object-integrity", `${file} 内容 digest ${actual} 与对象名不一致（对象损坏；请人工核对后删除该文件再重试）`);
+  }
+  return body;
+}
+
 /** Exact bounded read; a body whose digest no longer matches its name is a hard error, not a miss. */
 export function readProductionCasObject(
   root: string,
@@ -175,40 +249,74 @@ export function readProductionCasObject(
   sha256: string,
   maxBytes = MAX_PRODUCTION_CAS_OBJECT_BYTES,
 ): Buffer | null {
-  const digest = requireDigest(sha256);
-  const directory = productionCasDirectory(root, project, false);
-  if (directory === null) return null;
-  const file = join(directory, digest);
-  let before: ReturnType<typeof lstatSync>;
-  try { before = lstatSync(file); }
+  const located = locateObject(root, project, sha256);
+  if (located === null) return null;
+  const { file, digest } = located;
+  let before: CasObjectStat;
+  try { before = objectStat(lstatSync(file)); }
   catch (error) {
     if (errno(error) === "ENOENT") return null;
-    fail(`无法检查 ${file}`, error);
+    fail("store-invalid", `无法检查 ${file}`, error);
   }
-  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) {
-    fail(`${file} 必须是单链接普通文件（拒绝 symlink/hardlink/FIFO/device）`);
-  }
-  if (before.size > maxBytes) fail(`${file} 超过 ${maxBytes} bytes 安全读取上限`);
+  assertObjectPath(file, before, maxBytes);
   let fd: number | undefined;
   try {
     fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-    const opened = fstatSync(fd);
-    if (!opened.isFile() || opened.nlink !== 1 || Number(opened.size) !== Number(before.size)) {
-      fail(`${file} 在 lstat/open 间被替换`);
-    }
+    const opened = objectStat(fstatSync(fd));
+    assertObjectOpened(file, before, opened);
     const body = Buffer.alloc(opened.size);
     let offset = 0;
     while (offset < body.length) {
       const read = readSync(fd, body, offset, body.length - offset, offset);
-      if (read <= 0) fail(`${file} 读取期间被截断`);
+      if (read <= 0) fail("object-integrity", `${file} 读取期间被截断`);
       offset += read;
     }
-    const actual = createHash("sha256").update(body).digest("hex");
-    if (actual !== digest) {
-      fail(`${file} 内容 digest ${actual} 与对象名不一致（对象损坏；请人工核对后删除该文件再重试）`);
-    }
-    return body;
+    return assertObjectDigest(file, body, digest);
   } finally {
     if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * Same object, same checks, without blocking the event loop, and with the caller's abort honoured
+ * between steps. The worker reads objects here while HTTP requests to the gateway are in flight
+ * (§6.4), so a multi-MiB keyframe must not stall them; `readProductionCasObject` stays for the
+ * synchronous call sites. The two share every integrity rule through the assertions above — only the
+ * I/O calls differ.
+ */
+export async function readProductionCasObjectAsync(
+  root: string,
+  project: string,
+  sha256: string,
+  maxBytes = MAX_PRODUCTION_CAS_OBJECT_BYTES,
+  signal?: AbortSignal,
+): Promise<Buffer | null> {
+  signal?.throwIfAborted();
+  const located = locateObject(root, project, sha256);
+  if (located === null) return null;
+  const { file, digest } = located;
+  let before: CasObjectStat;
+  try { before = objectStat(await lstat(file)); }
+  catch (error) {
+    if (errno(error) === "ENOENT") return null;
+    fail("store-invalid", `无法检查 ${file}`, error);
+  }
+  assertObjectPath(file, before, maxBytes);
+  signal?.throwIfAborted();
+  const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = objectStat(await handle.stat());
+    assertObjectOpened(file, before, opened);
+    const body = Buffer.alloc(opened.size);
+    let offset = 0;
+    while (offset < body.length) {
+      signal?.throwIfAborted();
+      const { bytesRead } = await handle.read(body, offset, body.length - offset, offset);
+      if (bytesRead <= 0) fail("object-integrity", `${file} 读取期间被截断`);
+      offset += bytesRead;
+    }
+    return assertObjectDigest(file, body, digest);
+  } finally {
+    await handle.close();
   }
 }

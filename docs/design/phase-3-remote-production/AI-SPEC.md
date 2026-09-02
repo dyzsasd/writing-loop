@@ -697,6 +697,11 @@ artifact digest、workflow digest 与参数 digest 只演示 server-owned identi
       ]
     }
   ],
+  "localAssetSource": {
+    "version": 1,
+    "kind": "workspace-cas",
+    "casAuthority": "wl-sg"
+  },
   "runner": {
     "version": 1,
     "intervalMs": 5000,
@@ -740,7 +745,7 @@ Gateway router 只委派以下 writing-loop-owned contract；它们不是 ComfyU
 - `PUT /v1/scopes/{workspace}/{project}/stages/{stageKey}`
 - `PUT|GET /v1/scopes/{workspace}/{project}/jobs/{remoteJobId}` 与 scoped cancellation PUT
 - `PUT /v1/scopes/{workspace}/{project}/ingests/{ingestKey}`
-- `GET /v1/scopes/{workspace}/{project}/assets/sha256/{digest}`
+- `GET|HEAD|PUT /v1/scopes/{workspace}/{project}/assets/sha256/{digest}`
 
 Node bridge 只允许 literal private IP；生产 TLS/mTLS、credential issuance、server profile/asset registry、
 durable storage/submission admission backend、raw Comfy/H3 服务与模型供应链 attestation 仍是部署责任。
@@ -782,6 +787,15 @@ ingests 三个内核装配在同一进程，绑定 registry 配置中的字面�
   唯一一条主视频派生尾帧。gateway 进程恒注入系统 `ffmpeg` 提取器（固定 argv，只有两条 gateway 自有
   路径进入参数）；宿主机没有可用 ffmpeg 时该次 ingest 以 `derivation-failed` 失败，而不是登记一条缺
   连续性尾帧的 take。派生对象写进同一 ingest CAS，因此下一镜可经 `cas://` 直接把它当首帧再登记（§6.4）。
+- `assets` 路由是同一个内容寻址对象的三种方法，都在同一个 bearer 边界内：`GET` 下载（scope 必须
+  持有该对象的 claim），`HEAD` 只答存在性（200/404、无响应体），`PUT` 由 worker 发布本机 workspace
+  CAS 里的输入正本（`inputs[0]` 的 ShotRequest、操作者上传的首帧、已批准候选图，§6.4）。`PUT` 的
+  请求体是原始字节，服务端重算 sha256 必须等于路径中的 digest（否则 400 且不落盘），同字节重放为
+  幂等 200，同名不同字节为 409。媒体类型由字节嗅探判定：图片按 `backends[].maxInputImageBytes`
+  限长；嗅探不出类型时按 ShotRequest 内容校验（严格解析 + canonical 字节复算 + `prompt.text` 可
+  材料化，与 stage 内核同一判据），上限 1 MiB；视频 / 音频等 provider 产物只经 ingest 内核入库，
+  在该路由上 415。发布走与 ingest 相同的 temp + fsync + link 原子路径并登记 metadata 与 scope
+  claim，因此上传成功后 `cas://` resolver 与 `HEAD`/`GET` 立即一致。
 - `objectsRoot` / `ingestRoot` / `jobStateRoot` 是持久化启动盘上的三个独立 durable root；
   gateway 在 `jobStateRoot` 下划分 `jobs/`（job record）与 `storage-admission/`（durable slot）两个子目录。
 - `--export-profile-snapshot` 只导出只读快照后退出，不监听端口。快照按 profileId 索引，含每份 profile

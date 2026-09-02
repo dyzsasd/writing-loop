@@ -207,6 +207,11 @@
       ]
     }
   ],
+  "localAssetSource": {
+    "version": 1,
+    "kind": "workspace-cas",
+    "casAuthority": "wl-sg"
+  },
   "runner": {
     "version": 1,
     "intervalMs": 5000,

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -61,6 +62,12 @@ import {
   productionGatewayMain,
   startProductionGatewayProcess,
 } from "../src/production-gateway-main.ts";
+import {
+  productionCasObjectPath,
+  writeProductionCasObject,
+} from "../src/production-cas.ts";
+import { WorkspaceCasLocalAssetSource } from "../src/production-local-asset-source.ts";
+import { productionGatewayBlobPath } from "../src/production-gateway.ts";
 
 let fails = 0;
 const ok = (condition: boolean, message: string): void => {
@@ -131,6 +138,7 @@ const root = (): string => {
 type ConfigOverrides = {
   listenHost?: string;
   configMode?: number;
+  maxInputImageBytes?: number;
 };
 
 function registryConfig(dirs: {
@@ -148,7 +156,7 @@ function registryConfig(dirs: {
       backendInstanceId: BACKEND,
       kind: "comfyui",
       comfyBaseUrl: `http://127.0.0.1:${dirs.comfyPort}`,
-      maxInputImageBytes: 16 * 1024 * 1024,
+      maxInputImageBytes: overrides.maxInputImageBytes ?? 16 * 1024 * 1024,
       profileIds: [PROFILE_ID, PROFILE_ID_V2],
     }],
     executionProfiles: [{
@@ -868,7 +876,11 @@ try {
     jobStateRoot: join(liveRoot, "jobs"),
     comfyPort: comfy.port,
   };
-  const liveConfigFile = writeRegistry(liveDirs, liveRoot);
+  // §6.4 assets PUT 的图片上限取自 registry 的同一个字段；这里用小值，让超限用例不必造大对象。
+  const LIVE_MAX_INPUT_IMAGE_BYTES = 64 * 1024;
+  const liveConfigFile = writeRegistry(liveDirs, liveRoot, {
+    maxInputImageBytes: LIVE_MAX_INPUT_IMAGE_BYTES,
+  });
   // 装配层默认注入系统 ffmpeg 提取器；这里换成 fake，让全进程冒烟不依赖宿主机上的 ffmpeg。
   const derivedFrame = Buffer.concat([PNG, Buffer.from("derived-last-frame")]);
   let extractedFrom: string | null = null;
@@ -937,6 +949,107 @@ try {
       `${origin}/v1/scopes/${WS}/${PROJECT}/assets/sha256/${SHA.a}`, { redirect: "error" },
     );
     ok(missingAssetBearer.status === 401, "缺失 Authorization 的 assets GET 被拒为 401");
+
+    // —— §6.4 输入上传路由：内容寻址的 PUT / HEAD ——
+    const assetUrl = (sha256: string): string =>
+      `${origin}/v1/scopes/${WS}/${PROJECT}/assets/sha256/${sha256}`;
+    const putAsset = async (
+      sha256: string,
+      body: Uint8Array,
+      bearer: string | null = BEARER,
+    ): Promise<Response> => await fetch(assetUrl(sha256), {
+      method: "PUT",
+      redirect: "error",
+      headers: {
+        "content-type": "application/octet-stream",
+        ...(bearer === null ? {} : { authorization: `Bearer ${bearer}` }),
+      },
+      body,
+    });
+    const headAsset = async (sha256: string, bearer: string | null = BEARER): Promise<Response> =>
+      await fetch(assetUrl(sha256), {
+        method: "HEAD",
+        redirect: "error",
+        ...(bearer === null ? {} : { headers: { authorization: `Bearer ${bearer}` } }),
+      });
+
+    const uploadPng = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.from("uploaded-operator-keyframe"),
+    ]);
+    const uploadPngSha = digest(uploadPng);
+    ok((await putAsset(uploadPngSha, uploadPng, null)).status === 401
+      && (await headAsset(uploadPngSha, null)).status === 401,
+    "缺失 Authorization 的 assets PUT / HEAD 被 bearer 层拒为 401");
+    ok((await headAsset(uploadPngSha)).status === 404,
+      "未上传的对象 HEAD 为 404");
+
+    const wrongDigest = digest(Buffer.from("some other bytes entirely"));
+    const mismatched = await putAsset(wrongDigest, uploadPng);
+    ok(mismatched.status === 400
+      && (await mismatched.json() as { error: string }).error === "bad-request"
+      && !existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, wrongDigest))
+      && (await headAsset(wrongDigest)).status === 404,
+    "上传字节的 sha256 与路径中的 digest 不符时 400，且对象不落盘");
+
+    const firstUpload = await putAsset(uploadPngSha, uploadPng);
+    const firstBody = await firstUpload.json() as { sha256: string; byteLength: number; mediaType: string };
+    ok(firstUpload.status === 200 && firstBody.sha256 === uploadPngSha
+      && firstBody.byteLength === uploadPng.byteLength && firstBody.mediaType === "image/png"
+      && existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, uploadPngSha)),
+    "内容寻址上传：字节按 digest 入 ingest CAS，媒体类型由字节嗅探判定");
+    const replay = await putAsset(uploadPngSha, uploadPng);
+    ok(replay.status === 200
+      && JSON.stringify(await replay.json()) === JSON.stringify(firstBody),
+    "相同字节重放为幂等 200，响应逐字节相同");
+    const headAfter = await headAsset(uploadPngSha);
+    ok(headAfter.status === 200
+      && headAfter.headers.get("content-length") === String(uploadPng.byteLength)
+      && headAfter.headers.get("content-type") === "image/png"
+      && (await headAfter.text()) === "",
+    "上传后 HEAD 为 200 且不返回体");
+
+    const oversize = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(LIVE_MAX_INPUT_IMAGE_BYTES, 0x41),
+    ]);
+    const oversizeSha = digest(oversize);
+    ok((await putAsset(oversizeSha, oversize)).status === 413
+      && !existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, oversizeSha)),
+    "图片超过 registry 声明的 maxInputImageBytes 时 413，且不落盘");
+
+    const videoSha = digest(MP4);
+    ok((await putAsset(videoSha, MP4)).status === 415
+      && !existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, videoSha)),
+    "视频等非输入类型的上传被 415 拒绝（provider 产物只经 ingest 内核入库）");
+    const notShotRequest = Buffer.from("{\"kind\":\"not-a-shot-request\"}", "utf8");
+    const notShotRequestSha = digest(notShotRequest);
+    ok((await putAsset(notShotRequestSha, notShotRequest)).status === 415
+      && !existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, notShotRequestSha)),
+    "既嗅探不出媒体类型、又不是 canonical ShotRequest 正本的字节被 415 拒绝，且不落盘");
+
+    // 内容寻址下同名不同字节不可能由本路由产生；仓库被就地改坏时仍然拒绝覆盖。
+    const honestPng = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.from("honest-content"),
+    ]);
+    const corruptPng = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.from("corrupted-store-content"),
+    ]);
+    const claimedSha = digest(honestPng);
+    const corruptPath = productionGatewayBlobPath(liveDirs.ingestRoot, claimedSha);
+    mkdirSync(join(corruptPath, ".."), { recursive: true, mode: 0o700 });
+    writeFileSync(corruptPath, corruptPng, { mode: 0o400 });
+    const conflicted = await putAsset(claimedSha, honestPng);
+    ok(conflicted.status === 409
+      && (await conflicted.json() as { error: string }).error === "conflict"
+      && readFileSync(corruptPath).equals(corruptPng),
+    "同一 digest 下已存在不同字节时以 409 拒绝，绝不覆盖既有对象");
+    // 每条失败路径都要把临时文件清干净：残留会随批次累积占满启动盘。
+    const ingestTemporary = join(liveDirs.ingestRoot, "tmp");
+    ok(!existsSync(ingestTemporary) || readdirSync(ingestTemporary).length === 0,
+      "上传的成功与全部失败路径都不在 ingest tmp 目录留残留");
 
     // stages: real private-network staging by the worker-side client.
     const stager = new HttpProductionInputStager({
@@ -1065,17 +1178,31 @@ try {
       && String(extractedFrom).endsWith(digest(MP4)),
     "ingests 路由冒烟：主视频按内容寻址入 CAS，并由装配层的帧提取器登记尾帧为第二个 AssetRef");
 
-    // —— H3 graph 契约 v2 全链路：stage → PUT /jobs → ComfyUI 收到的 prompt 带逐镜值（§5.3） ——
+    // —— H3 graph 契约 v2 全链路（§5.3、§6.4）：本机 workspace CAS 的 ShotRequest 与首帧
+    // → worker stage 时自动上传 → PUT /jobs → fake ComfyUI 收到带逐镜 prompt / seed 的 v2 graph ——
+    const workspaceRoot = root();
+    mkdirSync(join(workspaceRoot, ".writing-loop", PROJECT), { recursive: true, mode: 0o700 });
+    // 首帧走 operator-upload 轨道：正本只在本机，gateway 侧要由 worker 送过去。
+    writeProductionCasObject(workspaceRoot, PROJECT, PNG);
+    const uploadingStager = new HttpProductionInputStager({
+      baseUrl: origin,
+      workspaceId: WS,
+      project: PROJECT,
+      transport: "insecure-private-http",
+      credentialResolver: () => BEARER,
+      localAssetSource: new WorkspaceCasLocalAssetSource({
+        root: workspaceRoot,
+        project: PROJECT,
+        casAuthority: "wl-sg",
+      }),
+    });
     const stageShotRequest = (shotRequest: ShotRequest): AssetRef => {
       const bytes = Buffer.from(shotRequestCanonicalJson(shotRequest), "utf8");
-      const sha256 = digest(bytes);
-      const shard = join(liveDirs.ingestRoot, "blobs", "sha256", sha256.slice(0, 2));
-      mkdirSync(shard, { recursive: true, mode: 0o700 });
-      if (!existsSync(join(shard, sha256))) writeFileSync(join(shard, sha256), bytes, { mode: 0o400 });
+      const written = writeProductionCasObject(workspaceRoot, PROJECT, bytes);
       return {
         version: 1,
-        uri: `cas://wl-sg/sha256/${sha256}`,
-        sha256,
+        uri: `cas://wl-sg/sha256/${written.sha256}`,
+        sha256: written.sha256,
         byteLength: bytes.byteLength,
         mediaType: SHOT_REQUEST_MEDIA_TYPE,
       };
@@ -1100,11 +1227,18 @@ try {
       execution: structuredClone(INTENT_EXECUTION_V2),
       inputs: [v2ShotAsset, structuredClone(FIRST_FRAME)],
     });
-    const v2Staged = await stager.stage(v2Intent);
+    ok(!existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, v2ShotAsset.sha256))
+      && existsSync(productionCasObjectPath(workspaceRoot, PROJECT, v2ShotAsset.sha256)),
+    "stage 之前：ShotRequest 正本只在本机 workspace CAS，GPU VM 的 ingest CAS 还没有它");
+    const v2Staged = await uploadingStager.stage(v2Intent);
     ok(v2Staged.bindings.map((binding) => binding.slot).join(",") === "shot-request,first_frame"
       && v2Staged.shotRequest?.prompt === v2ShotRequest.prompt.text
-      && v2Staged.shotRequest.seed === 4_242,
-    "契约 v2 stage：index 0 是 shot-request slot，回执携带逐镜 prompt 与 seed");
+      && v2Staged.shotRequest.seed === 4_242
+      && existsSync(productionGatewayBlobPath(liveDirs.ingestRoot, v2ShotAsset.sha256)),
+    "契约 v2 stage：worker 先把缺失的 cas:// 输入上传到 gateway，回执 index 0 是 shot-request slot 并携带逐镜 prompt 与 seed");
+    ok((await headAsset(v2ShotAsset.sha256)).status === 200
+      && (await headAsset(FIRST_FRAME.sha256)).status === 200,
+    "上传后两个输入对象在 assets 路由上都可见（HEAD 200）");
     const v2Materialized = materializeProductionH3Workflow(
       templateWorkflowV2,
       H3_CONTRACT_V2 as never,
@@ -1146,7 +1280,7 @@ try {
       execution: structuredClone(INTENT_EXECUTION_V2),
       inputs: [nullSeedAsset, structuredClone(FIRST_FRAME)],
     });
-    const nullSeedStaged = await stager.stage(nullSeedIntent);
+    const nullSeedStaged = await uploadingStager.stage(nullSeedIntent);
     const NULL_SEED_REMOTE_ID = "33333333-3333-4333-8333-333333333333";
     const nullSeedBody = {
       version: 1 as const,
@@ -1247,7 +1381,7 @@ try {
       && capabilities.modelFamilies.includes("minimax-h3")
       && capabilities.processingRegions.join(",") === "SG"
       && capabilities.providerJobIdMapping === "none"
-      && profileLimits?.maxInputImageBytes === 16 * 1024 * 1024
+      && profileLimits?.maxInputImageBytes === LIVE_MAX_INPUT_IMAGE_BYTES
       && profileLimits.aspectRatios.join(",") === "9:16"
       && profileLimits.resolutions.join(",") === "768p",
     "capabilities 路由转发 registry 推导出的真实 capability，而不是自造字面量");

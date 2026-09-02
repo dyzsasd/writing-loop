@@ -16,6 +16,7 @@ import {
   SHOT_REQUEST_MEDIA_TYPE,
   SHOT_VALIDATION_CODES,
   compileShotRequest,
+  derivedShotSeed,
   deriveVideoMode,
   extractProductionTags,
   h3VariantForMode,
@@ -28,6 +29,7 @@ import {
   selectH3ProfileForDuration,
   shotMergeBlocker,
   shotRequestAssetRef,
+  withDerivedShotSeed,
   shotRequestFromScript,
   type CompileShotRequestResult,
   type ShotCompileCapability,
@@ -311,6 +313,57 @@ const expectCode = (
   ok(parseShotRequest(shotRequest).compile.draftSha256 === shotRequest.compile.draftSha256,
     "H3 编译：产物可被 parseShotRequest 重解析");
   ok(shotRequest.compile.degradations.length === 0, "H3 编译：正路无 Degradation");
+}
+
+// —— 契约 v2 的 seed 在编译期强制（§5.3）：sentinel 只能由 ShotRequest 的显式 seed 填入 ——
+{
+  const v2NullSeed = compileShotRequest(
+    withDraft((draft) => { draft.output.seed = null; }), capability(), policy(),
+  );
+  expectCode(v2NullSeed, "output_intent_mismatch",
+    "H3 契约 v2（capability seed=uint32）拒绝 output.seed 为 null");
+  ok(v2NullSeed.validation.issues.some((issue) =>
+    issue.code === "output_intent_mismatch" && issue.field === "output.seed"
+    && issue.message.includes("v2")),
+  "该 error 指向 output.seed 并写明契约 v2 需要显式 seed");
+  // 契约 v1 的档声明 seed 不受支持，null 在那里是正常形态，不受本规则影响。
+  const v1NullSeed = compileShotRequest(
+    withDraft((draft) => { draft.output.seed = null; }),
+    capability(undefined, { "h3-9x16-8s": limits({ seed: "unsupported" }) }),
+    policy(),
+  );
+  ok(v1NullSeed.validation.errors === 0 && v1NullSeed.shotRequest?.output.seed === null,
+    "H3 契约 v1（capability seed=unsupported）下 output.seed 为 null 仍然编译通过");
+}
+
+// —— 派生 seed（§4.1 seed-derived）：合并之后按最终镜头内容补 uint32 seed ——
+{
+  const nullSeedDraft = withDraft((draft) => { draft.output.seed = null; });
+  const otherDraft = parseShotRequestDraft({
+    ...nullSeedDraft,
+    shotId: "EP001-S1-2",
+    subject: { ...nullSeedDraft.subject, shotId: "EP001-S1-2" },
+    continuity: { ...nullSeedDraft.continuity, prevShotId: nullSeedDraft.shotId },
+  });
+  const explicit = withDraft((draft) => { draft.output.seed = 7; });
+  const seeded = [nullSeedDraft, otherDraft, explicit].map(withDerivedShotSeed);
+  const first = seeded[0]!.draft.output.seed!;
+  const second = seeded[1]!.draft.output.seed!;
+  ok(Number.isSafeInteger(first) && first >= 0 && first <= 0xffff_ffff
+    && Number.isSafeInteger(second) && second >= 0 && second <= 0xffff_ffff,
+  "派生 seed 落在 uint32 区间内");
+  ok(first !== second, "内容不同的两镜派生出不同 seed");
+  ok(seeded[2]!.draft.output.seed === 7 && seeded[2]!.degradation === null,
+    "已写死 seed 的镜头不被覆盖，也不记退化");
+  ok(withDerivedShotSeed(nullSeedDraft).draft.output.seed === first,
+    "同一份 draft 恒得同一个 seed（确定性派生）");
+  ok(seeded[0]!.degradation?.code === "seed-derived"
+    && seeded[0]!.degradation.requiresReapproval === false
+    && seeded[0]!.degradation.from === "output.seed=null"
+    && seeded[0]!.degradation.to.startsWith(String(first)),
+  "被派生的镜头记一条 seed-derived 退化，写明取值");
+  ok(derivedShotSeed(seeded[0]!.draft) === first,
+    "seed 不参与它自己的派生：补上 seed 之后重算得同一值");
 }
 
 // —— 后端 fixture：seedance / veo（本版只到编译校验层，无 adapter） ——
@@ -1013,7 +1066,7 @@ const mergeDraft = (index: number, mutate: (draft: ShotRequestDraft) => void = (
 {
   const missing = SHOT_VALIDATION_CODES.filter((code) => !seen.has(code));
   ok(missing.length === 0, `验证矩阵覆盖全部 ${SHOT_VALIDATION_CODES.length} 个错误码（未覆盖：${missing.join(",") || "无"}）`);
-  ok(DEGRADATION_CODES.length === 6, "Degradation 词表为 6 项（v2 删除三个无触发规则的 code）");
+  ok(DEGRADATION_CODES.length === 7, "Degradation 词表为 7 项（v2 删除三个无触发规则的 code，1c 增 seed-derived）");
 }
 
 // —— 剧本预填（§6.1「一行动作 = 一个镜头」） ——

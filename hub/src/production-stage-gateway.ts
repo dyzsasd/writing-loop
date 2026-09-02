@@ -44,9 +44,8 @@ import {
   SHOT_REQUEST_MEDIA_TYPE,
   deriveVideoMode,
   h3VariantForMode,
-  parseShotRequest,
+  readShotRequestDocument,
   referenceAssetKind,
-  shotRequestCanonicalJson,
   type ShotRequest,
 } from "./production-shot-request.ts";
 import {
@@ -133,7 +132,9 @@ export type VerifiedStageReceipt = Readonly<{
   /**
    * Per-shot values read from the receipt's own projection of the staged `inputs[0]` object. The
    * object is pinned by `bindings[0].assetSha256`, which the bindings digest already covers, so the
-   * projection cannot name a different ShotRequest than the one this receipt staged.
+   * projection cannot name a different ShotRequest than the one this receipt staged. The worker
+   * additionally re-derives these values from its own copy of the object (its local asset source,
+   * §6.4) before it will submit, so a drifted projection cannot decide what gets materialized.
    */
   shotRequest: Readonly<ProductionStagedShotRequest> | null;
 }>;
@@ -673,30 +674,13 @@ function validateStagedShotRequest(
   execution: ProductionIntentExecution,
   asset: AssetRef,
 ): ShotRequest {
-  let text: string;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
-  catch { fail("unsupported-media"); }
-  let value: unknown;
-  try { value = JSON.parse(text); }
-  catch { fail("unsupported-media"); }
-  let shotRequest: ShotRequest;
-  try { shotRequest = parseShotRequest(value, "StagedShotRequest"); }
-  catch (error) {
-    if (error instanceof ProductionError) fail("unsupported-media");
-    throw error;
-  }
-  // Canonical bytes, not merely a parseable document: the digest the intent pinned is taken over the
-  // canonical form, and a re-serialised variant would stage a different object under the same name.
-  if (shotRequestCanonicalJson(shotRequest) !== text) fail("asset-integrity");
+  // The execution-independent half of the check (strict parse, canonical bytes, a `prompt.text` the
+  // pinned graph can actually carry) lives next to the ShotRequest type so the gateway's `assets`
+  // upload route admits exactly the documents this kernel will later accept.
+  const document = readShotRequestDocument(bytes);
+  if (!document.ok) fail(document.reason === "not-canonical" ? "asset-integrity" : "unsupported-media");
+  const shotRequest = document.shotRequest;
   if (asset.byteLength !== bytes.byteLength) fail("asset-integrity");
-  // `prompt.text` is materialized verbatim into a pinned graph literal, so it must satisfy the same
-  // bounded-scalar rule the graph contract applies (`boundedString`, production-h3-graph.ts):
-  // 1–16384 characters with no NUL/VT/FF/DEL. `parseShotRequest` already caps the length at 4096 and
-  // rejects NUL, so the reachable difference is VT/FF/DEL. Rejecting it here keeps a shot that could
-  // never be materialized from reaching dispatch; the public error stays code-only by design, so the
-  // field this rule is about is named here rather than in the response.
-  if (shotRequest.prompt.text.length < 1 || shotRequest.prompt.text.length > 16_384
-    || /[\u0000\u000b\u000c\u007f]/.test(shotRequest.prompt.text)) fail("unsupported-media");
   if (execution.modelFamily === "minimax-h3") {
     const variant = h3VariantForMode(deriveVideoMode(shotRequest.continuity));
     if (shotRequest.output.aspectRatio !== execution.aspectRatio

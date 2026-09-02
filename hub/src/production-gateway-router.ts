@@ -35,7 +35,8 @@ const METHODS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
   jobs: new Set(["GET", "PUT"]),
   stages: new Set(["PUT"]),
   ingests: new Set(["PUT"]),
-  assets: new Set(["GET"]),
+  // §6.4: one content-addressed object, read with GET, probed with HEAD, published with PUT.
+  assets: new Set(["GET", "HEAD", "PUT"]),
   // §8.6: the scope-level capability resource has no per-object segment.
   capabilities: new Set(["GET"]),
 });

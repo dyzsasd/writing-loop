@@ -656,6 +656,9 @@ export async function startProductionGatewayProcess(
       storeRoot: config.ingestRoot,
       comfyBaseUrl: backend.comfyBaseUrl,
       credentialResolver: () => bearer(),
+      // §6.4 `assets` PUT: the same declared input-image ceiling the capability route quotes, so a
+      // keyframe the compiler accepted cannot be refused by the upload that has to carry it.
+      maxUploadImageBytes: backend.maxInputImageBytes,
       // §5.3: H3 does not return a tail frame, so the deployed process always derives one. A host
       // without a usable ffmpeg fails the ingest rather than silently registering a take whose
       // continuity frame the next shot needs (§6.4).

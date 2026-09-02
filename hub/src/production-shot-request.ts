@@ -121,7 +121,7 @@ export type KeyframeOriginKind = typeof KEYFRAME_ORIGIN_KINDS[number];
 /** §4.1 Degradation 词表（三个无触发规则的 code 已在 v2 删除）。 */
 export const DEGRADATION_CODES = [
   "anchor-mode-selected", "duration-rounded-trim", "references-trimmed", "seed-not-reproducible",
-  "negative-prompt-folded", "prompt-translated",
+  "negative-prompt-folded", "prompt-translated", "seed-derived",
 ] as const;
 export type DegradationCode = typeof DEGRADATION_CODES[number];
 
@@ -1045,6 +1045,49 @@ export function shotRequestSha256(shotRequest: ShotRequest): string {
   return productionCanonicalJsonSha256(shotRequest);
 }
 
+/**
+ * `prompt.text` 会被逐字材料化成 pinned graph 的字面量，因此它必须同时满足 graph 契约的
+ * bounded-scalar 规则（`boundedString`，production-h3-graph.ts）：1–16384 字符、无 NUL/VT/FF/DEL。
+ * `parseShotRequest` 已经把长度收在 4096 并拒绝 NUL，可达的差集只有 VT/FF/DEL。
+ */
+const PROMPT_NOT_MATERIALIZABLE = /[\u0000\u000b\u000c\u007f]/;
+
+export type ShotRequestDocumentRejection = "unparseable" | "not-canonical" | "prompt-not-materializable";
+
+export type ShotRequestDocument =
+  | { ok: true; shotRequest: ShotRequest }
+  | { ok: false; reason: ShotRequestDocumentRejection };
+
+/**
+ * 一段字节是不是「可作为 `inputs[0]` 使用的 ShotRequest 正本」——与 execution 无关的那部分判据。
+ * stage kernel（登记时）与 gateway 的 assets 上传路由（入库时）共用它，两侧因此不可能对同一份对象
+ * 得出不同结论；execution 相关的判据（画幅 / 时长 / variant / 音频意图）留在 stage kernel。
+ *
+ * 判据本身返回而不抛：两个调用方对「不是 canonical 字节」与「解析不出」的公开错误码不同。
+ */
+export function readShotRequestDocument(bytes: Uint8Array): ShotRequestDocument {
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { return { ok: false, reason: "unparseable" }; }
+  let value: unknown;
+  try { value = JSON.parse(text); }
+  catch { return { ok: false, reason: "unparseable" }; }
+  let shotRequest: ShotRequest;
+  try { shotRequest = parseShotRequest(value, "ShotRequestDocument"); }
+  catch (error) {
+    if (error instanceof ProductionError) return { ok: false, reason: "unparseable" };
+    throw error;
+  }
+  // Canonical 字节，而不只是可解析的文档：intent 钉住的 digest 取自 canonical 形式，重新序列化过的
+  // 变体会以同一个名字登记成另一个对象。
+  if (shotRequestCanonicalJson(shotRequest) !== text) return { ok: false, reason: "not-canonical" };
+  if (shotRequest.prompt.text.length < 1 || shotRequest.prompt.text.length > 16_384
+    || PROMPT_NOT_MATERIALIZABLE.test(shotRequest.prompt.text)) {
+    return { ok: false, reason: "prompt-not-materializable" };
+  }
+  return { ok: true, shotRequest };
+}
+
 /** ShotRequest 写入 workspace CAS 后的 AssetRef —— intent inputs[0]（§4.1 资产 URI）。 */
 export function shotRequestAssetRef(shotRequest: ShotRequest, casAuthority: string): AssetRef {
   if (!CAS_AUTHORITY_RE.test(casAuthority)) {
@@ -1709,6 +1752,16 @@ export function compileShotRequest(
       requiresReapproval: false,
     });
   }
+  // H3 graph 契约 v2 把 `RandomNoise.noise_seed` 变成 sentinel，逐镜 seed 在 materialize 时从
+  // ShotRequest 填入（§5.3）；null 没有可填入的值，dispatch 期会被 binding verifier 拒绝。在编译期
+  // 判定，镜头就不会带着一个不可执行的 seed 进批次。契约 v1 的档声明 `seed: "unsupported"`，不受影响。
+  if (family === "minimax-h3" && limits.seed === "uint32" && seed === null) {
+    sink.error(
+      "output_intent_mismatch",
+      "output.seed",
+      `${limitsKey} 是 H3 graph 契约 v2（seed 为 sentinel），materialize 需要显式 output.seed，null 无法落图`,
+    );
+  }
   const seedReproducible = limits.seed === "uint32" || limits.seed === "int32";
 
   // negative prompt（§4.1、§5.1、§5.3）
@@ -2007,6 +2060,40 @@ export type ScriptPrefillWarning = {
 };
 
 export type ScriptPrefillResult = { shots: ScriptShotDraft[]; warnings: ScriptPrefillWarning[] };
+
+/**
+ * 由该镜头 draft 自身内容派生的 uint32 seed：digest 取自 `output.seed` 为 null 的同一份 draft，
+ * 因此同一份剧本 + 同一批预填、合并与视觉填充结果恒得同一个 seed，而 seed 本身不参与它自己的派生。
+ */
+export function derivedShotSeed(draft: ShotRequestDraft): number {
+  const source: ShotRequestDraft = { ...draft, output: { ...draft.output, seed: null } };
+  return Number.parseInt(productionCanonicalJsonSha256(source).slice(0, 8), 16);
+}
+
+/**
+ * H3 graph 契约 v2 的档要求逐镜 seed 非空（sentinel 在 materialize 时填入，§5.3），而剧本预填给不出
+ * 这个值。这里按最终镜头内容补一个确定性 seed，并按 `seed-derived` 记入退化；已经写死 seed 的镜头
+ * 原样返回、不记退化。
+ *
+ * 调用点在批次装配的最后一步（镜头合并、mergedPatches 与视觉填充之后，逐镜选定 execution profile
+ * 之后）：合并条件 10 把「seed 不同」当作阻断项（§6.1），更早派生会让任何两镜都合不起来；而选档之前
+ * 派生则无法按该镜实际落到的档（v1 / v2）区别对待。
+ */
+export function withDerivedShotSeed(
+  draft: ShotRequestDraft,
+): { draft: ShotRequestDraft; degradation: Degradation | null } {
+  if (draft.output.seed !== null) return { draft, degradation: null };
+  const seed = derivedShotSeed(draft);
+  return {
+    draft: parseShotRequestDraft({ ...draft, output: { ...draft.output, seed } }),
+    degradation: {
+      code: "seed-derived",
+      from: "output.seed=null",
+      to: `${seed}（该镜内容派生）`,
+      requiresReapproval: false,
+    },
+  };
+}
 
 const TIME_OF_DAY_MAP: Readonly<Record<string, TimeOfDay>> = {
   日: "day", 午: "day", 夜: "night", 夜半: "night",

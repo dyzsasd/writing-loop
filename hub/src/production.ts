@@ -390,7 +390,8 @@ function batchDrafts(
     }
     drafts = applyShotDraftPatches(merged.drafts, script.mergedPatches);
   }
-  // 视觉侧的两张表在最后一步补空位：人工 patch 已经写死的值不覆盖。
+  // 视觉侧的两张表在最后一步补空位：人工 patch 已经写死的值不覆盖。契约 v2 的派生 seed 更靠后，
+  // 在 buildShotBatchPlan 里逐镜按选定的档补（§5.3），因此它取的是视觉填充之后的镜头内容。
   const withVisual = applyVisualDefaults(drafts, visual, { arcId: request.arcId });
   return { drafts: withVisual.drafts, issues: [...issues, ...withVisual.issues] };
 }
@@ -451,6 +452,8 @@ function buildPlanShotsContext(options: PlanShotsOptions, cwd: string): PlanShot
       visual,
       drafts: assembled.drafts,
       draftIssues: assembled.issues,
+      // 剧本预填给不出 seed；`shots[]` 直接给出的 draft 由操作者写死，不派生。
+      deriveSeedWhenNull: request.script !== null,
     }),
   };
 }

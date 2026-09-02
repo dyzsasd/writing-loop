@@ -27,7 +27,12 @@ import {
   type ProductionDispatchIntent,
   type ProductionIntentExecution,
 } from "../src/production-intent.ts";
-import { SHOT_REQUEST_MEDIA_TYPE } from "../src/production-shot-request.ts";
+import {
+  SHOT_REQUEST_MEDIA_TYPE,
+  parseShotRequest,
+  shotRequestCanonicalJson,
+} from "../src/production-shot-request.ts";
+import { writeProductionCasObject } from "../src/production-cas.ts";
 import {
   createProductionRuntimeRegistry,
   loadProductionRuntimeConfig,
@@ -289,6 +294,83 @@ const H3_REF_EXECUTION: ProductionIntentExecution = {
   ...H3_REF_EXECUTION_BASE, parametersSha256: H3_REF_PARAMETERS_SHA,
 };
 
+/**
+ * 契约 v2 的 `inputs[0]` 正本。worker 侧 verifier 从本机 workspace CAS 取回它复核 stage 回执的
+ * prompt / seed 投影（§6.4），所以测试里的这份对象必须是真实可解析的 canonical ShotRequest。
+ */
+function shotRequestFor(seed: number | null, text: string) {
+  const source = (sha256: string) => ({
+    version: 1 as const, uri: `cas://wl-sg/sha256/${sha256}`, sha256, byteLength: 8_192,
+    mediaType: "text/markdown",
+  });
+  return parseShotRequest({
+    version: 1,
+    kind: "writing-loop/shot-request",
+    shotId: "ep-h3-S1-1",
+    subject: {
+      version: 1,
+      episode: { version: 1, episodeId: "ep-h3", revision: 1, source: source("a".repeat(64)) },
+      shotId: "ep-h3-S1-1",
+      revision: 1,
+      source: source("a".repeat(64)),
+    },
+    provenance: {
+      storyDesignSha256: "b".repeat(64),
+      assetsRevision: 3,
+      visualProductionSha256: null,
+      beatCardHash: null,
+      scriptLine: 17,
+      mergedScriptLines: [],
+    },
+    scene: {
+      sceneId: "S01", subscene: null, timeOfDay: "night", interior: "ext",
+      lightingStateId: null, dressingVariantId: null,
+    },
+    camera: {
+      shot_size: "wide", camera_movement: "dolly_out", lens_mm: 35, lighting_key: "natural",
+      depth_of_field: "deep", color_temperature: "neutral", cameraId: "CAM_A",
+    },
+    cast: [],
+    props: [],
+    crowd: null,
+    action: "人物走上天台，背对镜头。",
+    productionTags: [],
+    dialogue: [],
+    output: {
+      aspectRatio: "9:16", generateAudio: true, durationSeconds: 8,
+      storyboardDurationSeconds: 8, fps: 24, seed,
+    },
+    continuity: {
+      stageGroup: "ep-h3-S1",
+      prevShotId: null,
+      anchorMode: "keyframes",
+      firstFrame: {
+        asset: {
+          version: 1, uri: `cas://wl-sg/sha256/${"8".repeat(64)}`, sha256: "8".repeat(64),
+          byteLength: 100, mediaType: "image/png",
+        },
+        origin: { kind: "operator-upload", note: "首帧由操作者上传" },
+        containsRealFace: false,
+      },
+      lastFrame: null,
+      references: [],
+      referencePolicy: "trim_by_priority",
+      droppedReferences: [],
+      spatialPasses: [],
+      fingerprint: { modelSha256: "b".repeat(64), workflowSha256: "a".repeat(64), seed, seedReproducible: true },
+    },
+    prompt: {
+      text,
+      negativeText: null,
+      language: "zh-CN",
+      authoredBy: "episode-writer",
+      compiler: "production-shot-request@1",
+      selectedTranslation: null,
+    },
+    compile: { draftSha256: "c".repeat(64), policyDigest: "a".repeat(64), degradations: [] },
+  });
+}
+
 const asset = (name: string, digest: string) => ({
   version: 1 as const,
   uri: `s3://writing-loop-assets/demo/${name}`,
@@ -546,6 +628,7 @@ function h3Config(): Record<string, unknown> {
         bindings: structuredClone(H3_V2_BINDINGS),
       },
     ],
+    localAssetSource: { version: 1, kind: "workspace-cas", casAuthority: "wl-sg" },
     runner: structuredClone(validConfig().runner),
   };
 }
@@ -681,6 +764,9 @@ function matrixConfig(
         bindings,
       }]
       : [],
+    ...(scopedStaging
+      ? { localAssetSource: { version: 1, kind: "workspace-cas", casAuthority: "wl-sg" } }
+      : {}),
     runner: structuredClone(validConfig().runner),
   };
 }
@@ -1327,11 +1413,38 @@ try {
   let stageRequests = 0;
   // 契约 v2 的回执投影：由每个用例设置，模拟 stage kernel 从 inputs[0] 读出的 prompt / seed。
   let v2ShotRequestProjection: { prompt: string; seed: number | null } | null = null;
+  // §6.4：gateway 已持有的对象（HEAD 200）与本次由 worker 上传的对象（PUT 后进入本集合）。
+  const gatewayObjects = new Set<string>();
+  const uploaded: Array<{ sha256: string; byteLength: number }> = [];
+  let assetProbes = 0;
+  let uploadStatus = 200;
   const stageFetch = (
     slots: readonly string[],
     providerKeys: readonly string[],
     projection?: () => { prompt: string; seed: number | null } | null,
   ) => async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const path = new URL(input.toString()).pathname;
+    const assetMatch = /\/v1\/scopes\/([^/]+)\/([^/]+)\/assets\/sha256\/([a-f0-9]{64})$/.exec(path);
+    if (assetMatch !== null) {
+      const digest = assetMatch[3]!;
+      ok(new Headers(init?.headers).get("authorization") === "Bearer server-stage-secret"
+        && assetMatch[1] === WORKSPACE_ID && assetMatch[2] === "demo",
+      "assets 上传路由与 stages 走同一 scope 与 bearer");
+      if (init?.method === "HEAD") {
+        assetProbes++;
+        return new Response(null, { status: gatewayObjects.has(digest) ? 200 : 404 });
+      }
+      if (init?.method !== "PUT") throw new Error(`unexpected assets method ${String(init?.method)}`);
+      const body = init.body as Uint8Array;
+      if (uploadStatus === 200) {
+        gatewayObjects.add(digest);
+        uploaded.push({ sha256: digest, byteLength: body.byteLength });
+      }
+      return new Response(uploadStatus === 200 ? JSON.stringify({ version: 1, sha256: digest }) : "{}", {
+        status: uploadStatus,
+        headers: { "content-type": "application/json" },
+      });
+    }
     stageRequests++;
     const headers = new Headers(init?.headers);
     const request = JSON.parse(String(init?.body)) as {
@@ -1469,9 +1582,18 @@ try {
   ok(refProof.verified && refStaged.bindings.map((binding) => binding.slot).join(",") === "reference.0,reference.1",
     "concrete ref2va profile preserves and verifies ordered reference slots");
 
-  // —— 契约 v2：worker 侧 verifier 从 stage 回执的投影材料化逐镜 prompt / seed ——
+  // —— 契约 v2：worker 从本机对象源复核 stage 回执的 prompt / seed 投影（§6.4） ——
+  const V2_PROMPT = "夜色中的天台，人物背对镜头";
+  const v2ShotRequestBytes = Buffer.from(shotRequestCanonicalJson(shotRequestFor(4_242, V2_PROMPT)), "utf8");
+  const v2ShotRequestDigest = writeProductionCasObject(root, "demo", v2ShotRequestBytes).sha256;
   const v2Intent = h3Intent("take-h3-v2", H3_V2_EXECUTION, [
-    { ...asset("shot-request.json", "7".repeat(64)), mediaType: "application/vnd.writing-loop.shot-request+json" },
+    {
+      version: 1,
+      uri: `cas://wl-sg/sha256/${v2ShotRequestDigest}`,
+      sha256: v2ShotRequestDigest,
+      byteLength: v2ShotRequestBytes.byteLength,
+      mediaType: "application/vnd.writing-loop.shot-request+json",
+    },
     asset("v2-first.png", "8".repeat(64)),
     asset("v2-last.png", "9".repeat(64)),
   ]);
@@ -1491,19 +1613,81 @@ try {
       return "other";
     }
   };
-  const v2Proof = await verifyV2({ prompt: "夜色中的天台，人物背对镜头", seed: 4_242 });
+  const uploadsBefore = uploaded.length;
+  const v2Proof = await verifyV2({ prompt: V2_PROMPT, seed: 4_242 });
   const v2Bound = typeof v2Proof === "string" ? null : v2Proof.workflow;
   ok(typeof v2Proof !== "string" && v2Proof.verified
     && ((v2Bound![H3_V2_IDS.generator] as Record<string, unknown>).inputs as Record<string, unknown>).prompt
-      === "夜色中的天台，人物背对镜头"
+      === V2_PROMPT
     && ((v2Bound![H3_V2_IDS.noise] as Record<string, unknown>).inputs as Record<string, unknown>).noise_seed
       === 4_242
     && v2Proof.boundWorkflowSha256 !== v2Proof.templateWorkflowSha256,
-  "契约 v2：verifier 把回执投影里的 prompt 与 seed 材料化进 bound graph");
+  "契约 v2：verifier 用本机正本的 prompt 与 seed 材料化进 bound graph");
+  ok(uploaded.length === uploadsBefore + 1
+    && uploaded.at(-1)!.sha256 === v2ShotRequestDigest
+    && uploaded.at(-1)!.byteLength === v2ShotRequestBytes.byteLength,
+  "stage 之前：gateway 缺失的 cas:// 输入被逐字节上传到 assets 路由");
+  const afterFirstUpload = uploaded.length;
+  await verifyV2({ prompt: V2_PROMPT, seed: 4_242 });
+  ok(uploaded.length === afterFirstUpload,
+    "gateway 已持有该对象时 HEAD 命中，不再重复上传");
   ok(await verifyV2({ prompt: "无 seed 的镜头", seed: null }) === "workflow-invalid",
-    "契约 v2：ShotRequest 的 seed 为 null 时 worker verifier 以 workflow-invalid 拒绝");
+    "契约 v2：回执投影的 seed 为 null 时 worker verifier 以 workflow-invalid 拒绝");
+  ok(await verifyV2({ prompt: "另一段被改写的 prompt", seed: 4_242 }) === "workflow-invalid",
+    "契约 v2：回执投影的 prompt 与本机 ShotRequest 正本不一致即 workflow-invalid");
+  ok(await verifyV2({ prompt: V2_PROMPT, seed: 4_243 }) === "workflow-invalid",
+    "契约 v2：回执投影的 seed 与本机 ShotRequest 正本不一致即 workflow-invalid");
   ok(await verifyV2(null) === "stager:invalid-response",
     "契约 v2：stage 回执带 shot-request slot 却缺 shotRequest 投影时，worker 在解析回执时就拒绝");
+
+  // 上传失败即 fail-closed：不进入 stage，更不进入提交。
+  gatewayObjects.delete(v2ShotRequestDigest);
+  uploadStatus = 500;
+  const stageRequestsBeforeFailedUpload = stageRequests;
+  ok(await verifyV2({ prompt: V2_PROMPT, seed: 4_242 }) === "stager:gateway-unavailable"
+    && stageRequests === stageRequestsBeforeFailedUpload,
+  "assets 上传失败时该次 stage 直接失败：没有发出 PUT /stages，也就不会带着缺失输入继续");
+  uploadStatus = 200;
+
+  // 本机对象源没有该对象时同样 fail-closed；错误码与 gateway 侧的失败可区分。
+  const absentDigest = createHash("sha256").update("absent-shot-request").digest("hex");
+  const absentIntent = h3Intent("take-h3-v2-absent", H3_V2_EXECUTION, [
+    {
+      version: 1,
+      uri: `cas://wl-sg/sha256/${absentDigest}`,
+      sha256: absentDigest,
+      byteLength: 128,
+      mediaType: "application/vnd.writing-loop.shot-request+json",
+    },
+    asset("v2-first.png", "8".repeat(64)),
+    asset("v2-last.png", "9".repeat(64)),
+  ]);
+  let absentCode = "none";
+  try { await v2Pipeline.inputStager.stage(absentIntent); }
+  catch (error) { absentCode = error instanceof ProductionInputStagerError ? error.code : "other"; }
+  ok(absentCode === "local-asset-unavailable",
+    "本机 workspace CAS 没有该 cas:// 对象时 stage 以 local-asset-unavailable 失败");
+
+  // 另一个 CAS authority 的 cas:// 输入不可能被本 gateway 解析，在上传前就拒绝。
+  const foreignIntent = h3Intent("take-h3-v2-foreign", H3_V2_EXECUTION, [
+    {
+      version: 1,
+      uri: `cas://wl-other/sha256/${v2ShotRequestDigest}`,
+      sha256: v2ShotRequestDigest,
+      byteLength: v2ShotRequestBytes.byteLength,
+      mediaType: "application/vnd.writing-loop.shot-request+json",
+    },
+    asset("v2-first.png", "8".repeat(64)),
+    asset("v2-last.png", "9".repeat(64)),
+  ]);
+  let foreignCode = "none";
+  const probesBeforeForeign = assetProbes;
+  const stageRequestsBeforeForeign = stageRequests;
+  try { await v2Pipeline.inputStager.stage(foreignIntent); }
+  catch (error) { foreignCode = error instanceof ProductionInputStagerError ? error.code : "other"; }
+  ok(foreignCode === "invalid-input" && assetProbes === probesBeforeForeign
+    && stageRequests === stageRequestsBeforeForeign,
+  "cas:// 输入的 authority 与 runtime config 的 casAuthority 不一致时在 HEAD 之前就拒绝，零请求");
   v2ShotRequestProjection = null;
 
   stageMode = "reordered";
@@ -1824,6 +2008,35 @@ try {
     ok(rejects((config) => {
       config.executionProfileSnapshotFile = "/etc/snapshot.json";
     }, "相对 POSIX 路径"), "executionProfileSnapshotFile 拒绝绝对路径");
+
+    // —— §6.4 localAssetSource ——
+    ok(parsed.localAssetSource === null,
+      "只有 static-pre-staged workflow 的配置可以不声明 localAssetSource");
+    const parsedLocal = parseProductionRuntimeConfig({
+      ...validConfig(),
+      localAssetSource: { version: 1, kind: "workspace-cas", casAuthority: "wl-sg" },
+    }).localAssetSource;
+    ok(parsedLocal?.kind === "workspace-cas" && parsedLocal.casAuthority === "wl-sg",
+      "localAssetSource 严格解析为 workspace-cas + casAuthority");
+    ok(rejects((config) => {
+      config.localAssetSource = { version: 1, kind: "s3", casAuthority: "wl-sg" };
+    }, "workspace-cas"), "localAssetSource.kind 只接受 workspace-cas");
+    ok(rejects((config) => {
+      config.localAssetSource = { version: 1, kind: "workspace-cas", casAuthority: "WL-SG" };
+    }, "casAuthority"), "localAssetSource.casAuthority 必须匹配小写 authority 形态");
+    ok(rejects((config) => {
+      config.localAssetSource = { version: 1, kind: "workspace-cas", casAuthority: "wl-sg", root: "/srv" };
+    }, "未知：root"), "localAssetSource 不接受未知字段（路径来自装配层，不进配置文件）");
+    const missingLocalSource = h3Config();
+    delete missingLocalSource.localAssetSource;
+    let missingLocalCode = "accepted";
+    try { parseProductionRuntimeConfig(missingLocalSource); }
+    catch (error) {
+      missingLocalCode = error instanceof ProductionRuntimeConfigError
+        && error.message.includes("scoped-staging") ? "rejected" : "other";
+    }
+    ok(missingLocalCode === "rejected",
+      "存在 scoped-staging staging profile 却不声明 localAssetSource 时在解析层 fail-closed");
   }
 } finally {
   rmSync(root, { recursive: true, force: true });
