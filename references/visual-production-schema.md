@@ -91,7 +91,13 @@ shotId 取用）。一个 shotId 只能被一张候选图占用，跨场景亦�
 
 候选图还可选带 `containsRealFace`：该图是否含真人人脸（§4.7 `provider-likeness-policy`）。缺该键时
 解析为 `true`，与 gate 的 `undeclared` 同一 fail-closed 语义——未声明不等于不含。Blender 约束图生成
-的关键帧显式写 `false`。`plan-shots` 按 `shotIds` 自动填首帧时，把这一位原样带进 ShotRequest。
+的关键帧显式写 `false`。`plan-shots` 按 `shotIds` 自动填首帧时，把这一位原样带进 ShotRequest；排到某镜
+但尚未批准（`status` 仍是 `candidate`）的候选图不填首帧，只在该镜的计划里记一条 `source: visual` 的
+warning。人工已写死 `continuity.firstFrame` 的镜头不被覆盖。
+
+候选图与 render pass 的绑定约束（`validateVisualProduction`）：候选图引用的每个 render 必须与它自己的
+`(cameraId, lightingStateId, dressingVariantId)` 完全一致，且其中至少有一个 pass 属于
+`depth | normal | lineart`；同一 `(camera, lighting, dressing, pass)` 组合的 render 不得重复登记。
 
 ## 候选图批准轨道
 

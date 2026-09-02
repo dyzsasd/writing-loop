@@ -187,15 +187,19 @@ model/workflow/seed/参数 fingerprint。reference 必须标注用途，不能�
 planned             -> dispatch-pending | cancel-requested | failed
 dispatch-pending    -> submitting | cancel-requested | failed
 submitting          -> submitted | submission-unknown | cancel-requested | failed
-submitted           -> running | ingesting | cancel-requested | failed | orphaned
-running             -> ingesting | cancel-requested | failed | orphaned
-ingesting           -> qc-pending | cancel-requested | failed | orphaned
-qc-pending          -> approved | rejected | cancel-requested | failed | orphaned
-submission-unknown  -> submitted | running | cancel-requested | failed | orphaned
+submitted           -> running | ingesting | cancel-requested | cancelled | failed | orphaned
+running             -> ingesting | cancel-requested | cancelled | failed | orphaned
+ingesting           -> qc-pending | cancel-requested | cancelled | failed | orphaned
+qc-pending          -> approved | rejected | cancel-requested | cancelled | failed | orphaned
+submission-unknown  -> submitted | running | cancel-requested | cancelled | failed | orphaned
 cancel-requested    -> submission-unknown | submitted | running | ingesting | qc-pending |
                        approved | rejected | cancelled | failed | orphaned
 approved | rejected | failed | cancelled | orphaned -> (terminal)
 ```
+
+已提交的五个阶段（`submitted`、`running`、`ingesting`、`qc-pending`、`submission-unknown`）各有一条直达
+`cancelled` 的边：取消竞态先恢复了生产、provider 只在后续对账轮次才报出 terminal `cancelled` 事实时需要它。
+这些边仍由 reducer 的持久 `cancellationRequest` 与强匹配 observation 检查把关，不是无条件转移。
 
 最终合法转移由纯函数 reducer 唯一定义。终态不得回退；同 event ID + 同 canonical payload 的精确
 重放可幂等忽略，同 ID 不同 payload 与其他过时/乱序事件都硬错。`cancel-requested` 这一行是所有
@@ -354,6 +358,9 @@ interface ProductionAdapter {
 }
 
 interface ProductionArtifactIngestor {
+  // 先由 coordinator 取到本次不可变结果的幂等键；网络实现必须把受信任的 workspace/project scope
+  // 算进这个键。ingest 失败只重试同一个 ingestKey。
+  ingestKey(task: ProductionTask, observation: RemoteObservation): string;
   ingest(task: ProductionTask, observation: RemoteObservation, signal?: AbortSignal):
     Promise<{ version: 1; ingestKey: string; assets: AssetRef[]; cost: ProductionCost }>;
 }
@@ -434,13 +441,16 @@ queue₃ 已消失表示正常完成迁移，仍存在才视为协议冲突/潜�
 回答。这条记录把「provider 忘了一个在跑的任务」与「任务早已结束、history 只是被裁掉了」区分开。
 
 gateway 进程启动时先做一次抢占扫描（Spot 抢占或任何 ComfyUI 重启都会清空进程内 history）：遍历
-`jobStateRoot/jobs/` 下的持久 job record，只对「已提交且未终态」的任务发请求——已有抢占记录、已有
-终态记录、`outcome.json` 为 `not-submitted`、或没有 raw attempt claim（POST 尚未发出，提交路径仍归
-coordinator）的记录一律跳过。其余任务里 `/queue` 与 `/history/{id}` 都不认识的，durable 写入一条
-`provider_failed:preempted` 判定；之后该任务的 `GET /jobs/{id}` 直接按该判定回答 `failed`，不再询问
-provider。单个任务的 inspect 失败或超过该任务自己的截止时间，都只计入 `unresolved` 并留待下一次重启
-判定，不会中断整轮扫描；caller abort 与停机才结束扫描。扫描结果随监听日志一并输出，每条 unresolved
-另记一行原因。
+`jobStateRoot/jobs/` 下的持久 job record，只对「已提交且未终态」的任务发请求。四类记录一律跳过——
+已有抢占记录 `preempted.json`、已有终态记录 `terminal.json`、`outcome.json` 的 outcome 为
+`not-submitted`（durable 证明从未向 provider 发过请求）、或没有 raw attempt claim `raw-attempt.json`
+（POST 尚未发出，提交路径仍归 coordinator，改写会污染在跑的重试）。其余任务逐条 inspect：观察到终态
+就先写 `terminal.json` 再跳过；观察结果不是 `not-found` 也跳过。因此写入 `provider_failed:preempted`
+判定的三个前置是：有 raw attempt claim、无终态记录、provider 答 `not-found`。判定 durable 写入
+`preempted.json`（含 `requestDigest`、`remoteJobId`、`recordedAt`、`errorSummary` 与响应 digest），
+之后该任务的 `GET /jobs/{id}` 直接按它回答 `failed`，不再询问 provider。单个任务的 inspect 失败或超过
+该任务自己的截止时间，都只计入 `unresolved` 并留待下一次重启判定，不会中断整轮扫描；caller abort 与
+停机才结束扫描。扫描结果随监听日志一并输出，每条 unresolved 另记一行原因。
 
 v0.24+ `/api/jobs/{id}` 只有在只读 feature probe 明确成功时才可作为可选优化：精确 JSON 404 表示
 route supported，404 HTML/不同 envelope 才缓存为 legacy unsupported；401/403/429/5xx、timeout、
@@ -499,6 +509,17 @@ Node 20.11 的全局 WebSocket 需要 `--experimental-websocket`；因此 WS wat
 - handoff digest 使用 `sha256:writing-loop-canonical-json-v1`：UTF-8、无空白、数组保序、对象键按
   Unicode code-unit 顺序递归排序、安全整数；CLI 明确输出算法名与 digest。handoff `createdAt` 不得
   早于所绑定 production revision/approval facts。
+- CLI `production plan-shots --plan|--confirm --project KEY --input FILE --config RUNTIME` 的 `--plan`
+  严格零写入：它只读剧本、视觉清单与 runtime config 声明的只读 execution profile 快照，零远端网络，
+  输出可审批的 `ShotBatchPlan`；`--confirm <batchPlanId>` 重算同一计划后才写 workspace CAS、intent 与
+  task。runtime config 路径与 worker 同为 owner-only 文件，Studio / API / 浏览器都不能提供它。
+- CLI `production qc --approve|--reject --project KEY --task ID --by WHO [--note TEXT]` 只向本地权威
+  ledger 追加 approved / rejected 事件并绑定审批前的 task revision；非 `qc-pending` 的 task 一律拒绝，
+  `--reject` 必须给出 `--note`。它不连接 provider，也不触碰 gateway。
+- CLI `visual approve-candidate --project KEY --candidate ID --by WHO [--reject]` 只原子改写剧本 repo 内
+  `visual/production.v1.json` 的一张候选图的 `status` / `reviewedBy` / `reviewedAt`；不渲染、不连接
+  ComfyUI、不 enqueue 任何制片任务。
+- 以上三条与 `handoff` 都只在 CLI 上，Studio 的 production 面仍是只读投影（GET/HEAD 之外 405）。
 
 ## 9A. 远程部署、H3 与视频 Studio 的真实边界
 
@@ -746,6 +767,7 @@ Gateway router 只委派以下 writing-loop-owned contract；它们不是 ComfyU
 - `PUT|GET /v1/scopes/{workspace}/{project}/jobs/{remoteJobId}` 与 scoped cancellation PUT
 - `PUT /v1/scopes/{workspace}/{project}/ingests/{ingestKey}`
 - `GET|HEAD|PUT /v1/scopes/{workspace}/{project}/assets/sha256/{digest}`
+- `GET /v1/scopes/{workspace}/{project}/capabilities`（唯一没有对象段的 scope 级资源）
 
 Node bridge 只允许 literal private IP；生产 TLS/mTLS、credential issuance、server profile/asset registry、
 durable storage/submission admission backend、raw Comfy/H3 服务与模型供应链 attestation 仍是部署责任。

@@ -708,8 +708,11 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
 - `localAssetSource`（`stagingProfiles` 非空时必填，否则可缺省为 null）exact keys：`version`、
   `kind`、`casAuthority`。`kind` 本版只有 `workspace-cas`：本机 workspace CAS
   （`.writing-loop/<project>/production-cas.v1/sha256/<digest>`）即 `cas://` 输入的正本持有方，
-  路径由装配层按 workspace root 与 project 推出，不写进配置文件。`casAuthority` 必须与 gateway
-  registry 的 `casAuthority` 和 execution profile 快照里的同名字段相等。worker 用它做两件事（§6.4）：
+  路径由装配层按 workspace root 与 project 推出，不写进配置文件。单个 CAS 对象上限 64 MiB
+  （`MAX_PRODUCTION_CAS_OBJECT_BYTES`），其中 ShotRequest 这类文档另有 1 MiB 上限
+  （`MAX_PRODUCTION_CAS_DOCUMENT_BYTES`，与 gateway `assets` 路由的文档上限同值）。
+  `casAuthority` 必须与 gateway registry 的 `casAuthority` 和 execution profile 快照里的同名字段相等。
+  worker 用它做两件事（§6.4）：
   - staging 之前逐个 `cas://` 输入向 gateway `HEAD /v1/scopes/<ws>/<project>/assets/sha256/<digest>`，
     404 即 `PUT` 上传原始字节。上传失败或本机取不到该对象时，该次 stage 直接失败，不带着缺失输入继续。
     上传目标取 `stagingProfiles[].baseUrl`（不是顶层 `gateway.baseUrl`）：对象必须落到解析 `cas://`
