@@ -30,6 +30,8 @@ import {
   type ApplyProductionEventResult,
 } from "./production-store.ts";
 import {
+  PRODUCTION_MODEL_FAMILIES,
+  REQUIRES_SCOPED_STAGING,
   evaluateProductionIntentGates,
   parseProductionDispatchIntent,
   parseProductionIntentGateContext,
@@ -40,6 +42,7 @@ import {
 } from "./production-intent.ts";
 import {
   MAX_COORDINATOR_RETRY_ATTEMPTS,
+  PRODUCTION_ERROR_SUMMARY_PATTERN,
   emptyRetryState,
   parseCoordinatorRemoteObservation,
   type CoordinatorFailure,
@@ -210,8 +213,9 @@ type RunContext = {
 type EventDetail = { type: ProductionTaskEvent["type"] } & Record<string, unknown>;
 
 const SHA256 = /^[a-f0-9]{64}$/;
-const SAFE_BACKEND_ERROR = /^(?:execution_error(?::[A-Za-z_][A-Za-z0-9_.]{0,119})?|execution_interrupted)$/;
-const MODEL_FAMILIES = new Set<ProductionModelFamily>(["generic", "minimax-h3"]);
+// §4.5 errorSummary 词表与 durable observation 解析同源（production-coordinator-domain.ts）。
+const SAFE_BACKEND_ERROR = PRODUCTION_ERROR_SUMMARY_PATTERN;
+const MODEL_FAMILIES = new Set<ProductionModelFamily>(PRODUCTION_MODEL_FAMILIES);
 // Bases that state an amount actually incurred, so the reservation can be settled against it.
 // estimated stays a planning figure and unknown has no amount at all; neither releases exposure.
 const SETTLED_COST_BASES = new Set<ProductionCostBasis>([
@@ -801,7 +805,7 @@ async function dispatchPending(context: RunContext, taskValue: ProductionTask): 
       return;
     }
   } else if (context.options.inputStager === undefined) {
-    if (intent.execution.modelFamily === "minimax-h3"
+    if (REQUIRES_SCOPED_STAGING[intent.execution.modelFamily]
       || context.options.unstagedGenericInputMode !== "static-or-pre-staged") {
       issue(context, task.id, "input-stager-missing");
       return;

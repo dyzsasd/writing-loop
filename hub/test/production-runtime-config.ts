@@ -14,13 +14,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { productionCanonicalJsonSha256 } from "../src/production-canonical-json.ts";
 import { productionWorkflowSha256 } from "../src/production-coordinator.ts";
-import { productionInputBindingsDigest } from "../src/production-input-stager.ts";
+import {
+  productionInputBindingsDigest,
+  type ProductionInputStageResult,
+  type ProductionWorkflowBindingVerification,
+} from "../src/production-input-stager.ts";
 import {
   createProductionDispatchIntent,
   type ProductionDispatchIntent,
   type ProductionIntentExecution,
 } from "../src/production-intent.ts";
+import { SHOT_REQUEST_MEDIA_TYPE } from "../src/production-shot-request.ts";
 import {
   createProductionRuntimeRegistry,
   loadProductionRuntimeConfig,
@@ -229,7 +235,11 @@ const asset = (name: string, digest: string) => ({
   mediaType: "image/png",
 });
 
-function h3Intent(taskId: string, execution: ProductionIntentExecution): ProductionDispatchIntent {
+function h3Intent(
+  taskId: string,
+  execution: ProductionIntentExecution,
+  inputs?: readonly ReturnType<typeof asset>[],
+): ProductionDispatchIntent {
   return createProductionDispatchIntent({
     version: 1,
     taskId,
@@ -246,7 +256,9 @@ function h3Intent(taskId: string, execution: ProductionIntentExecution): Product
     createdAt: "2026-08-10T12:00:00.000Z",
     useTerritories: ["CN"],
     execution,
-    inputs: [asset(`${taskId}-0.png`, "2".repeat(64)), asset(`${taskId}-1.png`, "3".repeat(64))],
+    inputs: inputs === undefined
+      ? [asset(`${taskId}-0.png`, "2".repeat(64)), asset(`${taskId}-1.png`, "3".repeat(64))]
+      : [...inputs],
     budget: { version: 1, currency: "USD", estimatedAmountMicros: 500_000, maximumAmountMicros: 500_000 },
     rights: {
       version: 1,
@@ -435,6 +447,138 @@ function h3Config(): Record<string, unknown> {
         ],
       },
     ],
+    runner: structuredClone(validConfig().runner),
+  };
+}
+
+// —— 云家族 fixture（§4.2 execution 分支；workflow 文件即 execution profile 快照对象） ——
+const SEEDANCE_PROFILE_SNAPSHOT: Record<string, unknown> = {
+  version: 1,
+  kind: "writing-loop/execution-profile",
+  profileId: "seedance-720p-9x16",
+  backendInstanceId: "cloud-gateway",
+  modelFamily: "seedance",
+  resolution: "720p",
+  aspectRatio: "9:16",
+  generateAudio: true,
+};
+const VEO_PROFILE_SNAPSHOT: Record<string, unknown> = {
+  ...SEEDANCE_PROFILE_SNAPSHOT,
+  profileId: "veo-1080p-16x9",
+  modelFamily: "veo",
+  resolution: "1080p",
+  aspectRatio: "16:9",
+};
+const SEEDANCE_EXECUTION: ProductionIntentExecution = {
+  version: 1,
+  operation: "ark-video-task",
+  modelFamily: "seedance",
+  backendInstanceId: "cloud-gateway",
+  workflowSha256: productionWorkflowSha256(SEEDANCE_PROFILE_SNAPSHOT),
+  modelSha256: SHA.model,
+  parametersSha256: SHA.parameters,
+  provider: "byteplus-modelark",
+  modelId: "dreamina-seedance-2-0-260128",
+  resolution: "720p",
+  aspectRatio: "9:16",
+  generateAudio: true,
+  watermark: false,
+  returnLastFrame: true,
+  executionExpiresAfterSeconds: 7_200,
+};
+const VEO_EXECUTION: ProductionIntentExecution = {
+  version: 1,
+  operation: "vertex-veo-lro",
+  modelFamily: "veo",
+  backendInstanceId: "cloud-gateway",
+  workflowSha256: productionWorkflowSha256(VEO_PROFILE_SNAPSHOT),
+  modelSha256: SHA.model,
+  parametersSha256: SHA.parameters,
+  modelId: "veo-3.1-generate-001",
+  location: "us-central1",
+  resolution: "1080p",
+  aspectRatio: "16:9",
+  generateAudio: true,
+  sampleCount: 1,
+  ioMode: "inline-base64",
+};
+/** §6.5：顺序由数组位置隐含，计数区间让同一档 profile 承载 i2v / fl2v / 带参考的镜头。 */
+const CLOUD_SLOT_POLICY = {
+  version: 1,
+  kind: "provider-slot-policy",
+  slots: [
+    { slot: "shot-request", minCount: 1, maxCount: 1 },
+    { slot: "first_frame", minCount: 1, maxCount: 1 },
+    { slot: "last_frame", minCount: 0, maxCount: 1 },
+    { slot: "reference_image", minCount: 0, maxCount: 1 },
+  ],
+};
+
+/** 一份只含单个 workflow 的配置，用于四家族 × graph contract × staging 的接受/拒绝矩阵。 */
+function matrixConfig(
+  family: "generic" | "minimax-h3" | "seedance" | "veo",
+  graphContract: boolean,
+  scopedStaging: boolean,
+): Record<string, unknown> {
+  const execution = family === "minimax-h3"
+    ? { ...structuredClone(H3_FL_EXECUTION), backendInstanceId: "cloud-gateway" }
+    : family === "seedance" ? structuredClone(SEEDANCE_EXECUTION)
+      : family === "veo" ? structuredClone(VEO_EXECUTION)
+        : {
+          version: 1,
+          operation: "comfyui-workflow",
+          modelFamily: "generic",
+          backendInstanceId: "cloud-gateway",
+          workflowSha256,
+          modelSha256: SHA.model,
+          parametersSha256: SHA.parameters,
+        } as unknown as ProductionIntentExecution;
+  const bindings = family === "minimax-h3"
+    ? structuredClone(((h3Config().stagingProfiles as Record<string, unknown>[])[0]!).bindings)
+    : structuredClone(CLOUD_SLOT_POLICY);
+  return {
+    version: 1,
+    workspaceId: WORKSPACE_ID,
+    projects: [{
+      version: 1,
+      project: "demo",
+      enabled: true,
+      backendInstanceIds: ["cloud-gateway"],
+      deploymentTerritories: ["SG"],
+      availableBudgetMicros: 2_000_000,
+    }],
+    backends: [{
+      version: 1,
+      backendInstanceId: "cloud-gateway",
+      kind: "production-gateway",
+      baseUrl: "https://jobs.internal.example/cloud",
+      credentialEnv: "PRODUCTION_JOB_GATEWAY_TOKEN",
+      profileId: "matrix-profile",
+    }],
+    gateway: structuredClone(validConfig().gateway),
+    workflows: [{
+      version: 1,
+      backendInstanceId: execution.backendInstanceId,
+      workflowSha256: execution.workflowSha256,
+      modelFamily: family,
+      modelSha256: execution.modelSha256,
+      parametersSha256: execution.parametersSha256,
+      projects: ["demo"],
+      inputPolicy: scopedStaging ? "scoped-staging" : "static-pre-staged",
+      stagingProfileId: scopedStaging ? "matrix-profile" : null,
+      h3GraphContract: graphContract ? structuredClone(H3_FL_CONTRACT) : null,
+      file: "workflows/matrix.json",
+    }],
+    stagingProfiles: scopedStaging
+      ? [{
+        version: 1,
+        profileId: "matrix-profile",
+        baseUrl: "https://stages.internal.example/cloud",
+        credentialEnv: "PRODUCTION_STAGE_TOKEN",
+        execution,
+        bindings,
+      }]
+      : [],
     runner: structuredClone(validConfig().runner),
   };
 }
@@ -972,7 +1116,9 @@ try {
   "H3 source links reject wrong output index, tuple arity and numeric lookalikes");
 
   const parsedH3 = parseProductionRuntimeConfig(h3Config());
-  const flStageContracts = parsedH3.stagingProfiles[0]!.bindings;
+  const flStageBindings = parsedH3.stagingProfiles[0]!.bindings;
+  if (flStageBindings.kind !== "h3-graph-bindings") throw new Error("H3 profile 必须声明 LoadImage 绑定契约");
+  const flStageContracts = flStageBindings.bindings;
   const baseParameterDigest = productionH3ParameterManifestSha256(
     H3_FL_WORKFLOW, H3_FL_CONTRACT, H3_FL_EXECUTION,
   );
@@ -1195,6 +1341,189 @@ try {
   }), "workflow-unreadable") && mutatedDuringWorkflowRead,
   "same-inode workflow mutation is rejected by exact descriptor/path revalidation");
   writeFileSync(workflowFile, workflowText, { mode: 0o600 });
+
+  // —— 四家族 × graph contract 有/无 × scoped staging 有/无 的接受矩阵（§8.6 家族表） ——
+  const families = ["generic", "minimax-h3", "seedance", "veo"] as const;
+  for (const family of families) {
+    for (const graphContract of [false, true]) {
+      for (const scopedStaging of [false, true]) {
+        // generic 只接受静态 pinned 输入且必须 h3GraphContract: null；H3 两者皆必需；
+        // 云家族必须 scoped-staging 且 h3GraphContract: null。
+        const accepted = family === "generic"
+          ? !graphContract && !scopedStaging
+          : family === "minimax-h3" ? graphContract && scopedStaging : !graphContract && scopedStaging;
+        const label = `${family} × contract=${graphContract} × scoped=${scopedStaging}`;
+        const config = matrixConfig(family, graphContract, scopedStaging);
+        if (accepted) {
+          const parsed = parseProductionRuntimeConfig(config);
+          ok(parsed.workflows[0]?.modelFamily === family
+            && (parsed.workflows[0]?.h3GraphContract === null) !== (family === "minimax-h3"),
+          `parseWorkflow 接受 ${label}`);
+        } else {
+          ok(configError(() => parseProductionRuntimeConfig(config), "config-invalid-schema"),
+            `parseWorkflow 拒绝 ${label}`);
+        }
+      }
+    }
+  }
+
+  // —— 云家族 staging profile 的 slotPolicy 解析 ——
+  const seedanceConfig = matrixConfig("seedance", false, true);
+  const parsedSeedanceConfig = parseProductionRuntimeConfig(seedanceConfig);
+  const seedanceBindings = parsedSeedanceConfig.stagingProfiles[0]!.bindings;
+  ok(seedanceBindings.kind === "provider-slot-policy"
+    && seedanceBindings.slots.map((slot) => `${slot.slot}:${slot.minCount}-${slot.maxCount}`).join(",")
+      === "shot-request:1-1,first_frame:1-1,last_frame:0-1,reference_image:0-1",
+  "云家族 staging profile 解析为 slotPolicy 判别分支（slot + 计数区间，顺序即输入顺序）");
+  const brokenSlots = (mutate: (slots: Record<string, unknown>[]) => unknown): Record<string, unknown> => {
+    const config = matrixConfig("seedance", false, true);
+    const profile = (config.stagingProfiles as Record<string, unknown>[])[0]!;
+    const policy = profile.bindings as Record<string, unknown>;
+    policy.slots = mutate(structuredClone(policy.slots) as Record<string, unknown>[]);
+    return config;
+  };
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots((slots) => [...slots].reverse())),
+    "config-invalid-schema"), "slotPolicy 拒绝 slot 乱序");
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots(() => [
+    { slot: "first_frame", minCount: 1, maxCount: 1 }, { slot: "shot-request", minCount: 1, maxCount: 1 },
+  ])), "config-invalid-schema"), "slotPolicy 拒绝 inputs[0] 不是 shot-request");
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots((slots) => [
+    slots[0]!, { slot: "style_image", minCount: 0, maxCount: 1 },
+  ])), "config-invalid-schema"), "slotPolicy 拒绝词表外 slot");
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots(() => [
+    { slot: "shot-request", minCount: 0, maxCount: 1 },
+  ])), "config-invalid-schema"), "slotPolicy 拒绝 shot-request 计数区间不是 [1,1]");
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots((slots) => [
+    slots[0]!, { slot: "first_frame", minCount: 0, maxCount: 2 },
+  ])), "config-invalid-schema"), "slotPolicy 拒绝单例 slot 的 maxCount > 1");
+  ok(configError(() => parseProductionRuntimeConfig(brokenSlots((slots) => [
+    slots[0]!, { slot: "reference_image", minCount: 2, maxCount: 1 },
+  ])), "config-invalid-schema"), "slotPolicy 拒绝空计数区间（minCount > maxCount）");
+  const arrayBindings = matrixConfig("seedance", false, true);
+  ((arrayBindings.stagingProfiles as Record<string, unknown>[])[0]!).bindings =
+    structuredClone(((h3Config().stagingProfiles as Record<string, unknown>[])[0]!).bindings);
+  ok(configError(() => parseProductionRuntimeConfig(arrayBindings), "config-invalid-schema"),
+  "云家族不接受 H3 的 LoadImage 绑定契约形态");
+  const h3SlotPolicy = h3Config();
+  ((h3SlotPolicy.stagingProfiles as Record<string, unknown>[])[0]!).bindings = structuredClone(CLOUD_SLOT_POLICY);
+  ok(configError(() => parseProductionRuntimeConfig(h3SlotPolicy), "config-invalid-schema"),
+  "H3 不接受 slotPolicy 形态");
+  const genericProfile = matrixConfig("generic", false, true);
+  ok(configError(() => parseProductionRuntimeConfig(genericProfile), "config-invalid-schema"),
+  "generic execution 不得注册 staging profile");
+
+  // —— 云家族的 binding verifier：template == bound，只核对 staged slot 与 slotPolicy ——
+  const cloudConfigFile = join(runtimeDirectory, "cloud-runtime.json");
+  const cloudWorkflowFile = join(workflowDirectory, "matrix.json");
+  writeFileSync(cloudWorkflowFile, `${JSON.stringify(SEEDANCE_PROFILE_SNAPSHOT, null, 2)}\n`, { mode: 0o600 });
+  writeFileSync(cloudConfigFile, `${JSON.stringify(seedanceConfig, null, 2)}\n`, { mode: 0o600 });
+  let cloudStagedSlots = ["shot-request", "first_frame"];
+  const cloudRegistry = createProductionRuntimeRegistry({
+    root,
+    configFile: cloudConfigFile,
+    env: {
+      PRODUCTION_JOB_GATEWAY_TOKEN: "server-job-gateway-secret",
+      PRODUCTION_GATEWAY_TOKEN: "server-gateway-secret",
+      PRODUCTION_STAGE_TOKEN: "server-stage-secret",
+    },
+    stagingFetchByProfile: {
+      "matrix-profile": async (_input, init) => {
+        const request = JSON.parse(String(init?.body)) as {
+          stageKey: string;
+          inputs: Array<{ index: number; asset: { sha256: string } }>;
+        };
+        const bindings = request.inputs.map((entry, index) => ({
+          index,
+          slot: cloudStagedSlots[index]!,
+          assetSha256: entry.asset.sha256,
+          providerObjectKey: `staged/cloud-${index}.bin`,
+        }));
+        return new Response(JSON.stringify({
+          version: 1,
+          stageKey: request.stageKey,
+          bindingsDigest: productionInputBindingsDigest(bindings),
+          bindings,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    },
+    gatewayFetch: async () => { throw new Error("assembly must not ingest"); },
+  });
+  const cloudInputs = [
+    { ...asset("take-seedance-shot.json", "7".repeat(64)), mediaType: SHOT_REQUEST_MEDIA_TYPE },
+    asset("take-seedance-first.png", "8".repeat(64)),
+    asset("take-seedance-second.png", "9".repeat(64)),
+    asset("take-seedance-third.png", "a".repeat(64)),
+  ];
+  const cloudIntent = h3Intent("take-seedance", SEEDANCE_EXECUTION, cloudInputs.slice(0, 2));
+  const cloudPipeline = await cloudRegistry.projects[0]!.inputPipelineResolver.resolve(cloudIntent);
+  const cloudDescriptor = await cloudRegistry.projects[0]!.workflowResolver.resolve(cloudIntent);
+  if (cloudPipeline?.policy !== "scoped-staging" || cloudDescriptor === null) {
+    throw new Error("seedance fixture did not resolve a scoped staging pipeline");
+  }
+  ok(cloudDescriptor.modelFamily === "seedance",
+  "云家族注册的 workflow 就是 execution profile 快照对象，按 digest 校验后直通");
+  // 通过路径：经真实 stager 取回执照，再交 verifier。
+  const verifyStaged = async (
+    inputCount: number,
+    slots: readonly string[],
+  ): Promise<ProductionWorkflowBindingVerification> => {
+    cloudStagedSlots = [...slots];
+    const intent = h3Intent(`take-seedance-${slots.join("-")}`, SEEDANCE_EXECUTION, cloudInputs.slice(0, inputCount));
+    const staged = await cloudPipeline.inputStager.stage(intent);
+    return cloudPipeline.workflowBindingVerifier.verify(intent, cloudDescriptor.workflow, staged);
+  };
+  const i2vProof = await verifyStaged(2, ["shot-request", "first_frame"]);
+  ok(i2vProof.verified
+    && i2vProof.templateWorkflowSha256 === SEEDANCE_EXECUTION.workflowSha256
+    && i2vProof.boundWorkflowSha256 === i2vProof.templateWorkflowSha256
+    && JSON.stringify(i2vProof.workflow) === JSON.stringify(SEEDANCE_PROFILE_SNAPSHOT),
+  "i2v 镜头（无尾帧）通过同一 seedance staging profile：template == bound，profile 快照原样返回");
+  const fl2vProof = await verifyStaged(3, ["shot-request", "first_frame", "last_frame"]);
+  ok(fl2vProof.verified && fl2vProof.boundWorkflowSha256 === fl2vProof.templateWorkflowSha256,
+  "fl2v 镜头（带尾帧）通过同一 seedance staging profile，无需另建 profile 档");
+  cloudStagedSlots = ["shot-request", "first_frame"];
+
+  // 拒绝路径直接构造 stage receipt：重复 slot 名在 stage 契约 v1 里取不到（receipt 要求 slot 唯一，
+  // 带序号的 slot 名随 1b 的 stage 契约 v2 落地），因此这里只驱动 verifier 自身的顺序与计数判据。
+  const handStaged = (slots: readonly string[]): ProductionInputStageResult => {
+    const bindings = slots.map((slot, index) => ({
+      index,
+      slot,
+      assetSha256: String(index + 1).repeat(64),
+      providerObjectKey: `staged/cloud-${index}.bin`,
+    }));
+    return {
+      version: 1,
+      stageKey: "b".repeat(64),
+      bindingsDigest: productionInputBindingsDigest(bindings),
+      bindings,
+    };
+  };
+  const verifierRejects = async (slots: readonly string[]): Promise<boolean> => {
+    try {
+      await cloudPipeline.workflowBindingVerifier.verify(cloudIntent, cloudDescriptor.workflow, handStaged(slots));
+      return false;
+    } catch (error) { return error instanceof ProductionRuntimeConfigError; }
+  };
+  ok(await verifierRejects(["shot-request", "first_frame", "reference_image", "reference_image"]),
+  "staged slot 超过 slotPolicy 的 maxCount 时 verifier 拒绝");
+  ok(await verifierRejects(["shot-request", "last_frame"]),
+  "staged slot 缺 minCount 要求的 first_frame 时 verifier 拒绝");
+  ok(await verifierRejects(["shot-request", "last_frame", "first_frame"]),
+  "staged slot 违反 slotPolicy 顺序时 verifier 拒绝");
+
+  // —— 既有 H3 fixture 的解析结果钉字节 ——
+  // 两个常量取自本 fixture 当次解析结果的 canonical JSON sha256（h3Config() → parseProductionRuntimeConfig
+  // 后对 workflows 与 stagingProfiles[0].execution 取值）。解析层改动只要动到旧 H3 配置的读出结果，
+  // 这两条就会失败。
+  const H3_WORKFLOWS_DIGEST = "b18bee6a93c6c9ce4271dfd3ec638ad083bbab9051f2f2d3958d9d70dd797c19";
+  const H3_EXECUTION_DIGEST = "bddd0f0b5bdebe83a43e085c1a7bc77f12f0f5ccd80d1acafe9076e9879ceff3";
+  const h3Reparsed = parseProductionRuntimeConfig(h3Config());
+  ok(productionCanonicalJsonSha256(h3Reparsed.workflows) === H3_WORKFLOWS_DIGEST
+    && productionCanonicalJsonSha256(h3Reparsed.stagingProfiles[0]!.execution) === H3_EXECUTION_DIGEST
+    && JSON.stringify(h3Reparsed.workflows) === JSON.stringify(parsedH3.workflows)
+    && h3Reparsed.stagingProfiles[0]!.bindings.kind === "h3-graph-bindings",
+  "旧 H3 runtime fixture（数组形 bindings）的解析结果钉字节不变");
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

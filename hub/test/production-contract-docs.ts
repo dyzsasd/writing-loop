@@ -75,7 +75,8 @@ if (runtimeFixtureMatch) {
     const runtime = parseProductionRuntimeConfig(JSON.parse(runtimeFixtureMatch[1]));
     const workflow = runtime.workflows[0];
     const graph = workflow?.h3GraphContract;
-    const binding = runtime.stagingProfiles[0]?.bindings[0];
+    const profileBindings = runtime.stagingProfiles[0]?.bindings;
+    const binding = profileBindings?.kind === "h3-graph-bindings" ? profileBindings.bindings[0] : undefined;
     ok(runtime.projects[0]?.project === "drama-a"
       && runtime.backends[0]?.kind === "production-gateway"
       && workflow?.inputPolicy === "scoped-staging"

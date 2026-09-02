@@ -10,6 +10,7 @@
 // 本版（Phase 0）唯一可执行后端是 MiniMax H3 over ComfyUI：只有 minimax-h3 家族能产出 intentDraft，
 // seedance / veo 两个家族只到编译校验层（production-intent.ts 的 execution 分支随 Phase 3 / Phase 4 落地）。
 import { productionCanonicalJson, productionCanonicalJsonSha256 } from "./production-canonical-json.ts";
+import type { BackendKind, ShotCompileCapability, VideoBackendLimits } from "./production-adapter.ts";
 import {
   MAX_PRODUCTION_TEXT_LENGTH,
   ProductionError,
@@ -140,8 +141,9 @@ export type ShotValidationCode = typeof SHOT_VALIDATION_CODES[number];
 export const SHOT_MODEL_FAMILIES = ["minimax-h3", "seedance", "veo"] as const;
 export type ShotModelFamily = typeof SHOT_MODEL_FAMILIES[number];
 
-export const SHOT_BACKEND_KINDS = ["comfyui", "volcengine-ark", "byteplus-modelark", "vertex-veo"] as const;
-export type ShotBackendKind = typeof SHOT_BACKEND_KINDS[number];
+/** 后端形态词表的单一来源在 production-adapter.ts（§4.3 的 BackendKind）。 */
+export { BACKEND_KINDS as SHOT_BACKEND_KINDS } from "./production-adapter.ts";
+export type ShotBackendKind = BackendKind;
 
 /**
  * provider 文本指令：Ark 的弱校验传参写在 prompt 尾部（--rs/--rt/--dur/…）。词表随 provider 变动，
@@ -365,54 +367,9 @@ export type ValidationReport = {
   warnings: number;
 };
 
-// —— §4.3 capability（编译器消费的子集，逐字沿用字段名） ——
-export type VideoBackendLimits = {
-  modes: readonly VideoMode[];
-  durationSeconds: {
-    min: number;
-    max: number;
-    grid: readonly number[] | null;
-    gridByResolution: Readonly<Record<string, readonly number[]>> | null;
-  };
-  aspectRatios: readonly string[];
-  resolutions: readonly string[];
-  maxReferenceImages: number;
-  maxReferenceVideos: number;
-  maxReferenceAudios: number;
-  maxStyleImages: number;
-  maxReferenceAssetsTotal: number | null;
-  audioOnlyReference: boolean;
-  keyframesAndReferencesExclusive: true;
-  seed: "unsupported" | "uint32" | "uint32-best-effort" | "int32";
-  /** null = 无限制；Veo 为 ["en"]。 */
-  promptLanguages: readonly string[] | null;
-  promptDirectiveSyntax: "ark-text-flags" | null;
-  nativeAudio: {
-    status: "supported" | "unsupported" | "unverified";
-    channels: "mono" | "stereo" | null;
-    verifiedBy: {
-      modelId: string;
-      probeRemoteJobId: string;
-      providerJobId: string | null;
-      at: string;
-      hasAudio: boolean;
-    } | null;
-  };
-  returnsLastFrame: boolean;
-  maxInputImageBytes: number;
-  inputImageMediaTypes: readonly string[];
-  realFaceReferences: "forbidden" | "allowed";
-};
-
-export type ShotCompileCapability = {
-  backendKind: ShotBackendKind;
-  backendInstanceId: string;
-  modelFamilies: readonly ShotModelFamily[];
-  /** ISO-3166 alpha-2：cn-beijing→CN、ap-southeast-1→SG、us-central1→US。 */
-  processingRegions: readonly string[];
-  /** 按 modelId 索引；H3 以 profileId 为键（§4.3）。 */
-  limitsByModelId: Readonly<Record<string, VideoBackendLimits>>;
-};
+// —— §4.3 capability ——
+// 类型定义已合入 production-adapter.ts（0-D）。编译器侧保持同名导出，导入方不变。
+export type { ShotCompileCapability, VideoBackendLimits };
 
 // —— execution profile（gateway server-owned registry 的只读快照形态，§4.2） ——
 type ShotExecutionProfileBase = {

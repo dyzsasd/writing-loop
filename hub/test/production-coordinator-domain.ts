@@ -142,6 +142,43 @@ ok(throwsProduction(() => parseCoordinatorRemoteObservation({
   ...observation, outputs: Array.from({ length: MAX_COORDINATOR_OUTPUTS + 1 }, () => observation.outputs[0]),
 }), `最多 ${MAX_COORDINATOR_OUTPUTS}`), "lastObservation 在逐项解析前执行 output 数量上限");
 
+// —— §4.5 locator 按 source 分支（缺省即 comfy-view）与 errorSummary 词表 ——
+const comfyLocator = {
+  nodeId: "9", kind: "video", filename: "take.mp4", subfolder: "episode-1", folderType: "output",
+};
+const withSource = parseCoordinatorRemoteObservation({
+  ...observation, outputs: [{ source: "comfy-view", ...comfyLocator }],
+});
+ok(JSON.stringify(withSource.outputs) === JSON.stringify(observation.outputs)
+  && !Object.prototype.hasOwnProperty.call(withSource.outputs[0]!, "source"),
+"source: comfy-view 与缺省读法一致，归一化后 durable 字节逐字不变");
+ok(throwsProduction(() => parseCoordinatorRemoteObservation({
+  ...observation,
+  outputs: [{ source: "provider-output", remoteJobId: "job-1", outputIndex: 0, role: "primary", kind: "video" }],
+}), "openOutput 取回路径尚未装配"),
+"provider-output locator 在 ingest kernel 装配前 fail-closed 拒绝进入 durable observation");
+ok(throwsProduction(() => parseCoordinatorRemoteObservation({
+  ...observation, outputs: [{ source: "gcs", ...comfyLocator }],
+}), "必须是 comfy-view 或 provider-output"), "未知 locator source 被拒绝");
+ok(throwsProduction(() => parseCoordinatorRemoteObservation({
+  ...observation, outputs: [{ ...comfyLocator, source: "comfy-view", extra: 1 }],
+}), "含不支持字段"), "带 source 的 comfy-view locator 仍执行 exactKeys");
+
+const failedWith = (errorSummary: string): unknown =>
+  ({ ...observation, state: "failed", outputs: [], errorSummary });
+for (const summary of [
+  "provider_failed:preempted", "provider_failed:InvalidParameter.TaskTypeConstraint", "provider_failed",
+  "provider_expired", "content_filtered", "quota_exceeded", "invalid_input", "output_expired",
+  "execution_error:torch.OutOfMemoryError", "execution_interrupted",
+]) {
+  const parsed = parseCoordinatorRemoteObservation(failedWith(summary));
+  ok(parsed.errorSummary === summary, `errorSummary 词表接受 ${summary}`);
+}
+for (const summary of ["provider_failed:", "provider_crashed", "preempted", "provider_failed:超时"]) {
+  ok(throwsProduction(() => parseCoordinatorRemoteObservation(failedWith(summary)), "安全稳定类别"),
+    `errorSummary 词表拒绝 ${JSON.stringify(summary)}`);
+}
+
 const empty = emptyProductionCoordinatorControlState(WS, PROJECT);
 ok(throwsProduction(() => nextProductionCoordinatorControlState(empty, [{
   ...control(),

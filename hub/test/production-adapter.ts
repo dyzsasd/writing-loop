@@ -1,8 +1,10 @@
 // ComfyUI adapter contract: bounded protocol parsing, conservative submit ambiguity and safe cancel.
 import { createHash } from "node:crypto";
 import {
-  ComfyUiAdapter, ProductionAdapterError, type FetchLike, type ProductionAdapterErrorCode,
+  COMFY_H3_ASPECT_RATIOS, ComfyUiAdapter, ProductionAdapterError,
+  type FetchLike, type ProductionAdapterErrorCode,
 } from "../src/production-adapter.ts";
+import { H3_ASPECT_RATIOS } from "../src/production-intent.ts";
 
 let fails = 0;
 const ok = (condition: boolean, message: string): void => {
@@ -539,6 +541,80 @@ for (const [queueKey, expected] of [["queue_running", "running"], ["queue_pendin
   }), "remote-rejected") && mock.calls.length === 0,
   "ComfyUI submit 只接受已持久化 canonical UUID remoteJobId");
 }
+
+// —— §4.3 capability：H3 档由配置 profile 集合提供，processingRegions 由构造参数注入 ——
+{
+  const client = adapter(sequence([]).fetch, {
+    processingRegions: ["SG"],
+    maxInputImageBytes: 30 * 1024 * 1024,
+    h3Profiles: [
+      { profileId: "h3-9x16-8s", variant: "fl2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 1 },
+      { profileId: "h3-9x16-5s", variant: "fl2va", durationSeconds: 5, aspectRatio: "9:16", graphContractVersion: 1 },
+      { profileId: "h3-16x9-8s", variant: "fl2va", durationSeconds: 8, aspectRatio: "16:9", graphContractVersion: 1 },
+      { profileId: "h3-9x16-8s-ref", variant: "ref2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 2 },
+    ],
+  });
+  const caps = await client.capabilities();
+  const fl = caps.limitsByModelId?.["h3-9x16-8s"];
+  const ref = caps.limitsByModelId?.["h3-9x16-8s-ref"];
+  const landscape = caps.limitsByModelId?.["h3-16x9-8s"];
+  ok(caps.processingRegions?.join(",") === "SG" && caps.providerJobIdMapping === "none"
+    && caps.modelFamilies?.join(",") === "generic,minimax-h3",
+  "capability 投影注入的处理地域、provider ID 映射与已配置家族");
+  ok(Object.keys(caps.limitsByModelId ?? {}).sort().join(",")
+    === "h3-16x9-8s,h3-9x16-5s,h3-9x16-8s,h3-9x16-8s-ref",
+  "limitsByModelId 以 profileId 为键，逐档一条");
+  ok(fl?.durationSeconds.grid?.join(",") === "5,8" && fl.durationSeconds.min === 5 && fl.durationSeconds.max === 8
+    && landscape?.durationSeconds.grid?.join(",") === "8",
+  "时长网格 = 同 (variant, aspectRatio) 下已配置的时长档");
+  ok(fl?.seed === "unsupported" && ref?.seed === "uint32",
+  "seed 能力按 graph 契约版本声明：v1 的 seed 固定在 pinned graph 内，v2 才逐镜可复现");
+  ok(fl?.modes.join(",") === "i2v,fl2v" && ref?.modes.join(",") === "ref2v"
+    && fl?.maxReferenceImages === 0 && ref?.maxReferenceImages === 9
+    && fl?.aspectRatios.join(",") === "9:16" && fl?.resolutions.join(",") === "768p"
+    && fl?.nativeAudio.status === "supported" && fl?.nativeAudio.channels === "stereo"
+    && fl?.returnsLastFrame === false && fl?.outputRetention.kind === "comfy-history"
+    && fl?.maxInputImageBytes === 30 * 1024 * 1024,
+  "H3 契约事实：fl2va/ref2va 的模式与参考上限、短边 768、立体声原生音频、尾帧不回传");
+}
+{
+  const caps = await adapter(sequence([]).fetch).capabilities();
+  ok(caps.modelFamilies?.join(",") === "generic" && Object.keys(caps.limitsByModelId ?? {}).length === 0
+    && caps.processingRegions?.length === 0,
+  "未注入 H3 档的 raw ComfyUI 只声明 generic，limits 与处理地域为空（下游 fail-closed）");
+}
+for (const [label, extra] of [
+  ["缺 maxInputImageBytes", {
+    h3Profiles: [{ profileId: "p", variant: "fl2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 1 }],
+  }],
+  ["重复 profileId", {
+    maxInputImageBytes: 4_096,
+    h3Profiles: [
+      { profileId: "p", variant: "fl2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 1 },
+      { profileId: "p", variant: "ref2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 1 },
+    ],
+  }],
+  ["非 alpha-2 处理地域", { processingRegions: ["EU"] }],
+  ["词表外画幅", {
+    maxInputImageBytes: 4_096,
+    h3Profiles: [{ profileId: "p", variant: "fl2va", durationSeconds: 8, aspectRatio: "21:9", graphContractVersion: 1 }],
+  }],
+  ["未知 graph 契约版本", {
+    maxInputImageBytes: 4_096,
+    h3Profiles: [{ profileId: "p", variant: "fl2va", durationSeconds: 8, aspectRatio: "9:16", graphContractVersion: 3 }],
+  }],
+] as const) {
+  try {
+    adapter(sequence([]).fetch, extra as Partial<ConstructorParameters<typeof ComfyUiAdapter>[0]>);
+    ok(false, `capability 构造参数拒绝：${label}`);
+  } catch (error) {
+    ok(error instanceof ProductionAdapterError && error.code === "remote-rejected",
+      `capability 构造参数拒绝：${label}`);
+  }
+}
+
+ok(COMFY_H3_ASPECT_RATIOS.join(",") === H3_ASPECT_RATIOS.join(","),
+"capability 侧的 H3 画幅副本与 production-intent.ts 的 H3_ASPECT_RATIOS 保持同步");
 
 console.log(fails === 0 ? "\nPRODUCTION_ADAPTER_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

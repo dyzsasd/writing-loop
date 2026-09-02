@@ -27,6 +27,7 @@ import {
   type AssetRef,
   type ProductionSubjectRef,
 } from "./production-domain.ts";
+import { NON_ISO_PROCESSING_REGIONS } from "./production-adapter.ts";
 // 只在 parseInputs 内取值：production-shot-request.ts 反向依赖本模块，模块顶层引用会落进 TDZ。
 import { SHOT_REQUEST_MEDIA_TYPE } from "./production-shot-request.ts";
 import { assertProjectKey } from "./workspace.ts";
@@ -353,8 +354,6 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TERRITORY = /^(?:[A-Z]{2}|WORLDWIDE)$/;
 const PROCESSING_REGION = /^[A-Z]{2}$/;
-/** 形如 alpha-2 但不指向单一处理地：EU 是成员国集合，UK 不是 ISO-3166 代码（GB 才是）。 */
-const NON_ISO_PROCESSING_REGIONS = new Set(["EU", "UK"]);
 const RIGHTS_STATUSES = new Set(["cleared", "unknown", "expired", "blocked"]);
 const MODERATION_STATUSES = new Set(["passed", "not-reviewed", "failed"]);
 const LICENSE_STATUSES = new Set(["verified", "unknown", "blocked"]);
@@ -496,6 +495,17 @@ const FAMILIES_REQUIRING_SHOT_REQUEST_INPUT: Readonly<Record<ProductionModelFami
 const FAMILIES_REQUIRING_PROCESSING_REGIONS: Readonly<Record<ProductionModelFamily, boolean>> = {
   generic: false,
   "minimax-h3": false,
+  seedance: true,
+  veo: true,
+};
+
+/**
+ * 逐镜可变的输入必须经 scoped staging 边界登记；generic 的图是静态 pinned 输入（§8.6 家族表）。
+ * coordinator 的 dispatch 判定与 runtime config 的 workflow / staging profile 校验共用这一份。
+ */
+export const REQUIRES_SCOPED_STAGING: Readonly<Record<ProductionModelFamily, boolean>> = {
+  generic: false,
+  "minimax-h3": true,
   seedance: true,
   veo: true,
 };

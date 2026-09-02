@@ -111,7 +111,23 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_WORKSPACE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SAFE_PROJECT_KEY = /^[a-z0-9][a-z0-9._-]{0,31}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const SAFE_ERROR_SUMMARY = /^(?:execution_error(?::[A-Za-z_][A-Za-z0-9_.]{0,119})?|execution_interrupted)$/;
+/**
+ * §4.5 errorSummary 词表：只允许稳定类别，禁止 provider 消息 / URL / token / traceback / 输入原文。
+ * `provider_failed:<code>` 承载 GPU VM 抢占（`provider_failed:preempted`，§7）与 Ark 的错误码。
+ * production-coordinator.ts 直接引用该模式，两处判据同源。
+ */
+const ERROR_SUMMARY_ALTERNATIVES = [
+  "execution_error(?::[A-Za-z_][A-Za-z0-9_.]{0,119})?",
+  "execution_interrupted",
+  "provider_failed(?::[A-Za-z0-9_.-]{1,64})?",
+  "provider_expired",
+  "content_filtered",
+  "quota_exceeded",
+  "invalid_input",
+  "output_expired",
+];
+export const PRODUCTION_ERROR_SUMMARY_PATTERN = new RegExp(`^(?:${ERROR_SUMMARY_ALTERNATIVES.join("|")})$`);
+const SAFE_ERROR_SUMMARY = PRODUCTION_ERROR_SUMMARY_PATTERN;
 const REMOTE_STATES = new Set<RemoteJobState>([
   "pending", "running", "succeeded", "failed", "cancelled", "not-found",
 ]);
@@ -298,13 +314,27 @@ export function parseCancelAttempt(value: unknown, subject = "CancelAttempt"): C
 
 function parseOutput(value: unknown, subject: string): RemoteOutputLocator {
   const row = record(value, subject);
-  exactKeys(row, ["nodeId", "kind", "filename", "subfolder", "folderType"], subject);
+  // §4.5 的 locator 联合按 source 分支；缺少 source 时按 comfy-view 读取。provider-output 的取回要走
+  // adapter 的 openOutput，ingest kernel 收敛到该联合前（§8.6 的 production-gateway.ts /
+  // production-ingestor.ts 行）durable observation 不接受它——登记一条取不回的产物只会造成滞留任务。
+  const source = Object.prototype.hasOwnProperty.call(row, "source") ? row.source : "comfy-view";
+  if (source === "provider-output") {
+    fail(`${subject}.source`, "provider-output locator 的 openOutput 取回路径尚未装配，durable observation 暂不接受");
+  }
+  if (source !== "comfy-view") fail(`${subject}.source`, "必须是 comfy-view 或 provider-output");
+  const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
+  exactKeys(
+    row,
+    Object.prototype.hasOwnProperty.call(row, "source") ? ["source", ...comfyKeys] : comfyKeys,
+    subject,
+  );
   if (typeof row.kind !== "string" || !OUTPUT_KINDS.has(row.kind as RemoteOutputLocator["kind"])) {
     fail(`${subject}.kind`, "不是受支持的 output kind");
   }
   if (typeof row.folderType !== "string" || !OUTPUT_FOLDERS.has(row.folderType as RemoteOutputLocator["folderType"])) {
     fail(`${subject}.folderType`, "必须是 input、output 或 temp");
   }
+  // 归一化时不落 source：durable 记录与 ingest 请求体的 exactKeys 仍是固定五字段，提前写入会被拒。
   return {
     nodeId: identifier(row.nodeId, `${subject}.nodeId`),
     kind: row.kind as RemoteOutputLocator["kind"],

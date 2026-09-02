@@ -1,6 +1,10 @@
 // Server-side production backend boundary. The browser never receives backend endpoints or
 // credentials; adapters exchange stable remote IDs and bounded DTOs only.
 import { createHash, randomUUID } from "node:crypto";
+// Type-only on purpose: this module stays a runtime leaf (node:crypto only), so the shot-request /
+// intent vocabularies can name capability fields without joining their import cycle.
+import type { H3AspectRatio, H3Variant, ProductionModelFamily } from "./production-intent.ts";
+import type { ShotModelFamily, VideoMode } from "./production-shot-request.ts";
 
 export type ProductionAdapterErrorCode =
   | "aborted"
@@ -28,18 +32,100 @@ export class ProductionAdapterError extends Error {
   }
 }
 
+/**
+ * 处理地域只接受 ISO-3166 alpha-2 成员国代码：集合别名 EU、非标准码 UK 在解析层拒绝，WORLDWIDE 被
+ * 二位码形态排除（§4.7）。capability 与 intent gate 共用该判据。
+ */
+export const NON_ISO_PROCESSING_REGIONS: ReadonlySet<string> = new Set(["EU", "UK"]);
+
+/**
+ * H3 契约的画幅词表（§5.3）。本模块是运行时叶子，不能从 production-intent.ts 值导入，故在此保留一份；
+ * hub/test/production-adapter.ts 有与 `H3_ASPECT_RATIOS` 相等的同步用例钉住两者。
+ */
+export const COMFY_H3_ASPECT_RATIOS = ["9:16", "16:9", "1:1"] as const;
+
+/** §4.3 后端形态。`ShotBackendKind` 是同一词表在编译器侧的别名。 */
+export const BACKEND_KINDS = ["comfyui", "volcengine-ark", "byteplus-modelark", "vertex-veo"] as const;
+export type BackendKind = typeof BACKEND_KINDS[number];
+
+/** 取回窗口：provider URL 有过期秒数，comfy 的 /history 随进程重启清空（§3、§4.3）。 */
+export type VideoOutputRetention =
+  | { kind: "provider-url"; seconds: number }
+  | { kind: "gcs-object" }
+  | { kind: "inline-spool" }
+  | { kind: "comfy-history"; bounded: true };
+
+/** §4.3 逐 modelId 的能力上限（H3 以 profileId 为键）。编译器只读该结构裁定镜头级差异。 */
+export type VideoBackendLimits = {
+  modes: readonly VideoMode[];
+  durationSeconds: {
+    min: number;
+    max: number;
+    grid: readonly number[] | null;
+    gridByResolution: Readonly<Record<string, readonly number[]>> | null;
+  };
+  aspectRatios: readonly string[];
+  resolutions: readonly string[];
+  maxReferenceImages: number;
+  maxReferenceVideos: number;
+  maxReferenceAudios: number;
+  maxStyleImages: number;
+  maxReferenceAssetsTotal: number | null;
+  audioOnlyReference: boolean;
+  keyframesAndReferencesExclusive: true;
+  seed: "unsupported" | "uint32" | "uint32-best-effort" | "int32";
+  /** null = 无限制；Veo 为 ["en"]。 */
+  promptLanguages: readonly string[] | null;
+  promptDirectiveSyntax: "ark-text-flags" | null;
+  nativeAudio: {
+    status: "supported" | "unsupported" | "unverified";
+    channels: "mono" | "stereo" | null;
+    /** 必须绑定探针所用的 modelId，禁止跨 modelId 复用（§4.3）。 */
+    verifiedBy: {
+      modelId: string;
+      probeRemoteJobId: string;
+      providerJobId: string | null;
+      at: string;
+      hasAudio: boolean;
+    } | null;
+  };
+  returnsLastFrame: boolean;
+  maxInputImageBytes: number;
+  inputImageMediaTypes: readonly string[];
+  realFaceReferences: "forbidden" | "allowed";
+  outputRetention: VideoOutputRetention;
+};
+
+/** 编译器消费的 capability 子集（§4.3）；`compileShotRequest` 的入参端口。 */
+export type ShotCompileCapability = {
+  backendKind: BackendKind;
+  backendInstanceId: string;
+  modelFamilies: readonly ShotModelFamily[];
+  /** ISO-3166 alpha-2：cn-beijing→CN、ap-southeast-1→SG、us-central1→US。 */
+  processingRegions: readonly string[];
+  /** 按 modelId 索引；H3 以 profileId 为键（§4.3）。 */
+  limitsByModelId: Readonly<Record<string, VideoBackendLimits>>;
+};
+
 export type BackendCapabilities = {
-  backendKind: "comfyui";
+  backendKind: BackendKind;
   backendInstanceId: string;
   asynchronous: true;
   clientAssignedJobId: true;
   inspectById: true;
-  progressHints: "optional-websocket";
-  pendingCancellation: "best-effort";
-  runningCancellation: "version-gated-best-effort";
+  progressHints: "optional-websocket" | "poll-only" | "callback-optional";
+  pendingCancellation: "best-effort" | "unsupported";
+  runningCancellation: "version-gated-best-effort" | "best-effort" | "unsupported";
   providerIdempotency: false;
-  inputModes: readonly ["image-upload"];
-  outputModes: readonly ["download"];
+  inputModes: readonly ("image-upload" | "cas-object-key" | "inline-base64" | "gcs-uri")[];
+  outputModes: readonly ("download" | "provider-signed-url" | "gcs-object" | "inline-base64")[];
+  // §4.3 的四个描述字段。`ProductionGatewayAdapter.capabilities()` 目前自造 11 字段字面量，转发
+  // provider capabilities 后（§8.6 job gateway 行，下一切片）这四项改为必填；跨线解析
+  // （parseBackendCapabilities）现在就要求它们齐全，缺省只对进程内的过渡字面量成立。
+  modelFamilies?: readonly ProductionModelFamily[];
+  processingRegions?: readonly string[];
+  providerJobIdMapping?: "none" | "gateway-durable";
+  limitsByModelId?: Readonly<Record<string, VideoBackendLimits>>;
 };
 
 export type ProductionSubmissionInputBinding = {
@@ -85,13 +171,36 @@ export type SubmitResult = {
 
 export type RemoteJobState = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "not-found";
 
-export type RemoteOutputLocator = {
+/**
+ * §4.5 locator 判别联合的 comfy-view 分支。`source` 缺省按 comfy-view 读取；写入侧在 ingest kernel
+ * 与 job gateway 收敛到联合前（§8.6 的 production-gateway.ts / production-ingestor.ts 行，下一切片）
+ * 保持不写该键——它们的 exactKeys 仍是固定五字段，提前写入会被拒。
+ */
+export type ComfyViewOutputLocator = {
+  source?: "comfy-view";
   nodeId: string;
   kind: "image" | "video" | "audio" | "file";
   filename: string;
   subfolder: string;
   folderType: "input" | "output" | "temp";
 };
+
+/** §4.5 provider-output 分支：不含 URL，可落入 control ledger；取回经 adapter 的 openOutput。 */
+export type ProviderOutputLocator = {
+  source: "provider-output";
+  remoteJobId: string;
+  outputIndex: number;
+  role: "primary" | "last-frame";
+  kind: "video" | "image";
+};
+
+export type ProductionOutputLocator = ComfyViewOutputLocator | ProviderOutputLocator;
+
+/**
+ * 兼容别名。durable observation（`RemoteObservation` / `CoordinatorRemoteObservation`）在 ingest
+ * kernel 能取回 provider-output 之前只承载 comfy-view 形态；届时该别名收敛为 ProductionOutputLocator。
+ */
+export type RemoteOutputLocator = ComfyViewOutputLocator;
 
 export type RemoteObservation = {
   remoteJobId: string;
@@ -124,6 +233,23 @@ export interface ProductionAdapter {
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+/**
+ * 一档已配置的 H3 profile。契约把 (variant, durationSeconds, aspectRatio) 钉死在 pinned graph 里，
+ * 因此时长网格就是已配置 profile 集合（§5.3），capability 以 profileId 为键（§4.3）。
+ */
+export type ComfyUiH3ProfileCapability = {
+  profileId: string;
+  variant: H3Variant;
+  durationSeconds: number;
+  aspectRatio: H3AspectRatio;
+  /**
+   * 该档所用 H3 graph 契约的版本。v1 把 `RandomNoise.noise_seed` 固定在 pinned graph 内，逐镜 seed
+   * 不落图，因此 capability 声明 `seed: "unsupported"`；契约 v2（1b，seed 改为 sentinel）落地后该档
+   * 改声明 2，`seed` 随之翻转为 `"uint32"`（§5.3）。
+   */
+  graphContractVersion: 1 | 2;
+};
+
 export type ComfyUiAdapterOptions = {
   /** Trusted, server-injected URL. Never take this value from an HTTP request. */
   baseUrl: string | URL;
@@ -136,6 +262,12 @@ export type ComfyUiAdapterOptions = {
   /** Optional v0.24+ optimization. Legacy queue→history remains the audited default. */
   preferJobsApi?: boolean;
   now?: () => Date;
+  /** ISO-3166 alpha-2；空集合表示未声明，下游 gate 按 fail-closed 处理（§4.7）。 */
+  processingRegions?: readonly string[];
+  /** 已配置的 H3 profile 集合：limitsByModelId 的键与时长网格的唯一来源（§5.3）。 */
+  h3Profiles?: readonly ComfyUiH3ProfileCapability[];
+  /** 自托管没有 provider 侧图片上限，只有部署声明；配置了 h3Profiles 时必填。 */
+  maxInputImageBytes?: number;
 };
 
 type BoundedJson = { value: unknown; digest: string };
@@ -152,7 +284,15 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_RESPONSE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_WORKFLOW_BYTES = 2 * 1024 * 1024;
 const MAX_OUTPUTS = 128;
+const MAX_PROCESSING_REGIONS = 64;
+const MAX_CAPABILITY_PROFILES = 64;
+/** H3 契约把短边钉在 768（§5.3）；分辨率词表以 ShotExecutionProfile.resolution 的取值为准。 */
+const H3_RESOLUTION = "768p";
+/** ComfyUI LoadImage 可解码的图片类型（stage kernel 允许集合的保守子集）。 */
+const H3_INPUT_IMAGE_MEDIA_TYPES = Object.freeze(["image/jpeg", "image/png", "image/webp"]);
+const H3_MAX_REFERENCE_IMAGES = 9;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const TERRITORY = /^[A-Z]{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
 const JOB_TIME_FIELDS = ["create_time", "update_time", "execution_start_time", "execution_end_time"] as const;
@@ -196,6 +336,111 @@ function identifier(value: string, label: string): string {
     throw new ProductionAdapterError("remote-rejected", `${label} 无效`);
   }
   return value;
+}
+
+function trustedProcessingRegions(value: readonly string[] | undefined): readonly string[] {
+  if (value === undefined) return Object.freeze([]);
+  if (!Array.isArray(value) || value.length > MAX_PROCESSING_REGIONS) {
+    throw new ProductionAdapterError("remote-rejected", `processingRegions 最多 ${MAX_PROCESSING_REGIONS} 项`);
+  }
+  for (const region of value) {
+    // 集合别名 EU、非标准码 UK 与 WORLDWIDE 在解析层拒绝（§4.7），与 production-intent.ts 同一判据。
+    if (typeof region !== "string" || !TERRITORY.test(region) || NON_ISO_PROCESSING_REGIONS.has(region)) {
+      throw new ProductionAdapterError("remote-rejected", "processingRegions 只接受 ISO-3166 alpha-2 成员国代码");
+    }
+  }
+  const sorted = [...value].sort();
+  if (new Set(sorted).size !== sorted.length) {
+    throw new ProductionAdapterError("remote-rejected", "processingRegions 不得重复");
+  }
+  return Object.freeze(sorted);
+}
+
+/**
+ * H3 契约的能力事实（§5.3）：fl2va 走 LoadImage 首/尾帧（尾帧可缺省），ref2va 走 ref_images；
+ * 短边固定 768；音频由固定 pipeline 生成立体声；尾帧不回传，由 ingest kernel 用 ffmpeg 提取。
+ * 逐镜 seed 只有契约 v2 落图，v1 的档声明 seed 不受支持。
+ */
+function h3LimitsByProfileId(
+  profiles: readonly ComfyUiH3ProfileCapability[],
+  maxInputImageBytes: number,
+): Readonly<Record<string, VideoBackendLimits>> {
+  const limits: Record<string, VideoBackendLimits> = {};
+  for (const profile of profiles) {
+    // 时长网格 = 同 (variant, aspectRatio) 下已配置的时长档；每档一份 pinned graph 与 config 条目。
+    const grid = [...new Set(profiles
+      .filter((row) => row.variant === profile.variant && row.aspectRatio === profile.aspectRatio)
+      .map((row) => row.durationSeconds))].sort((left, right) => left - right);
+    limits[profile.profileId] = Object.freeze({
+      modes: Object.freeze(profile.variant === "fl2va" ? ["i2v", "fl2v"] as const : ["ref2v"] as const),
+      durationSeconds: Object.freeze({
+        min: grid[0]!,
+        max: grid[grid.length - 1]!,
+        grid: Object.freeze(grid),
+        gridByResolution: null,
+      }),
+      aspectRatios: Object.freeze([profile.aspectRatio]),
+      resolutions: Object.freeze([H3_RESOLUTION]),
+      maxReferenceImages: profile.variant === "ref2va" ? H3_MAX_REFERENCE_IMAGES : 0,
+      maxReferenceVideos: 0,
+      maxReferenceAudios: 0,
+      maxStyleImages: 0,
+      maxReferenceAssetsTotal: null,
+      audioOnlyReference: false,
+      keyframesAndReferencesExclusive: true,
+      seed: profile.graphContractVersion === 2 ? "uint32" : "unsupported",
+      promptLanguages: null,
+      promptDirectiveSyntax: null,
+      nativeAudio: Object.freeze({ status: "supported", channels: "stereo", verifiedBy: null }),
+      returnsLastFrame: false,
+      maxInputImageBytes,
+      inputImageMediaTypes: H3_INPUT_IMAGE_MEDIA_TYPES,
+      realFaceReferences: "allowed",
+      outputRetention: Object.freeze({ kind: "comfy-history", bounded: true }),
+    });
+  }
+  return Object.freeze(limits);
+}
+
+function trustedH3Profiles(
+  value: readonly ComfyUiH3ProfileCapability[] | undefined,
+  maxInputImageBytes: number | undefined,
+): Readonly<Record<string, VideoBackendLimits>> {
+  if (value === undefined) return Object.freeze({});
+  if (!Array.isArray(value) || value.length > MAX_CAPABILITY_PROFILES) {
+    throw new ProductionAdapterError("remote-rejected", `h3Profiles 必须是最多 ${MAX_CAPABILITY_PROFILES} 项的数组`);
+  }
+  if (value.length === 0) return Object.freeze({});
+  // 自托管后端没有 provider 侧的图片上限可引用，只有部署声明；缺省即无判据，不猜一个数字。
+  if (maxInputImageBytes === undefined) {
+    throw new ProductionAdapterError("remote-rejected", "配置了 h3Profiles 时必须声明 maxInputImageBytes");
+  }
+  const bytes = boundedInteger(
+    maxInputImageBytes, maxInputImageBytes, 1_024, 4 * 1024 * 1024 * 1024, "maxInputImageBytes",
+  );
+  for (const profile of value) {
+    if (profile === null || typeof profile !== "object" || Array.isArray(profile)) {
+      throw new ProductionAdapterError("remote-rejected", "h3Profiles 项必须是对象");
+    }
+    identifier(profile.profileId, "h3Profiles[].profileId");
+    if (profile.variant !== "fl2va" && profile.variant !== "ref2va") {
+      throw new ProductionAdapterError("remote-rejected", "h3Profiles[].variant 必须是 fl2va 或 ref2va");
+    }
+    if (typeof profile.aspectRatio !== "string"
+      || !(COMFY_H3_ASPECT_RATIOS as readonly string[]).includes(profile.aspectRatio)) {
+      throw new ProductionAdapterError(
+        "remote-rejected", `h3Profiles[].aspectRatio 必须是 ${COMFY_H3_ASPECT_RATIOS.join("、")} 之一`,
+      );
+    }
+    if (profile.graphContractVersion !== 1 && profile.graphContractVersion !== 2) {
+      throw new ProductionAdapterError("remote-rejected", "h3Profiles[].graphContractVersion 必须是 1 或 2");
+    }
+    boundedInteger(profile.durationSeconds, profile.durationSeconds, 1, 600, "h3Profiles[].durationSeconds");
+  }
+  if (new Set(value.map((profile) => profile.profileId)).size !== value.length) {
+    throw new ProductionAdapterError("remote-rejected", "h3Profiles[].profileId 不得重复");
+  }
+  return h3LimitsByProfileId(value, bytes);
 }
 
 function promptId(value: string): string {
@@ -436,6 +681,9 @@ export class ComfyUiAdapter implements ProductionAdapter {
   readonly #maxWorkflowBytes: number;
   readonly #preferJobsApi: boolean;
   readonly #now: () => Date;
+  readonly #processingRegions: readonly string[];
+  readonly #limitsByModelId: Readonly<Record<string, VideoBackendLimits>>;
+  readonly #modelFamilies: readonly ProductionModelFamily[];
   #jobsApi: "unknown" | "supported" | "unsupported" = "unknown";
 
   constructor(options: ComfyUiAdapterOptions) {
@@ -455,14 +703,26 @@ export class ComfyUiAdapter implements ProductionAdapter {
     }
     this.#preferJobsApi = options.preferJobsApi ?? false;
     this.#now = options.now ?? (() => new Date());
+    this.#processingRegions = trustedProcessingRegions(options.processingRegions);
+    this.#limitsByModelId = trustedH3Profiles(options.h3Profiles, options.maxInputImageBytes);
+    // 一台 ComfyUI 始终能跑 pinned 的 generic 图；H3 只有在配置了 profile 档时才成立。
+    this.#modelFamilies = Object.freeze(
+      Object.keys(this.#limitsByModelId).length > 0
+        ? ["generic" as const, "minimax-h3" as const]
+        : ["generic" as const],
+    );
   }
 
   async capabilities(_signal?: AbortSignal): Promise<BackendCapabilities> {
     return {
       backendKind: "comfyui",
       backendInstanceId: this.#backendInstanceId,
+      modelFamilies: this.#modelFamilies,
+      processingRegions: this.#processingRegions,
       asynchronous: true,
       clientAssignedJobId: true,
+      // 调用方预分配 prompt_id，provider 不另发 ID（§5.3）。
+      providerJobIdMapping: "none",
       inspectById: true,
       progressHints: "optional-websocket",
       pendingCancellation: "best-effort",
@@ -470,6 +730,7 @@ export class ComfyUiAdapter implements ProductionAdapter {
       providerIdempotency: false,
       inputModes: ["image-upload"],
       outputModes: ["download"],
+      limitsByModelId: this.#limitsByModelId,
     };
   }
 

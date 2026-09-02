@@ -25,6 +25,7 @@ import {
   type ProductionTaskEvent,
 } from "../src/production-domain.ts";
 import { ProductionStore } from "../src/production-store.ts";
+import { SHOT_REQUEST_MEDIA_TYPE } from "../src/production-shot-request.ts";
 import {
   createProductionDispatchIntent,
   type ProductionDispatchIntent,
@@ -119,7 +120,7 @@ function intentFor(
   id: string,
   taskSubject = subject(id),
   amountMicros = 500_000,
-  modelFamily: "generic" | "minimax-h3" = "generic",
+  modelFamily: "generic" | "minimax-h3" | "seedance" = "generic",
   maximumAmountMicros = amountMicros,
 ): ProductionDispatchIntent {
   const draft: ProductionIntentDraft = {
@@ -138,20 +139,40 @@ function intentFor(
           modelSha256: SHA.c,
           parametersSha256: SHA.d,
         }
-      : {
-          version: 1,
-          operation: "comfyui-workflow",
-          modelFamily: "minimax-h3",
-          backendInstanceId: BACKEND,
-          workflowSha256: productionWorkflowSha256(WORKFLOW),
-          modelSha256: SHA.c,
-          parametersSha256: SHA.d,
-          variant: "fl2va",
-          durationSeconds: 8,
-          shortEdge: 768,
-          aspectRatio: "9:16",
-        },
-    inputs: [asset(`${id}-input.png`, SHA.c, "image/png")],
+      : modelFamily === "minimax-h3"
+        ? {
+            version: 1,
+            operation: "comfyui-workflow",
+            modelFamily: "minimax-h3",
+            backendInstanceId: BACKEND,
+            workflowSha256: productionWorkflowSha256(WORKFLOW),
+            modelSha256: SHA.c,
+            parametersSha256: SHA.d,
+            variant: "fl2va",
+            durationSeconds: 8,
+            shortEdge: 768,
+            aspectRatio: "9:16",
+          }
+        : {
+            version: 1,
+            operation: "ark-video-task",
+            modelFamily: "seedance",
+            backendInstanceId: BACKEND,
+            workflowSha256: productionWorkflowSha256(WORKFLOW),
+            modelSha256: SHA.c,
+            parametersSha256: SHA.d,
+            provider: "byteplus-modelark",
+            modelId: "dreamina-seedance-2-0-260128",
+            resolution: "720p",
+            aspectRatio: "9:16",
+            generateAudio: true,
+            watermark: false,
+            returnLastFrame: true,
+            executionExpiresAfterSeconds: 7_200,
+          },
+    inputs: modelFamily === "seedance"
+      ? [asset(`${id}-shot.json`, SHA.c, SHOT_REQUEST_MEDIA_TYPE)]
+      : [asset(`${id}-input.png`, SHA.c, "image/png")],
     budget: {
       version: 1,
       currency: "USD",
@@ -209,7 +230,7 @@ function createTask(
   id: string,
   dispatch = true,
   amountMicros = 500_000,
-  modelFamily: "generic" | "minimax-h3" = "generic",
+  modelFamily: "generic" | "minimax-h3" | "seedance" = "generic",
   maximumAmountMicros = amountMicros,
 ): { store: ProductionStore; intent: ProductionDispatchIntent; task: ProductionTask } {
   mkdirSync(join(root, ".writing-loop", project), { recursive: true });
@@ -639,6 +660,37 @@ try {
     && new ProductionCoordinatorStore(root, WS, "h3-no-stager").read().revision === 0
     && h3Run.issues.some((row) => row.code === "input-stager-missing"),
   "H3-over-ComfyUI 无 stager 时在 provider 网络/预算/control mutation 前 fail-closed");
+
+  // 家族表（§8.6）：seedance / veo 的输入同样逐镜可变，compatibility marker 对它们不成立。
+  const seedanceNoStager = createTask(root, "seedance-no-stager", "take-seedance", true, 500_000, "seedance");
+  const seedanceAdapter = new FakeAdapter(["succeeded"]);
+  const seedanceRun = await runProductionProjectOnce(dependencies(
+    root, "seedance-no-stager", seedanceAdapter, new FakeIngestor(), [seedanceNoStager.intent], {
+      // 云家族的三个新 gate 需要显式声明才放行；这里让它们通过，测的是其后的 staging 家族表。
+      gateContextResolver: {
+        resolve: async () => ({
+          version: 1,
+          evaluatedAt: at(10),
+          deploymentTerritories: ["CN"],
+          availableBudgetMicros: 500_000,
+          allowedProcessingRegions: ["SG"],
+          backendProcessingRegions: ["SG"],
+          realFaceInputs: "absent",
+        }),
+      },
+      workflowResolver: {
+        resolve: async () => ({
+          version: 1, workflow: structuredClone(WORKFLOW), modelFamily: "seedance",
+          modelSha256: SHA.c, parametersSha256: SHA.d,
+        }),
+      },
+    },
+  ));
+  ok(seedanceNoStager.store.read().tasks[0]?.status === "dispatch-pending"
+    && seedanceAdapter.submitCalls === 0
+    && new ProductionCoordinatorStore(root, WS, "seedance-no-stager").read().revision === 0
+    && seedanceRun.issues.some((row) => row.code === "input-stager-missing"),
+  "seedance 无 stager 时同样 fail-closed（四家族 MODEL_FAMILIES 与 scoped staging 家族表）");
 
   const genericNoMarker = createTask(root, "generic-no-marker", "take-generic");
   const genericNoMarkerAdapter = new FakeAdapter(["succeeded"]);

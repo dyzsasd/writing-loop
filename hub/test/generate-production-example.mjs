@@ -158,9 +158,12 @@ function deriveExample() {
     || parsedProfile === undefined) {
     throw new Error("derived packaged example did not preserve its H3 graph/profile");
   }
+  if (parsedProfile.bindings?.kind !== "h3-graph-bindings") {
+    throw new Error("derived packaged example did not preserve its H3 LoadImage stage bindings");
+  }
   assertProductionH3Template(
     template, parsedWorkflow.h3GraphContract, parsedProfile.execution,
-    parsedProfile.bindings, parsedProfile.profileId,
+    parsedProfile.bindings.bindings, parsedProfile.profileId,
   );
   return {
     runtime: `${JSON.stringify(runtime, null, 2)}\n`,

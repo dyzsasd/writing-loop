@@ -82,6 +82,7 @@ const limits = (over: Partial<VideoBackendLimits> = {}): VideoBackendLimits => (
   maxInputImageBytes: 30 * 1024 * 1024,
   inputImageMediaTypes: ["image/png", "image/jpeg"],
   realFaceReferences: "allowed",
+  outputRetention: { kind: "comfy-history", bounded: true },
   ...over,
 });
 

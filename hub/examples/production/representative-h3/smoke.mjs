@@ -25,13 +25,17 @@ if (workflow?.h3GraphContract === null || workflow?.h3GraphContract === undefine
   throw new Error("packaged H3 runtime config lost its workflow/profile binding");
 }
 
-const sentinelBefore = templateSource[profile.bindings[0].source.nodeId].inputs.image;
+if (profile.bindings?.kind !== "h3-graph-bindings") {
+  throw new Error("packaged H3 runtime config lost its LoadImage stage bindings");
+}
+const stageBindings = profile.bindings.bindings;
+const sentinelBefore = templateSource[stageBindings[0].source.nodeId].inputs.image;
 const materialized = materializeProductionH3Workflow(
   templateSource,
   workflow.h3GraphContract,
   profile.execution,
-  profile.bindings,
-  profile.bindings.map((binding) => ({
+  stageBindings,
+  stageBindings.map((binding) => ({
     index: binding.index,
     slot: binding.slot,
     assetSha256: String(binding.index + 1).repeat(64),
@@ -42,8 +46,8 @@ const materialized = materializeProductionH3Workflow(
 if (materialized.templateWorkflowSha256 !== workflow.workflowSha256
   || materialized.boundWorkflowSha256 === materialized.templateWorkflowSha256
   || productionH3WorkflowSha256(materialized.workflow) !== materialized.boundWorkflowSha256
-  || templateSource[profile.bindings[0].source.nodeId].inputs.image !== sentinelBefore
-  || materialized.workflow[profile.bindings[0].source.nodeId].inputs.image
+  || templateSource[stageBindings[0].source.nodeId].inputs.image !== sentinelBefore
+  || materialized.workflow[stageBindings[0].source.nodeId].inputs.image
     !== "scoped/example/0/frame.png") {
   throw new Error("packaged H3 template→bound materialization smoke failed");
 }

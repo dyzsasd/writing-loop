@@ -33,6 +33,7 @@ import {
 import {
   MAX_PRODUCTION_INTENT_INPUTS,
   PRODUCTION_MODEL_FAMILIES,
+  REQUIRES_SCOPED_STAGING,
   parseProductionIntentExecution,
   readProductionIntent,
   type ProductionDispatchIntent,
@@ -41,6 +42,12 @@ import {
   type ProductionIntentResolver,
   type ProductionModelFamily,
 } from "./production-intent.ts";
+import {
+  PROVIDER_INPUT_SLOTS,
+  providerSlotPolicyViolation,
+  providerSlotSequenceViolation,
+  type ProviderInputSlot,
+} from "./production-provider-adapter.ts";
 import {
   hasSymlinkComponent,
   readRegularTextExact,
@@ -145,13 +152,30 @@ export type ProductionRuntimeWorkflowConfig = Readonly<{
 
 export type ProductionRuntimeStagingBindingConfig = ProductionH3StageBindingContract;
 
+/**
+ * 云家族的 stage 声明（§6.5 的 `slotPolicy`）：没有可绑定的 ComfyUI 节点，只声明 stage kernel 接受的
+ * slot、顺序与每个 slot 的出现次数区间。顺序由数组位置隐含（§5 的固定输入顺序），因此同一档 profile
+ * 可承载 i2v（无 last_frame）与 fl2v（有 last_frame）等镜头。本版只到类型与解析，stage kernel 侧随
+ * Phase 1 落地。
+ */
+export type ProductionRuntimeStagingSlotConfig = Readonly<{
+  slot: ProviderInputSlot;
+  minCount: number;
+  maxCount: number;
+}>;
+
+/** 家族决定形态：H3 是 pinned 图的 LoadImage 绑定契约，云家族是 slot policy（§8.6）。 */
+export type ProductionRuntimeStagingBindings =
+  | Readonly<{ kind: "h3-graph-bindings"; bindings: readonly ProductionRuntimeStagingBindingConfig[] }>
+  | Readonly<{ kind: "provider-slot-policy"; slots: readonly ProductionRuntimeStagingSlotConfig[] }>;
+
 export type ProductionRuntimeStagingProfileConfig = Readonly<{
   version: 1;
   profileId: string;
   baseUrl: string;
   credentialEnv: string | null;
   execution: ProductionIntentExecution;
-  bindings: readonly ProductionRuntimeStagingBindingConfig[];
+  bindings: ProductionRuntimeStagingBindings;
   transport: ProductionRuntimeTransport;
 }>;
 
@@ -245,6 +269,13 @@ const SAFE_ENV = /^[A-Z_][A-Z0-9_]{0,127}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TERRITORY = /^(?:[A-Z]{2}|WORLDWIDE)$/;
 const MODEL_FAMILIES = new Set<string>(PRODUCTION_MODEL_FAMILIES);
+/** 只有 H3 经 pinned ComfyUI 图执行，需要 graph contract；其余家族必须显式 null。 */
+const REQUIRES_H3_GRAPH_CONTRACT: Readonly<Record<ProductionModelFamily, boolean>> = {
+  generic: false,
+  "minimax-h3": true,
+  seedance: false,
+  veo: false,
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -478,8 +509,9 @@ function parseWorkflow(value: unknown, index: number): ProductionRuntimeWorkflow
   ], subject);
   version(row.version, subject);
   if (typeof row.modelFamily !== "string" || !MODEL_FAMILIES.has(row.modelFamily)) {
-    schemaError(`${subject}.modelFamily`, "必须是 generic 或 minimax-h3");
+    schemaError(`${subject}.modelFamily`, `必须是 ${PRODUCTION_MODEL_FAMILIES.join("、")} 之一`);
   }
+  const modelFamily = row.modelFamily as ProductionModelFamily;
   if (!Array.isArray(row.projects) || row.projects.length < 1
     || row.projects.length > MAX_PRODUCTION_RUNTIME_PROJECTS) {
     schemaError(`${subject}.projects`, `必须包含 1–${MAX_PRODUCTION_RUNTIME_PROJECTS} 个 project`);
@@ -498,20 +530,20 @@ function parseWorkflow(value: unknown, index: number): ProductionRuntimeWorkflow
   if ((inputPolicy === "static-pre-staged") !== (stagingProfileId === null)) {
     schemaError(subject, "static-pre-staged 必须使用 null profile；scoped-staging 必须引用 stagingProfileId");
   }
-  if (row.modelFamily === "minimax-h3" && inputPolicy !== "scoped-staging") {
-    schemaError(subject, "MiniMax H3 workflow 必须使用 scoped-staging");
+  if (REQUIRES_SCOPED_STAGING[modelFamily] && inputPolicy !== "scoped-staging") {
+    schemaError(subject, `${modelFamily} workflow 的输入逐镜可变，必须使用 scoped-staging`);
   }
-  const h3GraphContract = row.modelFamily === "minimax-h3"
+  const h3GraphContract = REQUIRES_H3_GRAPH_CONTRACT[modelFamily]
     ? parseH3GraphContract(row.h3GraphContract, `${subject}.h3GraphContract`)
     : null;
-  if (row.modelFamily === "generic" && row.h3GraphContract !== null) {
-    schemaError(`${subject}.h3GraphContract`, "generic workflow 必须显式使用 null");
+  if (!REQUIRES_H3_GRAPH_CONTRACT[modelFamily] && row.h3GraphContract !== null) {
+    schemaError(`${subject}.h3GraphContract`, `${modelFamily} workflow 不经 pinned ComfyUI 图执行，必须显式使用 null`);
   }
   return Object.freeze({
     version: 1,
     backendInstanceId: safeString(row.backendInstanceId, SAFE_ID, `${subject}.backendInstanceId`),
     workflowSha256: sha256(row.workflowSha256, `${subject}.workflowSha256`),
-    modelFamily: row.modelFamily as ProductionModelFamily,
+    modelFamily,
     modelSha256: sha256(row.modelSha256, `${subject}.modelSha256`),
     parametersSha256: sha256(row.parametersSha256, `${subject}.parametersSha256`),
     projects: Object.freeze([...projects].sort()),
@@ -520,6 +552,57 @@ function parseWorkflow(value: unknown, index: number): ProductionRuntimeWorkflow
     h3GraphContract,
     file: relativeWorkflowFile(row.file, `${subject}.file`),
   });
+}
+
+function parseStagingBindings(
+  value: unknown,
+  family: ProductionModelFamily,
+  subject: string,
+): ProductionRuntimeStagingBindings {
+  if (family === "minimax-h3") {
+    if (!Array.isArray(value) || value.length < 1 || value.length > MAX_PRODUCTION_INTENT_INPUTS) {
+      schemaError(subject, `H3 profile 必须声明 1–${MAX_PRODUCTION_INTENT_INPUTS} 项 LoadImage 绑定契约`);
+    }
+    const bindings = value.map((entry, bindingIndex): ProductionRuntimeStagingBindingConfig => {
+      try { return parseProductionH3StageBindingContract(entry, bindingIndex); }
+      catch (error) {
+        if (error instanceof ProductionH3GraphError) schemaError(`${subject}[${bindingIndex}]`, error.message);
+        throw error;
+      }
+    });
+    if (new Set(bindings.map((binding) => binding.slot)).size !== bindings.length
+      || new Set(bindings.map((binding) => binding.source.nodeId)).size !== bindings.length
+      || new Set(bindings.map((binding) => `${binding.consumer.nodeId}\0${binding.consumer.inputName}`)).size !== bindings.length) {
+      schemaError(subject, "slot、LoadImage source 与 consumer target 均不得重复");
+    }
+    return Object.freeze({ kind: "h3-graph-bindings", bindings: Object.freeze(bindings) });
+  }
+  // 云家族：请求体由 execution profile + ShotRequest 决定，没有可绑定的图节点，只声明 slot 与顺序。
+  const row = record(value, subject);
+  exactKeys(row, ["version", "kind", "slots"], subject);
+  version(row.version, subject);
+  if (row.kind !== "provider-slot-policy") {
+    schemaError(`${subject}.kind`, `${family} profile 的 bindings 必须是 provider-slot-policy`);
+  }
+  if (!Array.isArray(row.slots) || row.slots.length < 1 || row.slots.length > MAX_PRODUCTION_INTENT_INPUTS) {
+    schemaError(`${subject}.slots`, `必须包含 1–${MAX_PRODUCTION_INTENT_INPUTS} 项`);
+  }
+  const slots = row.slots.map((entry, slotIndex): ProductionRuntimeStagingSlotConfig => {
+    const slotSubject = `${subject}.slots[${slotIndex}]`;
+    const slotRow = record(entry, slotSubject);
+    exactKeys(slotRow, ["slot", "minCount", "maxCount"], slotSubject);
+    if (typeof slotRow.slot !== "string" || !(PROVIDER_INPUT_SLOTS as readonly string[]).includes(slotRow.slot)) {
+      schemaError(`${slotSubject}.slot`, `必须是 ${PROVIDER_INPUT_SLOTS.join("、")} 之一`);
+    }
+    return Object.freeze({
+      slot: slotRow.slot as ProviderInputSlot,
+      minCount: boundedInteger(slotRow.minCount, 0, MAX_PRODUCTION_INTENT_INPUTS, `${slotSubject}.minCount`),
+      maxCount: boundedInteger(slotRow.maxCount, 1, MAX_PRODUCTION_INTENT_INPUTS, `${slotSubject}.maxCount`),
+    });
+  });
+  const violation = providerSlotPolicyViolation(slots);
+  if (violation !== null) schemaError(`${subject}.slots`, violation);
+  return Object.freeze({ kind: "provider-slot-policy", slots: Object.freeze(slots) });
 }
 
 function parseStagingProfile(value: unknown, index: number): ProductionRuntimeStagingProfileConfig {
@@ -535,25 +618,13 @@ function parseStagingProfile(value: unknown, index: number): ProductionRuntimeSt
   let execution: ProductionIntentExecution;
   try { execution = parseProductionIntentExecution(row.execution, `${subject}.execution`); }
   catch { schemaError(`${subject}.execution`, "不是严格 ProductionIntentExecution"); }
-  if (execution.modelFamily !== "minimax-h3" || execution.operation !== "comfyui-workflow") {
-    schemaError(`${subject}.execution`, "v1 staging profile 仅支持 H3-over-Comfy 的图片输入；视频/音频与 generic fail-closed");
+  if (!REQUIRES_SCOPED_STAGING[execution.modelFamily]) {
+    schemaError(`${subject}.execution`, "generic workflow 的输入是静态 pinned，不得注册 staging profile");
   }
-  if (!Array.isArray(row.bindings) || row.bindings.length < 1
-    || row.bindings.length > MAX_PRODUCTION_INTENT_INPUTS) {
-    schemaError(`${subject}.bindings`, `必须包含 1–${MAX_PRODUCTION_INTENT_INPUTS} 项`);
+  if (execution.modelFamily === "minimax-h3" && execution.operation !== "comfyui-workflow") {
+    schemaError(`${subject}.execution`, "H3 staging profile 只装配 comfyui-workflow 传输形态");
   }
-  const bindings = row.bindings.map((entry, bindingIndex): ProductionRuntimeStagingBindingConfig => {
-    try { return parseProductionH3StageBindingContract(entry, bindingIndex); }
-    catch (error) {
-      if (error instanceof ProductionH3GraphError) schemaError(`${subject}.bindings[${bindingIndex}]`, error.message);
-      throw error;
-    }
-  });
-  if (new Set(bindings.map((binding) => binding.slot)).size !== bindings.length
-    || new Set(bindings.map((binding) => binding.source.nodeId)).size !== bindings.length
-    || new Set(bindings.map((binding) => `${binding.consumer.nodeId}\0${binding.consumer.inputName}`)).size !== bindings.length) {
-    schemaError(`${subject}.bindings`, "slot、LoadImage source 与 consumer target 均不得重复");
-  }
+  const bindings = parseStagingBindings(row.bindings, execution.modelFamily, `${subject}.bindings`);
   return Object.freeze({
     version: 1,
     profileId: safeString(row.profileId, SAFE_PROFILE_ID, `${subject}.profileId`),
@@ -632,7 +703,8 @@ function validateH3GraphContractExpectations(
   if (workflow.modelFamily !== "minimax-h3") return;
   const contract = workflow.h3GraphContract;
   if (contract === null) schemaError(subject, "缺少 H3 graph contract");
-  try { assertProductionH3ExecutionContract(contract, profile.execution, profile.bindings); }
+  if (profile.bindings.kind !== "h3-graph-bindings") schemaError(subject, "H3 workflow 的 staging profile 必须声明 LoadImage 绑定契约");
+  try { assertProductionH3ExecutionContract(contract, profile.execution, profile.bindings.bindings); }
   catch (error) {
     if (error instanceof ProductionH3GraphError) schemaError(subject, error.message);
     throw error;
@@ -833,10 +905,10 @@ function assertWorkflowH3GraphContract(
 ): void {
   if (config.modelFamily !== "minimax-h3") return;
   const contract = config.h3GraphContract;
-  if (contract === null || profile === null) {
+  if (contract === null || profile === null || profile.bindings.kind !== "h3-graph-bindings") {
     throw new ProductionRuntimeConfigError("workflow-invalid", "H3 workflow 缺少 graph contract/staging profile");
   }
-  try { assertProductionH3Template(workflow, contract, profile.execution, profile.bindings, profile.profileId); }
+  try { assertProductionH3Template(workflow, contract, profile.execution, profile.bindings.bindings, profile.profileId); }
   catch (error) {
     if (error instanceof ProductionH3GraphError) {
       throw new ProductionRuntimeConfigError("workflow-invalid", error.message);
@@ -1022,12 +1094,42 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
     signal?: AbortSignal,
   ): Promise<ProductionWorkflowBindingVerification> {
     throwIfAborted(signal);
+    const declared = this.#profile.bindings;
+    // H3 的绑定契约逐条对应一个图节点，数量恒定；云家族的 slotPolicy 是计数区间（同一 profile 承载
+    // i2v 与 fl2v 等镜头），因此只先按 [Σmin, Σmax] 做界限检查，顺序与逐 slot 计数交给下面的判据。
+    const stagedCountValid = declared.kind === "h3-graph-bindings"
+      ? staged.bindings.length === declared.bindings.length
+      : staged.bindings.length >= declared.slots.reduce((sum, slot) => sum + slot.minCount, 0)
+        && staged.bindings.length <= declared.slots.reduce((sum, slot) => sum + slot.maxCount, 0);
     const templateWorkflowSha256 = productionWorkflowSha256(workflow);
     if (executionIdentityKey(intent.execution) !== this.#executionKey
       || templateWorkflowSha256 !== intent.execution.workflowSha256
       || templateWorkflowSha256 !== this.#workflowConfig.workflowSha256
-      || staged.bindings.length !== this.#profile.bindings.length) {
+      || !stagedCountValid) {
       throw new ProductionRuntimeConfigError("workflow-invalid", "staging profile 与 immutable execution/workflow 不匹配");
+    }
+    if (declared.kind === "provider-slot-policy") {
+      // 云家族没有可材料化的图：注册的 workflow 就是 execution profile 快照，template 即 bound。
+      // 这里按 slotPolicy 的顺序与计数区间核对 staged.bindings；ShotRequest 的内容校验在 stage kernel。
+      const sequenceViolation = providerSlotSequenceViolation(
+        declared.slots,
+        staged.bindings.map((binding) => binding.slot as ProviderInputSlot),
+      );
+      if (sequenceViolation !== null) {
+        throw new ProductionRuntimeConfigError(
+          "workflow-invalid", `staged slot 不满足 profile slotPolicy：${sequenceViolation}`,
+        );
+      }
+      throwIfAborted(signal);
+      return {
+        version: 1,
+        verified: true,
+        templateWorkflowSha256,
+        boundWorkflowSha256: templateWorkflowSha256,
+        workflow,
+        stageKey: staged.stageKey,
+        bindingsDigest: staged.bindingsDigest,
+      };
     }
     const contract = this.#workflowConfig.h3GraphContract;
     if (contract === null) throw new ProductionRuntimeConfigError("workflow-invalid", "H3 graph contract 缺失");
@@ -1037,7 +1139,7 @@ class ExactWorkflowBindingVerifier implements ProductionWorkflowBindingVerifier 
         workflow,
         contract,
         this.#profile.execution,
-        this.#profile.bindings,
+        declared.bindings,
         staged.bindings,
         this.#profile.profileId,
       );

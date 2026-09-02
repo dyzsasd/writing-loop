@@ -704,14 +704,26 @@ workflow graph 同样按有界单链接普通文件逐次读取并复核 inode/d
     按需启动的 GPU VM 两台主机，且均由同一操作者控制；VPC 内出现第三方工作负载时该前提失效；
   - 不适用于跨 VPC、跨云或经公网的部署。
 - workflow：完整 backend/model/workflow/parameters tuple、显式 projects allowlist、必填
-  `inputPolicy: static-pre-staged | scoped-staging` 与 `h3GraphContract`（generic 必须为 `null`）；MiniMax H3
-  只能用 `scoped-staging`。H3 contract 固定 native generator、768 short-edge canvas、24fps 对应的
+  `inputPolicy: static-pre-staged | scoped-staging` 与 `h3GraphContract`。两项按 modelFamily 家族表判定：
+  `minimax-h3`、`seedance`、`veo` 的输入逐镜可变，只能用 `scoped-staging`；只有 `minimax-h3` 经 pinned
+  ComfyUI 图执行并带 graph contract，`generic` / `seedance` / `veo` 的 `h3GraphContract` 必须显式为 `null`。
+  H3 contract 固定 native generator、768 short-edge canvas、24fps 对应的
   `17k+5` length、diffusion/text encoder/video VAE/audio VAE 四组件 bundle digest、active
   SigmaShift→guider/scheduler→sampler→双 decode→CreateVideo→SaveVideo pipeline，以及实际参数投影 digest。
-- staging profile：完整 H3 execution 与有序 `index/slot/source/consumer`。v1 source 只能是
-  `LoadImage.image` output 0；consumer 必须是 contract 中真实 H3 generator 的 `first_frame`、
-  `last_frame` 或 `ref_images.ref_image_N`。source→consumer exact edge、无 fanout、无 decoy node 与 provider
-  key 唯一性都在 graph verifier 中证明；未知/漂移 profile 在预算与 provider I/O 前 fail-closed。
+- staging profile：完整 execution 与按家族判别的 `bindings`。`minimax-h3` 用有序
+  `index/slot/source/consumer` 的 LoadImage 绑定契约（数组形）：v1 source 只能是 `LoadImage.image`
+  output 0；consumer 必须是 contract 中真实 H3 generator 的 `first_frame`、`last_frame` 或
+  `ref_images.ref_image_N`。source→consumer exact edge、无 fanout、无 decoy node 与 provider key 唯一性
+  都在 graph verifier 中证明。`seedance` / `veo` 没有可绑定的图节点，`bindings` 改用
+  `{version: 1, kind: "provider-slot-policy", slots: [{slot, minCount, maxCount}]}`（§6.5）：`slot` 取
+  `shot-request | first_frame | last_frame | reference_image | reference_video | reference_audio`，顺序由数组
+  位置隐含，必须按 `shot-request`、首帧、尾帧、图片参考、视频参考、音频参考 严格升序且每个 slot 只出现
+  一次（重复次数由计数区间表达）；`shot-request` 恒为首项且 `minCount = maxCount = 1`，`first_frame` 与
+  `last_frame` 的 `maxCount` 只能是 1。计数区间让同一档 profile 承载 i2v（无尾帧）与 fl2v（有尾帧）等
+  镜头，不必逐镜建档。云家族的 verifier 不材料化图：template digest == bound digest，只按该声明的顺序与
+  计数区间核对 staged bindings。
+  `generic` 的输入是静态 pinned，不得注册 staging profile。未知/漂移 profile 在预算与 provider I/O 前
+  fail-closed。
 - intent license evidence 的可选 `obligations`（`{attribution, revenueThresholdUsd, noModelImprovement}`，
   三字段一旦出现就必须齐全）：许可文本附加的持续义务，是编译器与 intent gate 共同的唯一来源，
   execution profile 不复制该字段。MiniMax H3 Community License IV.1 / IV.2 / V.3 对应

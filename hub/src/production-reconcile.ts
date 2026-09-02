@@ -69,7 +69,19 @@ function iso(value: unknown): string {
 
 function locator(value: unknown, index: number): RemoteOutputLocator {
   if (!object(value)) fail(`outputs[${index}] must be an object`);
-  exactKeys(value, ["nodeId", "kind", "filename", "subfolder", "folderType"], `outputs[${index}]`);
+  // §4.5：locator 按 source 分支，缺少 source 时按 comfy-view 读取。provider-output 需要 adapter 的
+  // openOutput 取回路径（§8.6 的 ingest kernel 行，下一切片），此处 fail-closed 拒绝。
+  const source = Object.prototype.hasOwnProperty.call(value, "source") ? value.source : "comfy-view";
+  if (source === "provider-output") {
+    fail(`outputs[${index}].source provider-output 的 openOutput 取回路径尚未装配`);
+  }
+  if (source !== "comfy-view") fail(`outputs[${index}].source must be comfy-view or provider-output`);
+  const comfyKeys = ["nodeId", "kind", "filename", "subfolder", "folderType"];
+  exactKeys(
+    value,
+    Object.prototype.hasOwnProperty.call(value, "source") ? ["source", ...comfyKeys] : comfyKeys,
+    `outputs[${index}]`,
+  );
   const text = (field: "nodeId" | "filename" | "subfolder"): string => {
     const item = value[field];
     if (typeof item !== "string" || item.length > 1_024 || /[\u0000-\u001f\u007f]/.test(item)) {
@@ -90,6 +102,7 @@ function locator(value: unknown, index: number): RemoteOutputLocator {
   if (!OUTPUT_KINDS.has(String(value.kind)) || !FOLDER_TYPES.has(String(value.folderType))) {
     fail(`outputs[${index}] enum invalid`);
   }
+  // 归一化时不落 source：ingest 请求体的 exactKeys 仍是固定五字段。
   return {
     nodeId,
     kind: value.kind as RemoteOutputLocator["kind"],
