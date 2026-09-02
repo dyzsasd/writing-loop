@@ -400,18 +400,30 @@ writing-loop 侧批次与样片：
 
 | 层 | 机制 | 增量 |
 |---|---|---|
-| 批次人工审批 | `production plan-shots --plan` 输出 `ShotBatchPlan`；`--confirm <batchPlanId>` 才写入，内部对每个 intent 以其自身 planId 调用 `commitProductionTaskEnqueue`（`hub/src/production-enqueue.ts` 的确认指纹为单 intent planId），批次 planId 只用于批次审批 | `batchPlanId = sha256(canonicalJson({workspace, project, intents[], policyDigest, degradations[]}))`；plan 文档含每镜估算（写明 modelId 与价目档）、总估算、后端选择理由 `decisions[]`、`phase: sample \| bulk`、`waves[]`（承接链顺序）、`droppedReferences`、`validation` 汇总、GPU 小时估算（不构成阻断条件）；策略变更即 batchPlanId 失效 |
+| 批次人工审批 | `production plan-shots --plan` 输出 `ShotBatchPlan`；`--confirm <batchPlanId>` 才写入，内部对每个 intent 以其自身 planId 调用 `commitProductionTaskEnqueue`（`hub/src/production-enqueue.ts` 的确认指纹为单 intent planId），批次 planId 只用于批次审批 | `batchPlanId = sha256(canonicalJson({workspace, project, intents[], policyDigest, degradations[]}))`（公式不变）；plan 文档含 `createdAt`（取批次文档同名字段）、`selectedShotIds`（本次选中镜头，升序）、每镜估算（写明 modelId 与价目档）、总估算、后端选择理由 `decisions[]`、`phase: sample \| bulk`、`waves[]`（本版恒为一波，见下文承接链取证）、`droppedReferences`、`validation` 汇总、GPU 小时估算（不构成阻断条件）；`shots[]` 每条另带 `selected` 与 `selectionReason`，未选中镜头的 `planId` / `profileId` / `wave` 均为 null；策略变更即 batchPlanId 失效 |
 | 样片门 | 对应 VCS「每类付费资产先出样本」（`skills/pipelines/cinematic/asset-director.md`） | `samplePolicy{sampleShotIds, requireApprovedSampleBeforeBulk: true}`，缺省取每个被选 **profile** 在批次顺序里的第一镜（`defaultSamplePolicy`）；`phase: bulk` 必须显式声明 `sampleShotIds`（要检查的是先前批次的样片，不能由本批次自证），`--confirm` 按 taskId 查本地权威账本检查 sample task 均为 `approved`。taskId 由 `<taskIdPrefix>-<shotId>` 拼出，因此 sample 批次与 bulk 批次必须使用同一个 `taskIdPrefix` |
-| 估算 | `budget.estimatedAmountMicros` 由 profile 价目 × durationSeconds（Seedance 按 token 公式，含二维价目与最低 token 用量）得出；`maximumAmountMicros = ceil(estimated × SHOT_BATCH_MAXIMUM_MULTIPLIER)`，本版 multiplier 为 1.5 | `production plan-shots --plan\|--confirm --project KEY --input FILE --config RUNTIME [--from-script EP [--scene N]…] [--json]` 读取 `executionProfileSnapshotFile` 声明的只读 profile 快照（零网络），并复算每条 `profileDigest`、校验 `execution.workflowSha256` 落在本项目 `workflows[]` 内，价目单一来源（§4.2） |
+| 估算 | `budget.estimatedAmountMicros` 由 profile 价目 × durationSeconds（Seedance 按 token 公式，含二维价目与最低 token 用量）得出；`maximumAmountMicros = ceil(estimated × SHOT_BATCH_MAXIMUM_MULTIPLIER)`，本版 multiplier 为 1.5 | `production plan-shots --plan\|--confirm --project KEY --input FILE --config RUNTIME [--from-script <集号> [--scene N]…] [--shot ID]… [--json]` 读取 `executionProfileSnapshotFile` 声明的只读 profile 快照（零网络），并复算每条 `profileDigest`、校验 `execution.workflowSha256` 落在本项目 `workflows[]` 内，价目单一来源（§4.2） |
 | QC 裁决 | `production qc --approve \| --reject --project KEY --task ID --by WHO [--note TEXT] [--json]`（`hub/src/production.ts`），写 approved / rejected 事件，`approval.taskRevision = revision - 1`；`--reject` 必须给出 `--note` 原因，非 `qc-pending` 的 task 一律拒绝 | 0-E 已合并 |
 
 `plan-shots` 的批次装配（`hub/src/production-shot-plan.ts`）：
 
-- `policyDigest` 覆盖 `phase`、`anchorPreference`、`compiler`、`casAuthority`、`taskIdPrefix`、`backendInstanceId`、`arcId`、项目声明（`allowedProcessingRegions`、`licenseCompliance`、`usesOutputToImproveModels`）、编译真正用到的 capability、被选中 profile 的 `{profileId, profileDigest}`、`samplePolicy`、intent 脚手架（`createdAt`、`useTerritories`、`rights`、`moderation`、`license`）与视觉侧四张表（`approvedCandidates`、`propStates`、`mappings`、`candidatesByShotId`）。`profileDigest` 已覆盖 execution、时长网格、价目与许可，价目一改 `batchPlanId` 立刻失效。
+- `policyDigest` 覆盖 `phase`、`anchorPreference`、`compiler`、`casAuthority`、`taskIdPrefix`、`backendInstanceId`、`arcId`、项目声明（`allowedProcessingRegions`、`licenseCompliance`、`usesOutputToImproveModels`）、编译真正用到的 capability、被选中 profile 的 `{profileId, profileDigest}`、`samplePolicy`、intent 脚手架（`createdAt`、`useTerritories`、`rights`、`moderation`、`license`）与视觉侧四张表（`approvedCandidates`、`propStates`、`mappings`、`candidatesByShotId`），另含本次选中的镜头集合 `selectedShotIds`。`profileDigest` 已覆盖 execution、时长网格、价目与许可，价目一改 `batchPlanId` 立刻失效；选中集合进入计算体后，同一份批次文档筛出不同镜头即为不同批次，`batchPlanId` 不同，批准不可互相顶替。
+- 按镜头筛选：批次文档的可选键 `shotIds` 与命令行 `--shot <id>`（可重复）等价，两者都给出时取交集（`resolveShotSelection`）。筛选在预填、合并与视觉填充**之后**、编译**之前**生效：被筛掉的镜头不编译、不进 `intents[]`、不计估算、不进 `validation.shots`，只在 `shots[]` 以 `selected: false` 与 `selectionReason` 列出。两种情形拒绝出计划：交集为空、筛选指向不存在的镜头（合并会改变存活 shotId，静默少跑几镜比报错更难发现）。`--plan` 带 `--shot` 而 `--confirm` 不带时两次的选中集合不同，`batchPlanId` 随之不同，`--confirm` 因指纹不匹配被拒。
 - `--from-script` 走剧本预填路径，输入的 `script{episodeFile, episode, sceneIndexes, options, patches, mergedPatches}` 有两处 patch：`patches` 在**合并前**补齐分镜字段（`camera` 必须在这一步落位，否则合并条件 3 恒不成立），`mergedPatches` 在**合并后**按存活 shotId 补齐 prompt 与连续性输入。两份 patch 都只允许替换 `camera`、`scene`、`cast`、`props`、`crowd`、`output`、`continuity`、`prompt` 八个成员，其中 `scene` 只接受 `lightingStateId` / `dressingVariantId`、`continuity` 只接受 `firstFrame` / `lastFrame` / `references` / `spatialPasses`；`sceneId`、时段、内外、`stageGroup`、`prevShotId` 是剧本与合并结果的事实，不接受改写。
 - 视觉侧默认值（`applyVisualDefaults`）在最后一步只补空位，人工 patch 写死的值不覆盖。seed 派生紧随其后、在逐镜选定 execution profile **之后**、编译**之前**执行，因此取的是合并、`mergedPatches` 与视觉填充之后的 draft（§4.1）。`shots[]` 直接给出的 draft 不派生：派生只在 `--from-script` 路径打开（`deriveSeedWhenNull`）。
-- 预填与合并的 warnings（首个动作行之前的对白、合并时被丢弃的字段）按 shotId 进入 `validation.shots[].issues`（`source: prefill | merge | visual | compile`）并计入 `validation.warnings`。
+- 预填与合并的 warnings（首个动作行之前的对白、合并时被丢弃的字段）按 shotId 进入 `validation.shots[].issues`（`source: prefill | merge | visual | upstream | compile`）并计入 `validation.warnings`。前三者是装配期提示，`compile` 是 §4.1 的编译层错误码表，`upstream` 是计划期的上游取证（下一条），只有 `upstream-take-unavailable` 一个码（error 级；它属于 plan 层词表，不进 §4.1 的编译层 `ValidationReport`）。
+- `previous-shot-last-frame` 的上游取证在计划期进行，读本项目的本地权威账本（`--plan` 仍为零写入）。承接只有一种成立方式，四条全部满足才放行：`origin.taskId` 已在本项目账本内；该 task 状态 ∈ {`qc-pending`, `approved`}（`dispatch-pending` / `running` / `failed` / `rejected` 的 take 没有可用尾帧）；该 task 的 subject 就是 `origin.shotId` 那一镜；该 take 唯一的 `image/*` 资产与本镜声明的尾帧 `sha256` / `byteLength` / `mediaType` 逐项相同。`uri` 不参与比对：同一份对象在账本里是 ingest 登记的 `urn:sha256:`，在批次文档里写成 `cas://`（§6.4）。任一条不满足即在该镜记一条 `upstream-take-unavailable`（error），整批随之 `blocked`，`--confirm` 拒绝提交。
+- 批内不成链：ShotRequest 不可变且携带尾帧的 `asset.sha256`，上游尚未出片时该 digest 无从得知；即便猜对，`--confirm` 之后的精确重放也会看到上游停在 `dispatch-pending` 而判为不可用。因此批次内部没有顺序约束，`waves[]` 的形状保留给消费方但恒为一波。逐镜推进的走法：镜头 N 出片并 QC 之后，下一个批次用 `--shot` 选镜头 N+1，其 `continuity.firstFrame` 的 `origin.taskId` 填镜头 N 的 task id、`asset` 填镜头 N 的实际尾帧 AssetRef。
 - `--plan` 严格零写入；含 error 级校验问题的批次一律拒绝提交（`--plan` 仍输出完整文档，退出码为 1）。
+
+批次审批记录（`hub/src/production-batch-approval.ts`）：
+
+- `--confirm` 逐镜提交时在 immutable intent 旁边写一份可读记录，路径 `.writing-loop/<project>/production-batch-approvals.v1/<taskId>.json`，exact keys `{version, kind, taskId, shotId, batchPlanId, taskIdPrefix, phase, sampleShotIds, approvedAt}`（`kind` 为 `writing-loop/shot-batch-approval`）。它是继 immutable intent、CAS 内 ShotRequest 之后账本外的第三份不可变伴生文件：账本事件的 payload 与 digest 一个字节都不改，已有 task 的事件重放结果不变。
+- `approvedAt` 取批次文档的 `createdAt`——进入 `batchPlanId` 计算体的同一时刻。取 `--confirm` 的墙上时钟会让精确重放写出另一份字节，幂等性随之失效。
+- 只在本次 `--confirm` 确实创建了 task 的那一镜上写。task 已在账本内（精确重放、样片批次的镜头又出现在 bulk 批次里、2b 之前发布的旧 task）时本次没有发布任何东西，一律不写也不改；否则一份只是路过的批次会把自己的 `batchPlanId` 绑到别人发布的 take 上。
+- 写入纪律与 intent 相同：同目录临时文件 → fsync → `link(2)` 定名，崩溃至多留下临时文件。定名冲突的判据也相同：逐字段相同即认作精确重放并沿用既有文件；不同即拒绝覆盖，并报出文件路径与两边的 `batchPlanId`（那是一条残留的孤儿记录，由操作者核对后删除），不静默沿用。
+- 崩溃窗口（task 已创建、记录尚未落盘）退化为该 take 只出 `qc-approved` 一条门，重跑 `--confirm` 也不补写（task 已在账本内）。取舍是宁可少一条门，也不发出可能绑错批次的门。
+- 这份记录是 §4.8 `batch-approved` 与 `sample-approved` 两条门的唯一取证来源。
 
 机器门与 gateway 准入：
 
@@ -422,6 +434,19 @@ writing-loop 侧批次与样片：
 - `obligations.noModelImprovement` 是编译期专属条款，gate 不判定：输出是否被用于改进其他模型是产物的后续使用方式，dispatch 前拿不到可取证的事实，只能按项目声明的 `usesOutputToImproveModels` 在编译期检查（§4.1、AI-SPEC 使用约束）。
 - `SubmissionAdmissionPolicy.acquire/settle`（`hub/src/production-job-gateway.ts`）按 backend 配置并发上限（§3），只加配置。
 - reservation 语义不变：估算是计划事实，reservation 以 maximum 为准。
+
+证据登记（`hub/src/production-evidence.ts`）。rights / moderation / license 三种 evidence 在 intent gate 上都要求一个稳定的 AssetRef，该命令把证据文件写入 workspace CAS 并输出可直接粘进批次文档对应段落的对象片段：
+
+```
+production evidence register --project KEY --kind rights|license --file PATH --config RUNTIME [--json]
+production evidence register --project KEY --kind moderation --file PATH --config RUNTIME --status STATUS --reviewed-at <规范 UTC ISO> [--json]
+```
+
+- 写入 `.writing-loop/<project>/production-cas.v1/sha256/<digest>`，内容寻址，重复登记同一份文件是幂等的（`casObjectCreated: false`）。输出片段按 kind：`rights` 给 `{evidence}`，`moderation` 给 `{status, reviewedAt, evidence}`，`license` 给 `{licenseSha256, evidence}`。片段只填这份文件能取证的部分，rights 的地域与有效期、license 的签发方与义务由操作者在批次文档里补齐。
+- `mediaType` 按内容判定，不看扩展名：`%PDF-` 魔数 → `application/pdf`；可往返的 UTF-8 且去空白后以 `{` / `[` 开头并能 JSON 解析 → `application/json`；其余可往返的 UTF-8 且除制表 / 换行 / 回车外无控制字符 → `text/plain`。以 `{` / `[` 开头却解析失败的回落到文本判据（带 BOM 的 JSON、以 `[Exhibit A]` 开头的许可证正文都是这一形态）。三者都判不出即拒绝登记，不退化为 `application/octet-stream`：AssetRef 的 `mediaType` 随 intent 固化进不可变证据。
+- 单份证据上限 4 MiB（`MAX_PRODUCTION_EVIDENCE_BYTES`），比 CAS 的文档上限 1 MiB 宽：证据 AssetRef 不进 intent `inputs[]`、也不经 handoff 导出，不受 stage 与导出侧的文档判据约束。空文件、非单链接普通文件、读取期间被替换的文件一律拒绝。
+- `--kind moderation` 必须显式给出 `--status`（词表与 intent 侧 `parseModeration` 同源，导出为 `PRODUCTION_MODERATION_STATUSES`：`passed` / `not-reviewed` / `failed`）与 `--reviewed-at`（规范 UTC ISO），缺一即拒绝；其余两个 kind 不接受这两个参数。审核结论与审核时刻是文件之外的人工事实，命令不代填。
+- `--config` 必填，CAS authority 取 runtime config 的 `localAssetSource.casAuthority`，不另设 `--authority`：猜错的 authority 会让 worker 的本机对象源以 authority-mismatch 失败。authority 判据由 `production-domain.ts` 导出的 `PRODUCTION_CAS_AUTHORITY`（`/^[a-z0-9][a-z0-9-]{0,62}$/`）单点持有，runtime config、profile 快照、本机对象源、ShotRequest 装配与证据登记五处共用。
 
 审批点总表：
 
@@ -459,7 +484,17 @@ writing-loop 侧批次与样片：
 | assets | asset_manifest（`sha256 / role / provider_job_id / plan_sha256 / writing_loop_task_id / cost_usd / prompt / model`，`license` 填 handoff take 的许可摘要，如 `MiniMax H3 Community License; attribution required`） | 同上 | importer |
 | edit / compose / publish | edit_decisions（importer 提供草稿，每镜一条 cut，按 `storyboardDurationSeconds` 裁切）/ render_report + final_review / publish_log | edit、compose 不设门，publish 人工；publish 前检查：asset_manifest 中任一 take 的 license 含署名义务时，publish_log 必须含 `attribution: ["MiniMax H3"]` 且成片或发布文案中出现该署名 | agent |
 
-预授权记录：importer 在 scene_plan 与 assets 检查点 `metadata.gates[]` 写入 `GateRecord{gate: "qc-approved", bindsTo{planSha256, requestSha256}, approvedBy, approvedAt, system: "wl-qc", handoffDigest}`，并在 decision_log 追加 `approval_policy` 与逐 take 的 `provider_selection`（写明供应商由 writing-loop 批次审批锁定）。Backlot `gate_skipped` 审计（`backlot/state.py`）据此可追溯。`CostTracker` 保持 observe，take 的 `cost` 写入 `cost_log.json`。
+预授权记录：handoff 契约 v2 的每个 take 带 `gates[]`，三条门各有各自的取证来源，缺一即不出：
+
+| gate | 取证来源 | `bindsTo.planSha256` | `approvedBy` / `approvedAt` | `system` |
+|---|---|---|---|---|
+| `qc-approved` | 账本的 QC 裁决（`approval.decidedBy` / `decidedAt`） | 不可变 intent 重算出的单 intent 确认指纹（即 `--confirm` 逐镜提交时用的那一个） | QC 裁决人与裁决时刻 | `wl-qc` |
+| `batch-approved` | 批次审批记录（§4.7） | 该记录的 `batchPlanId` | `wl-plan-shots` / 批次文档的 `createdAt` | `wl-plan-shots` |
+| `sample-approved` | 批次审批记录，且 `shotId ∈ sampleShotIds` | 该记录的 `batchPlanId` | 该样片自己的 QC 裁决人与裁决时刻 | `wl-sample-gate` |
+
+三条门的 `bindsTo.requestSha256` 都是该镜 ShotRequest 的 digest。无批次审批记录的 task（2b 之前的 `--confirm` 发布）只出 `qc-approved`；不在 `sampleShotIds` 内的镜头不出 `sample-approved`；`sample-approved` 只对已 approved 的样片 take 出；记录的 `taskId` 或 `shotId` 与 take 对不上时整份交接失败。`batch-approved` 的 `approvedBy` 记的是签发这条门的控制面，不冒充人工审批人：本版 `--confirm` 只接受批次指纹，没有操作者身份输入；人工署名需后续为 `--confirm` 增加 `--by`。
+
+VCS importer（`978c632`）把每个 take 的全部 GateRecord 按 take 顺序、take 内原顺序复制进 scene_plan 与 assets 检查点的 `metadata.gates[]`（各补 `handoffDigest`）。每种门每个 take 至多一条，`qc-approved` 必需；三条门都核对 `bindsTo.requestSha256` 等于该 take 的 `shotRequest.sha256`，并校验 `planSha256` 为 64 位小写 sha256、`approvedAt` 为规范 UTC ISO、`approvedBy` 与 `system` 非空。门的语义由 writing-loop 决定，importer 不解释。`asset_manifest` 与 `decision_log` 的 `plan_sha256` 取自 `qc-approved` 门（单 intent 计划摘要）。decision_log 另追加 `approval_policy` 与逐 take 的 `provider_selection`（写明供应商由 writing-loop 批次审批锁定）。Backlot `gate_skipped` 审计（`backlot/state.py`）据此可追溯。`CostTracker` 保持 observe，take 的 `cost` 写入 `cost_log.json`。
 
 ## 5. 后端映射
 
@@ -607,7 +642,7 @@ writing-loop 侧批次与样片：
 
 ### 6.4 承接链
 
-`carryFrom`（origin `previous-shot-last-frame`）指向上一镜 task 已 ingest 的 `role: last-frame` 资产，来源任务状态 ∈ {qc-pending, approved}（修正 F10：不要求 approved，避免批量退化为逐镜串行）。来源任务被 rejected 后，依赖它的未提交 intent 需要重新出一版批次（`plan-shots --plan` 重新装配，`batchPlanId` 随之改变；本版没有独立的 `--refresh` 子选项），已提交的在 QC 摘要标注「上游被拒」。Seedance 由 `return_last_frame` 直接产出尾帧；Veo 与 H3 由 ingest kernel 执行 `ffmpeg -sseof -0.05 -i <video> -frames:v 1 -c:v png` 产出第二个 `urn:sha256` AssetRef，metadata 记录 `derivedFrom: {sha256, tool: "ffmpeg", version}`。再登记步骤：ingest 产出的 AssetRef 为 `urn:sha256:<digest>`，stage kernel 不接受无 authority 的 URI；编译器把 carryFrom 资产改写为 `cas://<cas-authority>/sha256/<digest>`（sha256 不变，ingest 已把对象写入同一 CAS 目录），gateway registry 为该 authority 配置 `ProductionStageAssetResolver` 与 `assetPolicies` 条目。本版 gateway 为单实例，H3 输出与下一镜 staging 共用 GPU VM 持久盘上的同一 CAS 目录，不涉及跨实例取回。
+`carryFrom`（origin `previous-shot-last-frame`）指向上一镜 task 已 ingest 的 `role: last-frame` 资产，来源任务状态 ∈ {qc-pending, approved}（修正 F10：不要求 approved，避免批量退化为逐镜串行）。这一条件与尾帧身份在 `plan-shots` 的计划期取证（§4.7）：读本项目的本地权威账本（只读，`--plan` 仍为零写入），核对 `origin.taskId` 已在账本内、状态落在上述两个值上、该 task 的 subject 就是 `origin.shotId` 那一镜、该 take 唯一的 `image/*` 资产与本镜声明的尾帧 `sha256` / `byteLength` / `mediaType` 逐项相同（`uri` 不比对：账本里是 ingest 登记的 `urn:sha256:`，批次文档里写成 `cas://`）。任一条不满足即记 `upstream-take-unavailable`（error），整批随之 `blocked`，`--confirm` 拒绝提交。因此承接只成立于已入库并到达 QC 的上游 take，批内不成链，`waves[]` 恒为一波；逐镜推进的走法是镜头 N 出片并 QC 之后，下一个批次用 `--shot` 选镜头 N+1，`origin.taskId` 与 `carryFrom` 的 AssetRef 都填镜头 N 的实际值。来源任务被 rejected 后，依赖它的未提交 intent 需要重新出一版批次（`plan-shots --plan` 重新装配，`batchPlanId` 随之改变；本版没有独立的 `--refresh` 子选项），已提交的在 QC 摘要标注「上游被拒」。Seedance 由 `return_last_frame` 直接产出尾帧；Veo 与 H3 由 ingest kernel 执行 `ffmpeg -sseof -0.05 -i <video> -frames:v 1 -c:v png` 产出第二个 `urn:sha256` AssetRef，metadata 记录 `derivedFrom: {sha256, tool: "ffmpeg", version}`。再登记步骤：ingest 产出的 AssetRef 为 `urn:sha256:<digest>`，stage kernel 不接受无 authority 的 URI；编译器把 carryFrom 资产改写为 `cas://<cas-authority>/sha256/<digest>`（sha256 不变，ingest 已把对象写入同一 CAS 目录），gateway registry 为该 authority 配置 `ProductionStageAssetResolver` 与 `assetPolicies` 条目。本版 gateway 为单实例，H3 输出与下一镜 staging 共用 GPU VM 持久盘上的同一 CAS 目录，不涉及跨实例取回。
 
 正本在本机的输入（`inputs[0]` 的 ShotRequest、操作者上传的首帧、已批准候选图）由 worker 送到 GPU VM，不经手工复制：gateway 的 `assets` 资源同一个 URL 支持 `GET|HEAD|PUT`（bearer 与其余路由相同），`PUT` 的请求体是原始字节、服务端重算 sha256 必须等于路径中的 digest（否则 400 且不落盘），同字节重放为幂等 200、同名不同字节为 409；媒体类型由字节嗅探判定，图片按 registry 的 `maxInputImageBytes` 限长，嗅探不出类型时按 ShotRequest 内容校验（与 stage kernel 同一判据）、上限 1 MiB，视频 / 音频等 provider 产物只经 ingest kernel 入库。worker 侧 `HttpProductionInputStager` 在 PUT `/stages` 之前对每个 `cas://` 输入先 `HEAD`，404 才上传；上传目标取 `stagingProfiles[].baseUrl`（不是顶层 `gateway.baseUrl`）——对象必须落到解析 `cas://` 的那台主机上。上传失败即该次 stage 失败（fail-closed，不进入提交），错误码见 §7。对象源为 runtime config 的 `localAssetSource: {version: 1, kind: "workspace-cas", casAuthority}`（`hub/src/production-local-asset-source.ts` 的 `WorkspaceCasLocalAssetSource`），只接受与该 authority 相同的 `cas://` URI，读回时逐项核对 digest 与 `byteLength`。本机 workspace CAS 的路径为 `.writing-loop/<project>/production-cas.v1/sha256/<digest>`（`hub/src/production-cas.ts` 的 `productionCasObjectPath`，目录常量 `PRODUCTION_CAS_DIRECTORY` / `PRODUCTION_CAS_ALGORITHM_DIRECTORY`），单个对象上限 `MAX_PRODUCTION_CAS_OBJECT_BYTES` = 64 MiB，ShotRequest 这类文档上限 `MAX_PRODUCTION_CAS_DOCUMENT_BYTES` = 1 MiB。路径由装配层按 workspace root 与 project 推出，不写进配置文件。同一个对象源也是契约 v2 逐镜 prompt / seed 的独立复核来源（§5.3）：worker 提交前从本机正本重新读出两值，与 stage 回执的 `shotRequest` 投影逐字比对，不一致即 `workflow-invalid`。Phase 3 / Phase 4 增开第二个 gateway 实例（云 adapter 与云输出 ingest，可直接跑在本机 loopback）后，跨实例 resolver 经对端的 `assets` GET 路由取对象并核对 sha256。
 
@@ -715,11 +750,13 @@ worker runtime config：`backends[]`、`gateway`（ingest）与 `stagingProfiles
 
 ### 8.3 Phase 2：VCS 导入与合成（EP001 场 1-1 端到端试点）
 
+落地状态：writing-loop 侧已分两片合并（2a `0190d19` handoff 契约 v2 与 `--export-dir`；2b `ee65459` `plan-shots` 补强），VCS 侧 importer 已提交（`978c632`）。端到端试点待 GPU 会话。
+
 | 项 | 内容 |
 |---|---|
-| 改动文件 | writing-loop：`hub/src/production.ts`（`handoff --export-dir`）、`production-studio-handoff.ts`（契约 v2）；VCS：新增 `pipeline_defs/scripted-drama.yaml`、`skills/pipelines/scripted-drama/{proposal-director,edit-director}.md`、`skills/video-creation-studio/scripts/import_handoff.py`、`tests/contracts/test_import_handoff.py`；修改 `skills/video-creation-studio/scripts/studio.py`（`import-handoff` 命令）、`skills/video-creation-studio/references/execution-contract.md`、`schemas/artifacts/scene_plan.schema.json`、`asset_manifest.schema.json`、`decision_log.schema.json`、publish 校验脚本、`backlot/state.py`、`docs/PROVIDERS.md` |
-| 交付物 | `handoff --export-dir`（经 gateway `assets` GET 路由下载 `urn:sha256` 资产，文件名 `<sha256>.<ext>`）；handoff 契约 v2（takes 增加 `shotRequest: AssetRef`、`execution` 摘要、`cost`、`assetRoles[]`、`gates[]`、`license` 摘要）；scripted-drama 清单；importer；scene_plan / asset_manifest / decision_log schema 增字段；proposal / edit director 技能 |
-| 验收标准 | 导入后 `studio.py status` 报告 `next_stage: proposal`，proposal 批准后报告 `next_stage: edit`；`video_compose` 以 ffmpeg runtime 渲染 9:16 成片，`_pre_compose_validation` 通过；Backlot `gate_skipped` 为空；importer 契约测试覆盖 digest 不匹配、sha256 不匹配、非 approved take 均拒绝；publish 署名检查对含 H3 take 的 manifest 生效（fixture），`publish_log.attribution` 含 `MiniMax H3` |
+| 改动文件 | writing-loop：`hub/src/production.ts`（`handoff --export-dir`、`plan-shots --shot`、`evidence register`）、`production-studio-handoff.ts`（契约 v2 与三条门）、`production-shot-plan.ts`（按镜头筛选、上游取证、批次审批记录写入）、新增 `production-batch-approval.ts` 与 `production-evidence.ts`；VCS：新增 `pipeline_defs/scripted-drama.yaml`、`skills/pipelines/scripted-drama/{proposal-director,edit-director}.md`、`skills/video-creation-studio/scripts/import_handoff.py`、`tests/contracts/test_import_handoff.py`；修改 `skills/video-creation-studio/scripts/studio.py`（`import-handoff` 命令）、`skills/video-creation-studio/references/execution-contract.md`、`schemas/artifacts/scene_plan.schema.json`、`asset_manifest.schema.json`、`decision_log.schema.json`、publish 校验脚本、`backlot/state.py`、`docs/PROVIDERS.md` |
+| 交付物 | `handoff --export-dir`（经 gateway `assets` GET 路由下载 `urn:sha256` 资产，文件名 `<sha256>.<ext>`）；handoff 契约 v2（takes 增加 `shotRequest: AssetRef`、`execution` 摘要、`cost`、`assetRoles[]`、`gates[]`、`license` 摘要）；`plan-shots` 补强（2b）：批次审批记录 `production-batch-approvals.v1/<taskId>.json` 与据此发出的 `batch-approved` / `sample-approved` 两条门、按镜头筛选（`--shot` 与批次文档 `shotIds`）、计划期上游取证（`upstream-take-unavailable`）、`production evidence register`、CAS authority 正则统一为 `PRODUCTION_CAS_AUTHORITY`；scripted-drama 清单；importer；scene_plan / asset_manifest / decision_log schema 增字段；proposal / edit director 技能 |
+| 验收标准 | 导入后 `studio.py status` 报告 `next_stage: proposal`，proposal 批准后报告 `next_stage: edit`；`video_compose` 以 ffmpeg runtime 渲染 9:16 成片，`_pre_compose_validation` 通过；Backlot `gate_skipped` 为空；importer 契约测试覆盖 digest 不匹配、sha256 不匹配、非 approved take 均拒绝；publish 署名检查对含 H3 take 的 manifest 生效（fixture），`publish_log.attribution` 含 `MiniMax H3`；2b：批次审批记录只在确实创建 task 时写、孤儿记录拒绝覆盖、无记录的 take 只出 `qc-approved` 各 1 例，`--shot` 与 `shotIds` 取交集及无交集 / 指向不存在镜头 / `--plan` 带 `--shot` 而 `--confirm` 不带（指纹不匹配）各 1 例，`upstream-take-unavailable` 的四条判据逐条有用例，证据登记的三种 mediaType 判定与 `--kind moderation` 缺 `--status` / `--reviewed-at` 被拒各 1 例 |
 | 前提条件 | Phase 1 的 9:16 takes；1-1 场共 4 个 ▲ 行（【特效】×2、【特写】×1、1 条 VO），按 §6.1 的合并规则确定实际镜头数；成本为 GPU 小时（Spot 约 1.55 USD/h），无 provider 账单；本机 VCS 环境（Python 环境、ffmpeg、`pipeline_defs` 新清单）；导出期间 GPU VM 必须运行（资产在 VM 持久盘），`handoff --export-dir` 后 rsync 到本机 |
 
 ### 8.4 Phase 3：Seedance over BytePlus（账户就绪后）

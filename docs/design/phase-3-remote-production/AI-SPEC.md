@@ -510,9 +510,11 @@ Node 20.11 的全局 WebSocket 需要 `--experimental-websocket`；因此 WS wat
   Unicode code-unit 顺序递归排序、安全整数；CLI 明确输出算法名与 digest。handoff `createdAt` 不得
   早于所绑定 production revision/approval facts。
 - CLI `production plan-shots --plan|--confirm --project KEY --input FILE --config RUNTIME` 的 `--plan`
-  严格零写入：它只读剧本、视觉清单与 runtime config 声明的只读 execution profile 快照，零远端网络，
-  输出可审批的 `ShotBatchPlan`；`--confirm <batchPlanId>` 重算同一计划后才写 workspace CAS、intent 与
-  task。runtime config 路径与 worker 同为 owner-only 文件，Studio / API / 浏览器都不能提供它。
+  严格零写入：它只读剧本、视觉清单、本地权威 ledger（`previous-shot-last-frame` 的上游状态与尾帧身份
+  取证，只读、零写入）与 runtime config 声明的只读 execution profile 快照，零远端网络，输出可审批的
+  `ShotBatchPlan`；`--confirm <batchPlanId>` 重算同一计划后才写 workspace CAS、intent、task，以及批次
+  审批记录（`production-batch-approvals.v1/<taskId>.json`，只在 task 创建成功后写）。runtime config
+  路径与 worker 同为 owner-only 文件，Studio / API / 浏览器都不能提供它。
 - CLI `production qc --approve|--reject --project KEY --task ID --by WHO [--note TEXT]` 只向本地权威
   ledger 追加 approved / rejected 事件并绑定审批前的 task revision；非 `qc-pending` 的 task 一律拒绝，
   `--reject` 必须给出 `--note`。它不连接 provider，也不触碰 gateway。
