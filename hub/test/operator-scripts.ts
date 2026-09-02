@@ -37,5 +37,15 @@ for (const script of scripts) {
   ok(syntax.status === 0, `${rel}：bash -n 语法检查通过${syntax.status === 0 ? "" : `\n  ${syntax.stderr.trim()}`}`);
 }
 
+// 2026-09-02 回归：G4 机型不接受 pd-* 启动盘（API：pd-balanced disk type cannot be used by g4-standard-48）。
+{
+  const vmScript = readFileSync(join(repoRoot, "writing-loop-operator", "scripts", "gcp-h3-vm.sh"), "utf8");
+  const createBlock = /gc compute instances create[\s\S]*?--metadata-from-file/.exec(vmScript)?.[0] ?? "";
+  ok(vmScript.includes('BOOT_DISK_TYPE="${WL_GPU_BOOT_DISK_TYPE:-hyperdisk-balanced}"')
+    && createBlock.includes('--boot-disk-type "$BOOT_DISK_TYPE"')
+    && !/--boot-disk-type\s+pd-/.test(createBlock),
+    "gcp-h3-vm.sh：启动盘类型默认 hyperdisk-balanced 且可用 WL_GPU_BOOT_DISK_TYPE 覆盖（G4 机型不接受 pd-*）");
+}
+
 console.log(fails === 0 ? "\nOPERATOR_SCRIPTS_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

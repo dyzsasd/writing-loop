@@ -2,7 +2,7 @@
 # GPU VM（MiniMax H3 over ComfyUI）按批次启停。
 #
 # 机型与镜像由规格固定：Spot g4-standard-48、image-family wl-comfy-h3-g4-sg、asia-southeast1。
-# 持久化启动盘 200 GB 承载 job record、CAS objects 与 ingest 产物，且**不随实例删除**
+# 持久化启动盘 200 GB（hyperdisk-balanced，G4 不接受 pd-*）承载 job record、CAS objects 与 ingest 产物，且**不随实例删除**
 # （--no-boot-disk-auto-delete）；`--instance-termination-action=STOP` 让 Spot 抢占只停机不删盘。
 # 实例默认无外网 IP、不加 http-server / https-server 标签。当前拓扑（操作者 2026-09-02 裁定）：
 # worker 与全部 writing-loop 控制面在操作者本机，经 IAP ssh 隧道访问 VM 上的 gateway，因此 gateway 与
@@ -21,7 +21,7 @@
 #
 # 环境变量（都有默认值）：
 #   WL_GPU_PROJECT WL_GPU_ZONE WL_GPU_INSTANCE WL_GPU_IMAGE_FAMILY WL_GPU_IMAGE_PROJECT
-#   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_SUBNET WL_GATEWAY_PORT WL_COMFY_PORT
+#   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_BOOT_DISK_TYPE WL_GPU_SUBNET WL_GATEWAY_PORT WL_COMFY_PORT
 #   WL_GPU_MAX_UPTIME_MINUTES（开机自动关机硬上限，默认 300；0 关闭）
 # 停机纪律：不需要 GPU 时必须 `stop`，该命令会轮询确认 TERMINATED；即使忘记，startup-script 也会到点自动关机。
 set -euo pipefail
@@ -33,6 +33,8 @@ IMAGE_FAMILY="${WL_GPU_IMAGE_FAMILY:-wl-comfy-h3-g4-sg}"
 IMAGE_PROJECT="${WL_GPU_IMAGE_PROJECT:-$PROJECT}"
 MACHINE="${WL_GPU_MACHINE:-g4-standard-48}"
 BOOT_GB="${WL_GPU_BOOT_GB:-200}"
+# G4 机型只接受 Hyperdisk（pd-* 会被 API 拒绝：pd-balanced disk type cannot be used by g4-standard-48）。
+BOOT_DISK_TYPE="${WL_GPU_BOOT_DISK_TYPE:-hyperdisk-balanced}"
 SUBNET="${WL_GPU_SUBNET:-default}"
 GATEWAY_PORT="${WL_GATEWAY_PORT:-8790}"
 COMFY_PORT="${WL_COMFY_PORT:-8188}"
@@ -100,7 +102,7 @@ cmd_create() {
     --image-family "$IMAGE_FAMILY" \
     --image-project "$IMAGE_PROJECT" \
     --boot-disk-size "${BOOT_GB}GB" \
-    --boot-disk-type pd-balanced \
+    --boot-disk-type "$BOOT_DISK_TYPE" \
     --no-boot-disk-auto-delete \
     --subnet "$SUBNET" \
     --no-address \
