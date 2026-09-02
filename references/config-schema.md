@@ -769,6 +769,96 @@ server profile 与 Comfy 兼容性证明替换示例值；参见 [Comfy H3 教�
 [H3 core nodes](https://github.com/Comfy-Org/ComfyUI/blob/master/comfy_extras/nodes_minimax_h3.py) 与
 [官方 workflow templates](https://github.com/Comfy-Org/workflow_templates/tree/main/templates)。
 
+## Server-only production gateway registry（不属于 workspace config）
+
+私有制片 gateway 进程使用第二份 owner-only JSON，通过
+`writing-loop-production-gateway --config /absolute/production-gateway.json` 装配。它与 worker 的
+`production-runtime.json` 是**两台主机上的两份文件**：worker 只持有 `profileId` 与已钉住的 digest，
+gateway registry 才持有 raw ComfyUI origin、template graph、价目与 CAS authority。完整且由 strict
+parser 执行验证的 v1 fixture 见
+[`AI-SPEC.md` §9B.1](https://github.com/dyzsasd/writing-loop/blob/main/docs/design/phase-3-remote-production/AI-SPEC.md)。
+
+文件要求与 worker runtime config 相同：当前 euid 所有、单链接普通文件，mode 只能 `0400`/`0600`，
+只保存环境变量名，不保存 token。顶层 exact keys：`version`、`listen`、`auth`、`backends`、
+`executionProfiles`、`stageProfiles`、`casAuthority`、`objectsRoot`、`ingestRoot`、`jobStateRoot`、
+`admission`、`reconcilePolicy`。
+
+- `listen{host, port}`：`host` 只接受 RFC1918 私网 IPv4（10/8、172.16/12、192.168/16）或 `127.0.0.1`
+  字面地址；`0.0.0.0`、公网 IP 与域名在监听前被拒。`port` 为 0–65535，`0` 表示取临时端口（测试用），
+  部署固定端口。
+- `auth{bearerEnv}`：静态 bearer 的环境变量名，由 systemd `EnvironmentFile`（0600）注入。全部路由
+  要求 `Authorization: Bearer <该变量的值>`，缺失或错误一律 401。bearer 短于 16 字符时进程拒绝启动。
+- `backends[]`：v1 只支持 `kind: "comfyui"`，字段为 `backendInstanceId`、`comfyBaseUrl`（只接受
+  literal loopback HTTP，ComfyUI 与 gateway 同机）、`profileIds[]`。数组长度必须为 1：jobs 内核只
+  绑一个 raw adapter，第二个 backend 需要独立实例，解析层直接拒绝。
+- `executionProfiles[]`：`execution` 是 §4.2 execution profile 正本
+  （`kind: "writing-loop/execution-profile"`，含 profileId、modelFamily、operation、backendInstanceId、
+  workflowSha256 / modelSha256 / parametersSha256、variant、shortEdge、durationSeconds、aspectRatio、
+  resolution、generateAudio）；`workflowFile` 是相对 registry config 的 pinned graph
+  路径（解析规则同 `workflows[].file`：无 `..`、无 symlink component、单链接普通文件、digest 必须等于
+  `execution.workflowSha256`）；`h3GraphContract` 与 `stageProfileId` 绑定 graph 与 slot 契约；
+  `priceTable` 为 `null` 或 `{basis: "tariff", currency: "USD", microsPerOutputSecond, priceAsOf, source}`；
+  `license` 是 `ProductionLicenseEvidence` 形态（`parseProductionLicenseEvidence` 解析），署名 /
+  收入阈值 / 禁止改进模型三项义务只在其 `obligations`，与 intent gate 同一判据，execution profile
+  本身不再带 license 字段；`processingRegions[]` 是 ISO-3166 alpha-2 实际处理地域。intent 级
+  execution 由 profile 推导，不二次配置。
+- `stageProfiles[]`：`providerCasNamespace`（以 `/sha256` 结尾）、有序 `inputs[]{index, slot, mediaTypes}`
+  与 H3 `bindings[]`；两者逐位按 index/slot 对齐，否则拒绝。`mediaTypes` 必须落在 stage 内核的允许
+  集合内（`audio/flac|mpeg|ogg|wav`、`image/gif|jpeg|png|webp`、`video/mp4|webm`）、去重且按字典序
+  升序、至多 32 项——与内核请求期的 `parseProfileInput` 同一规则，避免「启动成功但每个 stages 请求
+  500」。
+- `casAuthority`：stage 资产只接受 `cas://<casAuthority>/sha256/<digest>`，解析到本机 ingest CAS
+  （承接链的尾帧因此不需要跨主机取回）。
+- `objectsRoot` / `ingestRoot` / `jobStateRoot`：持久化启动盘上的三个独立绝对路径。stage 内核把资产
+  硬链接到 `<objectsRoot>/objects/<namespace>/<sha256>`（ComfyUI 必须能读该目录）；ingest CAS 在
+  `<ingestRoot>/blobs/sha256/`；`jobStateRoot` 下由 gateway 划分 `jobs/`（不可变 job record）与
+  `storage-admission/`（durable storage slot）。三者不得相等，也不得互相嵌套。
+- `admission{maxConcurrentPerBackend}`：per-backend **在途提交数上限**（1–256）——同时持有 admission
+  slot 而尚未 settle 的提交数，不是 provider 侧的并发渲染数。slot 在 `settle()` 时释放（一次 allow
+  只落一个 `submitted | not-submitted | submission-unknown` outcome）。v1 为单实例 gateway，该
+  authority 即进程内幂等记录；同一 backend 出现第二个 gateway 进程时必须换成共享 durable 实现。
+- `reconcilePolicy{unknownRemoteJob, minObservationAgeSeconds}`：Spot 抢占重启后的判定声明
+  （`provider-failed-preempted` 或 `orphaned`，以及取该判定前的最短观察秒数）。本版由操作者的
+  reconcile 流程消费，gateway 进程自身不改写任何账本。
+
+### 只读 execution profile 快照
+
+`writing-loop-production-gateway --config FILE --export-profile-snapshot OUT` 只导出快照后退出，不监听
+端口。导出前逐个证明 pinned graph（存在、单链接、digest 等于 `execution.workflowSha256`、通过 H3 模板
+断言），任一条不成立即拒绝导出，避免发布一份本机并未部署的 digest。OUT 以 `0600` 写入，格式为：
+
+```json
+{
+  "version": 1,
+  "kind": "writing-loop/execution-profile-snapshot",
+  "casAuthority": "wl-sg",
+  "profiles": [
+    {
+      "version": 1,
+      "profileId": "h3-fl2va-portrait",
+      "profileDigest": "<sha256 of the canonical entry without this field>",
+      "execution": { "...": "§4.2 execution profile 正本" },
+      "durationGrid": [8],
+      "priceTable": { "version": 1, "basis": "tariff", "currency": "USD", "microsPerOutputSecond": 430,
+                      "priceAsOf": "2026-08-28T00:00:00.000Z", "source": "..." },
+      "license": { "version": 1, "status": "verified", "basis": "community", "territories": ["SG"],
+                   "licenseSha256": null, "evidence": null, "issuedBy": "MiniMaxAI",
+                   "issuedAt": "2026-01-01T00:00:00.000Z", "expiresAt": null,
+                   "obligations": { "attribution": "MiniMax H3", "revenueThresholdUsd": 20000000,
+                                    "noModelImprovement": true } },
+      "processingRegions": ["SG"]
+    }
+  ]
+}
+```
+
+`profileDigest` 是去掉该字段后条目的 canonical JSON sha256；`durationGrid` 是同一输出形状
+（backendInstanceId + modelFamily + variant + aspectRatio + resolution + generateAudio）下已配置 profile
+的时长集合升序去重（§5.3：H3 每档时长一份 profile）。worker 侧 runtime config 的
+`executionProfileSnapshotFile` 声明该文件路径，`plan-shots` 零网络读取它做估算，并校验
+`execution.workflowSha256` 与自身 `workflows[].workflowSha256` 相等，不等即拒绝出计划。价目只有这
+一处来源，registry 与快照是同一份 profile 内容。
+
 ## 校验规则（onboarding plan/create 必须通过）
 - workspace 根已由 `writing-loop init` 确立（`.writing-loop/config.json` 存在，§11/§13）。
 - `repoPath` 的父目录存在，目标路径**尚不存在**，且不能是 workspace 根、其祖先或

@@ -123,6 +123,13 @@ export type ProductionInputStagerCredentialResolver = (
   signal: AbortSignal,
 ) => string | null | Promise<string | null>;
 
+/**
+ * Owner-only transport declaration mirroring the runtime config field (§8.0). `tls` keeps the
+ * existing HTTPS / plaintext-loopback rules unchanged; `insecure-private-http` trades TLS for VPC
+ * isolation and therefore requires a private-IP literal endpoint plus a bearer credential.
+ */
+export type ProductionInputStagerTransport = "tls" | "insecure-private-http";
+
 export type HttpProductionInputStagerOptions = {
   /** Fixed server-side gateway root; never source this from a task, intent or browser request. */
   baseUrl: string | URL;
@@ -131,6 +138,7 @@ export type HttpProductionInputStagerOptions = {
   credentialResolver?: ProductionInputStagerCredentialResolver;
   /** Development-only escape hatch. HTTP remains limited to loopback and cannot carry a bearer. */
   allowInsecureLoopback?: boolean;
+  transport?: ProductionInputStagerTransport;
   fetch?: FetchLike;
   timeoutMs?: number;
   maxResponseBytes?: number;
@@ -320,17 +328,41 @@ function boundedInteger(
   return result;
 }
 
+/**
+ * RFC1918 IPv4 or the loopback literal, written as a literal address. WHATWG URL canonicalises
+ * numeric hosts, so a decimal-dotted match here also covers octal/hex spellings, while every domain
+ * name — which could resolve anywhere — stays outside the accepted set.
+ */
+function isPrivateIpv4Literal(hostname: string): boolean {
+  if (hostname === "127.0.0.1") return true;
+  const octets = hostname.split(".");
+  if (octets.length !== 4
+    || !octets.every((part) => /^(?:0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)) {
+    return false;
+  }
+  const [first, second] = octets.map(Number) as [number, number, number, number];
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
 function trustedBaseUrl(
   value: string | URL,
   allowInsecureLoopback: boolean,
   hasCredentialResolver: boolean,
+  transport: ProductionInputStagerTransport,
 ): URL {
   let url: URL;
   try { url = new URL(value); }
   catch { fail("invalid-config"); }
   if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname
     || url.username || url.password || url.search || url.hash) fail("invalid-config");
-  if (url.protocol === "http:") {
+  if (transport === "insecure-private-http") {
+    // VPC 私网明文：只接受私网字面 IP 的 http endpoint，且仍以 bearer 鉴权（§8.0）。
+    if (url.protocol !== "http:" || !isPrivateIpv4Literal(url.hostname) || !hasCredentialResolver) {
+      fail("invalid-config");
+    }
+  } else if (url.protocol === "http:") {
     const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
     if (!allowInsecureLoopback || !loopback || hasCredentialResolver) fail("invalid-config");
   }
@@ -429,10 +461,13 @@ export class HttpProductionInputStager implements ProductionInputStager {
     if (options.allowInsecureLoopback !== undefined && typeof options.allowInsecureLoopback !== "boolean") {
       fail("invalid-config");
     }
+    const transport = options.transport ?? "tls";
+    if (transport !== "tls" && transport !== "insecure-private-http") fail("invalid-config");
     this.#baseUrl = trustedBaseUrl(
       options.baseUrl,
       options.allowInsecureLoopback === true,
       options.credentialResolver !== undefined,
+      transport,
     );
     this.#scope = parseScope(options.workspaceId, options.project);
     this.#credentialResolver = options.credentialResolver ?? null;

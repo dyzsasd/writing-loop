@@ -728,6 +728,268 @@ durable storage/submission admission backend、raw Comfy/H3 服务与模型供�
 仓库提供安全内核和 composition ports，不提供 permissive 默认 admission，也不把单进程 semaphore
 或进程内文件计数冒充集群硬配额。
 
+### 9B.1 Gateway 进程与 server-owned registry
+
+`writing-loop-production-gateway --config FILE [--export-profile-snapshot OUT]` 把 jobs / stages /
+ingests 三个内核装配在同一进程，绑定 registry 配置中的字面私网 IP，并对全部路由要求
+`Authorization: Bearer <auth.bearerEnv 的值>`（`timingSafeEqual` 比较，缺失或错误一律 401，
+不回显任何 secret）。registry 配置与 worker runtime config 同为 owner-only、单链接、`0400`/`0600`
+的有界 UTF-8 JSON，同样只保存环境变量名。顶层 exact keys：`version`、`listen`、`auth`、`backends`、
+`executionProfiles`、`stageProfiles`、`casAuthority`、`objectsRoot`、`ingestRoot`、`jobStateRoot`、
+`admission`、`reconcilePolicy`。
+
+- `listen.host` 只接受 RFC1918 私网 IPv4 或 `127.0.0.1` 字面地址；`0.0.0.0`、公网 IP 与域名在装配前
+  被拒。`backends[].comfyBaseUrl` 只接受 literal loopback HTTP：ComfyUI 与 gateway 同机。
+- `executionProfiles[]` 持有 §4.2 execution profile 正本（`kind: "writing-loop/execution-profile"`）、
+  pinned graph 文件路径与 `h3GraphContract`、tariff 价目、`ProductionLicenseEvidence` 形态的 `license`
+  （义务只在其 `obligations`，与 intent gate 同一判据）与 `processingRegions`。
+  intent 级 execution 由 profile 推导，不二次配置，因此 `workflowBindingKey` 的五项不可能与价目面漂移。
+- `stageProfiles[]` 持有 provider CAS namespace、有序 `index/slot/mediaTypes` 与 H3 stage binding 契约；
+  两者逐位对齐。stage 资产只经 `cas://<casAuthority>/sha256/<digest>` 解析到本机 ingest CAS。
+- `objectsRoot` / `ingestRoot` / `jobStateRoot` 是持久化启动盘上的三个独立 durable root；
+  gateway 在 `jobStateRoot` 下划分 `jobs/`（job record）与 `storage-admission/`（durable slot）两个子目录。
+- `--export-profile-snapshot` 只导出只读快照后退出，不监听端口。快照按 profileId 索引，含每份 profile
+  的 canonical digest、execution profile 正本、H3 时长网格与价目；worker 的
+  `executionProfileSnapshotFile` 读取它，并校验 `execution.workflowSha256` 与自身
+  `workflows[].workflowSha256` 相等。价目不存在第二处。
+
+下面 fixture 由文档测试直接交给 strict registry parser，字段漂移会使 CI 失败。数字与 digest 仍是
+representative 值，部署时按实际 graph/artifact attestation 与实测费率替换：
+
+<!-- writing-loop-production-gateway-registry-v1-fixture:start -->
+```json
+{
+  "version": 1,
+  "listen": {
+    "version": 1,
+    "host": "10.148.0.9",
+    "port": 8790
+  },
+  "auth": {
+    "version": 1,
+    "bearerEnv": "WRITING_LOOP_GATEWAY_BEARER"
+  },
+  "backends": [
+    {
+      "version": 1,
+      "backendInstanceId": "gateway-h3-fl2va",
+      "kind": "comfyui",
+      "comfyBaseUrl": "http://127.0.0.1:8188",
+      "profileIds": [
+        "h3-fl2va-portrait"
+      ]
+    }
+  ],
+  "executionProfiles": [
+    {
+      "version": 1,
+      "execution": {
+        "version": 1,
+        "kind": "writing-loop/execution-profile",
+        "profileId": "h3-fl2va-portrait",
+        "backendInstanceId": "gateway-h3-fl2va",
+        "workflowSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "modelSha256": "d153e5de740ec05a573d03497225a9bdb144666816cec2d4ba7ab5e0c8239a9a",
+        "parametersSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "resolution": "768p",
+        "aspectRatio": "9:16",
+        "generateAudio": true,
+        "modelFamily": "minimax-h3",
+        "operation": "comfyui-workflow",
+        "variant": "fl2va",
+        "shortEdge": 768,
+        "durationSeconds": 8
+      },
+      "workflowFile": "workflows/h3-fl2va-portrait.json",
+      "stageProfileId": "h3-fl2va-portrait-stage",
+      "h3GraphContract": {
+        "version": 1,
+        "generator": {
+          "version": 1,
+          "nodeId": "10",
+          "classType": "MiniMaxH3ImageToVideo",
+          "width": 768,
+          "height": 1344,
+          "length": 192
+        },
+        "modelBundle": {
+          "version": 1,
+          "diffusion": {
+            "version": 1,
+            "nodeId": "11",
+            "classType": "UNETLoader",
+            "inputName": "unet_name",
+            "modelAlias": "minimax/MiniMax-H3.safetensors",
+            "artifactSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          "textEncoder": {
+            "version": 1,
+            "nodeId": "12",
+            "classType": "CLIPLoader",
+            "inputName": "clip_name",
+            "modelAlias": "minimax/Qwen3-VL-32B.safetensors",
+            "artifactSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+          },
+          "videoVae": {
+            "version": 1,
+            "nodeId": "13",
+            "classType": "VAELoader",
+            "inputName": "vae_name",
+            "modelAlias": "minimax/MiniMax-H3-video-vae.safetensors",
+            "artifactSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+          },
+          "audioVae": {
+            "version": 1,
+            "nodeId": "14",
+            "classType": "VAELoader",
+            "inputName": "vae_name",
+            "modelAlias": "minimax/MiniMax-H3-audio-vae.safetensors",
+            "artifactSha256": "9999999999999999999999999999999999999999999999999999999999999999"
+          },
+          "sha256": "d153e5de740ec05a573d03497225a9bdb144666816cec2d4ba7ab5e0c8239a9a"
+        },
+        "pipeline": {
+          "version": 1,
+          "sigmaShift": {
+            "version": 1,
+            "nodeId": "15",
+            "classType": "MiniMaxH3SigmaShift"
+          },
+          "guider": {
+            "version": 1,
+            "nodeId": "16",
+            "classType": "BasicGuider"
+          },
+          "scheduler": {
+            "version": 1,
+            "nodeId": "17",
+            "classType": "BasicScheduler"
+          },
+          "samplerSelect": {
+            "version": 1,
+            "nodeId": "18",
+            "classType": "KSamplerSelect"
+          },
+          "noise": {
+            "version": 1,
+            "nodeId": "19",
+            "classType": "RandomNoise"
+          },
+          "sampler": {
+            "version": 1,
+            "nodeId": "20",
+            "classType": "SamplerCustomAdvanced"
+          },
+          "videoDecode": {
+            "version": 1,
+            "nodeId": "21",
+            "classType": "VAEDecode"
+          },
+          "audioDecode": {
+            "version": 1,
+            "nodeId": "22",
+            "classType": "VAEDecodeAudio"
+          },
+          "createVideo": {
+            "version": 1,
+            "nodeId": "23",
+            "classType": "CreateVideo"
+          },
+          "saveVideo": {
+            "version": 1,
+            "nodeId": "24",
+            "classType": "SaveVideo"
+          }
+        },
+        "parameterManifest": {
+          "version": 1,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      },
+      "priceTable": {
+        "version": 1,
+        "basis": "tariff",
+        "currency": "USD",
+        "microsPerOutputSecond": 430,
+        "priceAsOf": "2026-08-28T00:00:00.000Z",
+        "source": "GCP g4-standard-48 Spot asia-southeast1 1.55 USD/h"
+      },
+      "license": {
+        "version": 1,
+        "status": "verified",
+        "basis": "community",
+        "territories": [
+          "SG"
+        ],
+        "licenseSha256": null,
+        "evidence": null,
+        "issuedBy": "MiniMaxAI",
+        "issuedAt": "2026-01-01T00:00:00.000Z",
+        "expiresAt": null,
+        "obligations": {
+          "attribution": "MiniMax H3",
+          "revenueThresholdUsd": 20000000,
+          "noModelImprovement": true
+        }
+      },
+      "processingRegions": [
+        "SG"
+      ]
+    }
+  ],
+  "stageProfiles": [
+    {
+      "version": 1,
+      "stageProfileId": "h3-fl2va-portrait-stage",
+      "providerCasNamespace": "wlcas/sha256",
+      "inputs": [
+        {
+          "version": 1,
+          "index": 0,
+          "slot": "first_frame",
+          "mediaTypes": [
+            "image/png"
+          ]
+        }
+      ],
+      "bindings": [
+        {
+          "version": 1,
+          "index": 0,
+          "slot": "first_frame",
+          "source": {
+            "version": 1,
+            "nodeId": "100",
+            "classType": "LoadImage",
+            "inputName": "image",
+            "outputIndex": 0
+          },
+          "consumer": {
+            "version": 1,
+            "nodeId": "10",
+            "inputName": "first_frame"
+          }
+        }
+      ]
+    }
+  ],
+  "casAuthority": "wl-sg",
+  "objectsRoot": "/var/lib/writing-loop/production/stage",
+  "ingestRoot": "/var/lib/writing-loop/production/ingest",
+  "jobStateRoot": "/var/lib/writing-loop/production/jobs",
+  "admission": {
+    "version": 1,
+    "maxConcurrentPerBackend": 1
+  },
+  "reconcilePolicy": {
+    "version": 1,
+    "unknownRemoteJob": "provider-failed-preempted",
+    "minObservationAgeSeconds": 300
+  }
+}
+```
+<!-- writing-loop-production-gateway-registry-v1-fixture:end -->
+
 ## 10. Guardrails
 
 以下条件必须阻断 dispatch 或发布：

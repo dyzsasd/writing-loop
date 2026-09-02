@@ -1240,6 +1240,61 @@ try {
   });
   ok(stageRequests === 0, "H3 runtime assembly performs no staging or provider network I/O");
 
+  // §8.0: the owner-only transport must reach the three assembled clients. Without it the
+  // gateway adapter, input stager and ingestor each reject a plaintext private-IP endpoint.
+  const privateTransportConfig = structuredClone(h3Config());
+  for (const backend of privateTransportConfig.backends as Record<string, unknown>[]) {
+    backend.baseUrl = "http://10.148.0.9:8790/h3";
+    backend.transport = "insecure-private-http";
+  }
+  const privateTransportGateway = privateTransportConfig.gateway as Record<string, unknown>;
+  privateTransportGateway.baseUrl = "http://10.148.0.9:8790";
+  privateTransportGateway.transport = "insecure-private-http";
+  for (const profile of privateTransportConfig.stagingProfiles as Record<string, unknown>[]) {
+    profile.baseUrl = "http://10.148.0.9:8790/h3";
+    profile.transport = "insecure-private-http";
+  }
+  const privateTransportFile = join(runtimeDirectory, "private-transport-runtime.json");
+  writeFileSync(privateTransportFile, `${JSON.stringify(privateTransportConfig, null, 2)}\n`, { mode: 0o600 });
+  let privateTransportRegistry: ReturnType<typeof createProductionRuntimeRegistry> | null = null;
+  let privateTransportAssemblyError: unknown = null;
+  try {
+    privateTransportRegistry = createProductionRuntimeRegistry({
+      root,
+      configFile: privateTransportFile,
+      env: {
+        PRODUCTION_JOB_GATEWAY_TOKEN: "server-job-gateway-secret",
+        PRODUCTION_GATEWAY_TOKEN: "server-gateway-secret",
+        PRODUCTION_STAGE_TOKEN: "server-stage-secret",
+      },
+      stagingFetchByProfile: {
+        "h3-fl-profile": async () => { throw new Error("assembly must not stage"); },
+        "h3-ref-profile": async () => { throw new Error("assembly must not stage"); },
+      },
+      gatewayFetch: async () => { throw new Error("assembly must not ingest"); },
+    });
+  } catch (error) { privateTransportAssemblyError = error; }
+  ok(privateTransportRegistry !== null && privateTransportAssemblyError === null
+    && privateTransportRegistry.projects.length === 1
+    && privateTransportRegistry.config.gateway.transport === "insecure-private-http",
+  `insecure-private-http assembles the gateway adapter, input stager and ingestor${
+    privateTransportAssemblyError instanceof Error ? `：${privateTransportAssemblyError.message}` : ""}`);
+
+  const publicTransportConfig = structuredClone(privateTransportConfig);
+  (publicTransportConfig.gateway as Record<string, unknown>).baseUrl = "http://203.0.113.9:8790";
+  const publicTransportFile = join(runtimeDirectory, "public-transport-runtime.json");
+  writeFileSync(publicTransportFile, `${JSON.stringify(publicTransportConfig, null, 2)}\n`, { mode: 0o600 });
+  ok(configError(() => createProductionRuntimeRegistry({
+    root,
+    configFile: publicTransportFile,
+    env: {
+      PRODUCTION_JOB_GATEWAY_TOKEN: "server-job-gateway-secret",
+      PRODUCTION_GATEWAY_TOKEN: "server-gateway-secret",
+      PRODUCTION_STAGE_TOKEN: "server-stage-secret",
+    },
+  }), "config-invalid-schema"),
+  "insecure-private-http still rejects a routable public ingest endpoint at parse time");
+
   const flIntent = h3Intent("take-h3-fl", H3_FL_EXECUTION);
   const flPipeline = await h3Registry.projects[0]!.inputPipelineResolver.resolve(flIntent);
   const flDescriptor = await h3Registry.projects[0]!.workflowResolver.resolve(flIntent);

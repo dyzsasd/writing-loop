@@ -1346,6 +1346,7 @@ export function createProductionRuntimeRegistry(
           project: project.project,
           backendInstanceId: backend.backendInstanceId,
           profileId: backend.profileId,
+          transport: backend.transport,
           credentialResolver: (signal) => {
             throwIfAborted(signal);
             const secret = secretFromEnvironment(env, backend.credentialEnv);
@@ -1397,7 +1398,10 @@ export function createProductionRuntimeRegistry(
             baseUrl: profile.baseUrl,
             workspaceId: scope.workspaceId,
             project: scope.project,
-            allowInsecureLoopback: new URL(profile.baseUrl).protocol === "http:",
+            // insecure-private-http 有自己的私网 + bearer 规则，不复用无凭据 loopback 开发豁免。
+            allowInsecureLoopback: profile.transport === "tls"
+              && new URL(profile.baseUrl).protocol === "http:",
+            transport: profile.transport,
             fetch: configuredStageFetch ?? fetch,
             credentialResolver: profile.credentialEnv === null ? undefined : (signal) => {
               throwIfAborted(signal);
@@ -1422,7 +1426,10 @@ export function createProductionRuntimeRegistry(
         baseUrl: config.gateway.baseUrl,
         workspaceId: config.workspaceId,
         project: project.project,
-        allowInsecureLoopback: new URL(config.gateway.baseUrl).protocol === "http:",
+        // insecure-private-http 有自己的私网 + bearer 规则，不复用无凭据 loopback 开发豁免。
+        allowInsecureLoopback: config.gateway.transport === "tls"
+          && new URL(config.gateway.baseUrl).protocol === "http:",
+        transport: config.gateway.transport,
         fetch: options.gatewayFetch ?? fetch,
         credentialResolver: config.gateway.credentialEnv === null ? undefined : (context, signal) => {
           throwIfAborted(signal);

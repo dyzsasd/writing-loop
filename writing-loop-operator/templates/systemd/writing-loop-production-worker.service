@@ -1,0 +1,20 @@
+# User 单元（--user），装到 ~/.config/systemd/user/。
+# WorkingDirectory 固定为 %h：workspace 路径与 runtime config 路径都由 EnvironmentFile 提供，
+# 不在本文件里硬编码，也不要在 Environment=/ExecStart= 行尾写注释（systemd 不支持行内注释）。
+[Unit]
+Description=writing-loop production worker (one pass over the authoritative ledger)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# 0600、仅本用户可读。至少提供三项：
+#   WRITING_LOOP_WORKSPACE=/absolute/workspace
+#   WRITING_LOOP_PRODUCTION_RUNTIME=/absolute/production-runtime.json
+#   <runtime config 三处 credentialEnv 声明的变量名>=<bearer>
+EnvironmentFile=%h/.config/writing-loop/production-worker.env
+# runtime config 必须是 0400/0600、当前用户所有的单链接普通文件。
+ExecStart=%h/.npm-global/bin/writing-loop-production-worker --config ${WRITING_LOOP_PRODUCTION_RUNTIME} --once
+TimeoutStartSec=3600

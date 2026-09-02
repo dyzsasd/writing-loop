@@ -89,6 +89,112 @@ writing-loop project disable <KEY>    # 不再起新 fire，在飞 fire 自然�
 writing-loop project enable <KEY> && systemctl --user restart writing-loop@<KEY>   # 恢复
 ```
 
+## §3a 视频生产 gateway 部署（两台主机）
+
+远端制片分两台主机，配置文件与凭据不互通。规格见仓库
+`docs/design/2026-08-video-provider-interface/DESIGN.md` §8.0 / §8.2。
+
+| 主机 | 放什么 | 单元 |
+|---|---|---|
+| GPU VM（Spot `g4-standard-48`，镜像 `wl-comfy-h3-g4-sg`，asia-southeast1，按批次启停） | ComfyUI；gateway 单进程（jobs / stages / ingests 三个内核）；registry 配置 `/etc/writing-loop/production-gateway.json`（0400/0600）与 bearer `/etc/writing-loop/production-gateway.env`（0600）；持久化启动盘上的 `objectsRoot` / `ingestRoot` / `jobStateRoot` | `comfyui.service`、`writing-loop-production-gateway.service`（**system 单元**，`/etc/systemd/system/`） |
+| writing-loop-sg（常驻） | 账本 workspace、调度器、`production-worker` timer；worker runtime config `production-runtime.json`（0400/0600，三处 `transport: "insecure-private-http"` 指向 GPU VM 内网 IP）与 `production-worker.env`（0600）；gateway 导出的只读 profile 快照 | `writing-loop-production-worker.service` + `.timer`（**user 单元**，`~/.config/systemd/user/`） |
+| 本机 | 只做 VCS 合成与 Blender 候选图；不直连 VPC 私网 gateway | 无 |
+
+### 安装（每台各做一次）
+
+```bash
+# GPU VM：先核对镜像里 ComfyUI 的单元名与运行用户，再按实际值改 gateway unit 的
+# User=/Group=/WorkingDirectory=/Requires= 四处
+systemctl cat comfyui.service
+
+# 需要出网装包/拉权重时临时挂外网 IP，装完立刻摘掉
+bash scripts/gcp-h3-vm.sh egress on
+sudo npm i -g @dyzsasd/writing-loop      # 提供 /usr/local/bin/writing-loop-production-gateway
+bash scripts/gcp-h3-vm.sh egress off
+
+sudo cp templates/systemd/writing-loop-production-gateway.service /etc/systemd/system/
+sudo systemctl daemon-reload
+
+# writing-loop-sg：worker 是 user 单元
+cp templates/systemd/writing-loop-production-worker.service \
+   templates/systemd/writing-loop-production-worker.timer ~/.config/systemd/user/
+systemctl --user daemon-reload && loginctl enable-linger "$USER"
+```
+
+`production-worker.env`（0600）至少三项，unit 里不硬编码任何路径：
+
+```
+WRITING_LOOP_WORKSPACE=/home/<user>/dramas
+WRITING_LOOP_PRODUCTION_RUNTIME=/home/<user>/.config/writing-loop/production-runtime.json
+WRITING_LOOP_GATEWAY_TOKEN=<与 GPU VM 的 bearer 相同>
+```
+
+### 每个批次的启动顺序
+
+```bash
+# ① 本机：开 GPU VM（Spot，抢占只停机不删盘；启动盘 no-auto-delete）
+bash scripts/gcp-h3-vm.sh start && bash scripts/gcp-h3-vm.sh status   # 记下 INTERNAL_IP
+
+# ② GPU VM：ComfyUI 先起，gateway 后起（unit 已声明 Requires/After）
+sudo systemctl start comfyui writing-loop-production-gateway
+sudo systemctl status writing-loop-production-gateway --no-pager
+
+# ③ GPU VM：导出只读 execution profile 快照，rsync 给 writing-loop-sg
+writing-loop-production-gateway --config /etc/writing-loop/production-gateway.json \
+  --export-profile-snapshot ~/export/execution-profiles.json
+
+# ④ writing-loop-sg：确认 runtime config 的三处 baseUrl 指向 ① 的 INTERNAL_IP，再放 worker
+systemctl --user start writing-loop-production-worker.timer
+
+# ⑤ 批次结束：先停 worker timer，再停 VM（job record 与 CAS 在启动盘上保留）
+systemctl --user stop writing-loop-production-worker.timer
+bash scripts/gcp-h3-vm.sh stop
+```
+
+### 探针命令
+
+```bash
+# GPU VM 本机：gateway 在监听且鉴权生效（401 = 活着且拒未授权，属于预期）
+curl -s -o /dev/null -w '%{http_code}\n' \
+  "http://<INTERNAL_IP>:8790/v1/scopes/<WS>/<PROJECT>/jobs/00000000-0000-4000-8000-000000000000"   # 期望 401
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $WRITING_LOOP_GATEWAY_BEARER" \
+  "http://<INTERNAL_IP>:8790/v1/scopes/<WS>/<PROJECT>/jobs/00000000-0000-4000-8000-000000000000"   # 期望 404
+
+# GPU VM 本机：ComfyUI loopback 可达
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8188/queue                               # 期望 200
+
+# writing-loop-sg：从服务器侧确认私网可达（不要从本机或公网测）
+ssh writing-loop-sg 'curl -s -o /dev/null -w "%{http_code}\n" \
+  "http://<INTERNAL_IP>:8790/v1/scopes/<WS>/<PROJECT>/jobs/00000000-0000-4000-8000-000000000000"'  # 期望 401
+
+# writing-loop-sg：worker 单轮（timer 之外的手动一轮）
+writing-loop-production-worker --config "$WRITING_LOOP_PRODUCTION_RUNTIME" --once --json
+```
+
+### 网络与磁盘纪律
+
+- 入站当前依赖 VPC 的 `default-allow-internal`（10.128.0.0/9）覆盖 writing-loop-sg（10.148.0.5）到
+  GPU VM 的私网 HTTP，无需新增规则。要收紧到只放行 worker 与 gateway 端口：
+
+  ```bash
+  gcloud compute firewall-rules create wl-h3-gateway-in \
+    --network default --direction INGRESS --action ALLOW --rules tcp:8790 \
+    --source-ranges 10.148.0.5/32 --target-tags wl-h3-gateway
+  gcloud compute instances add-tags wl-comfy-h3-g4 --zone asia-southeast1-b --tags wl-h3-gateway
+  ```
+
+- gateway 只绑 registry 配置里的字面私网 IP，进程拒绝 `0.0.0.0` 与公网地址；不给实例加
+  `http-server` / `https-server` 标签，端口不对公网开放。
+- 实例默认 `--no-address`，无 Cloud NAT 时不能出网；只在装包/拉权重时 `egress on`，完成后立刻
+  `egress off`。
+- 启动盘 `--no-boot-disk-auto-delete`，删除实例不会连带删盘。**删除实例前先做快照**：
+  `gcloud compute disks snapshot <INSTANCE> --zone <ZONE>`；确认快照可用后再删盘。
+- bearer 只经 `EnvironmentFile`（0600）注入，配置文件里只出现环境变量名。轮换 bearer =
+  改两台主机的 env 文件 + 各自 restart（GPU VM `sudo systemctl restart`，服务器 `systemctl --user`）。
+- 明文 HTTP 的适用条件（同 VPC、无第三方工作负载）见 `references/config-schema.md`；任一条
+  不成立时把 worker 三处 `transport` 改回 `"tls"`。
+- `handoff --export-dir` 要经 gateway 的 assets 路由取资产，**导出时 GPU VM 必须在运行**。
+
 ## §4 进展判读（日常监控口径）
 
 ```bash

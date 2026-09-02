@@ -4,7 +4,9 @@
 // (c) 在「装机形」布局（dist/ 拷贝 + 包根插件负载、无仓库兄弟目录）下过一遍
 // run --dry-run / status / fires / project plan-create-verify / doctor / install-claude-plugin 全链路。
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +86,8 @@ try {
     && existsSync(join(distDir, "production-gateway.js"))
     && existsSync(join(distDir, "production-gateway-router.js"))
     && existsSync(join(distDir, "production-job-gateway.js"))
+    && existsSync(join(distDir, "production-gateway-runtime-config.js"))
+    && existsSync(join(distDir, "production-gateway-main.js"))
     && existsSync(join(distDir, "production-worker.js"))
     && existsSync(join(distDir, "production-worker-lock.js"))
     && existsSync(join(distDir, "production-studio-handoff.js")),
@@ -133,6 +137,8 @@ try {
     && packed.has("dist/production-runtime-config.js") && packed.has("dist/production-runner.js")
     && packed.has("dist/production-gateway.js") && packed.has("dist/production-gateway-router.js")
     && packed.has("dist/production-job-gateway.js")
+    && packed.has("dist/production-gateway-runtime-config.js")
+    && packed.has("dist/production-gateway-main.js")
     && packed.has("dist/production-worker.js") && packed.has("dist/production-worker-lock.js")
     && packed.has("dist/production-studio-handoff.js")
     && packed.has("examples/production/representative-h3/README.md")
@@ -181,6 +187,11 @@ try {
   ok(workerHelp.code === 0 && workerHelp.out.includes("--config FILE --once")
     && workerHelp.out.includes("不接受 endpoint、token、workflow 或模型覆盖"),
   "编译 production worker 入口可运行，且明示 server-only 配置边界");
+  const gatewayHelp = run(process.execPath, [join(distDir, "production-gateway-main.js"), "--help"]);
+  ok(gatewayHelp.code === 0 && gatewayHelp.out.includes("--config FILE --export-profile-snapshot OUT")
+    && gatewayHelp.out.includes("Authorization: Bearer")
+    && gatewayHelp.out.includes("不接受 endpoint、token、workflow、模型或价目覆盖"),
+  "编译 production gateway 入口可运行，且明示 registry-only 配置边界");
 
   // ── AC3：装机形布局（dist/ 拷贝 + 包根插件负载；无仓库 ../skills 兄弟可回退） ──
   const inst = join(tmp, "pkg"); // inst/dist/cli.js → here=inst/dist，包根 = inst
@@ -194,6 +205,24 @@ try {
   const instWorkerHelp = run(process.execPath, [instWorker, "--help"], { cwd: inst });
   ok(instWorkerHelp.code === 0 && instWorkerHelp.out.includes("--config FILE --once"),
     "装机形 production worker bin 在无仓库兄弟目录时仍可运行");
+  const instGatewayHelp = run(process.execPath, [join(inst, "dist", "production-gateway-main.js"), "--help"], { cwd: inst });
+  ok(instGatewayHelp.code === 0 && instGatewayHelp.out.includes("--config FILE --export-profile-snapshot OUT"),
+    "装机形 production gateway bin 在无仓库兄弟目录时仍可运行");
+
+  // npm 把 bin 装成符号链接，Node 对 ESM 入口取 realpath——主模块判定若直接比较 process.argv[1]，
+  // 经 ~/.npm-global/bin 调用时为 false，进程静默退出 0（systemd ExecStart 看起来「起了又没了」）。
+  const binDir = join(tmp, "npm-global-bin");
+  mkdirSync(binDir, { recursive: true });
+  const linkedGateway = join(binDir, "writing-loop-production-gateway");
+  const linkedWorker = join(binDir, "writing-loop-production-worker");
+  symlinkSync(join(inst, "dist", "production-gateway-main.js"), linkedGateway);
+  symlinkSync(join(inst, "dist", "production-worker.js"), linkedWorker);
+  const linkedGatewayHelp = run(process.execPath, [linkedGateway, "--help"], { cwd: tmp });
+  const linkedWorkerHelp = run(process.execPath, [linkedWorker, "--help"], { cwd: tmp });
+  ok(linkedGatewayHelp.code === 0
+    && linkedGatewayHelp.out.includes("--config FILE --export-profile-snapshot OUT")
+    && linkedWorkerHelp.code === 0 && linkedWorkerHelp.out.includes("--config FILE --once"),
+  "经 npm bin 符号链接调用时两个 server-only 入口仍执行主模块，不静默退出");
   const instProductionExample = run(process.execPath, [
     join(inst, "examples", "production", "representative-h3", "smoke.mjs"),
   ], { cwd: inst });

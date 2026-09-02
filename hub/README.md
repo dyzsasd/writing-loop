@@ -140,6 +140,16 @@ and consumers must never send an arbitrary `https:` URI directly to `fetch`.
 Its owner-only runtime config and exact H3/Gateway fixture are documented in the
 [Phase 3C AI-SPEC](https://github.com/dyzsasd/writing-loop/blob/main/docs/design/phase-3-remote-production/AI-SPEC.md#9b-phase-3c-%E9%83%A8%E7%BD%B2%E4%B8%8E-runtime-contract).
 Run it from a systemd/launchd/container timer; Studio never holds its credentials.
+
+`writing-loop-production-gateway --config FILE [--export-profile-snapshot OUT]` is the second
+server-only binary: it assembles the jobs, stages and ingests kernels in one process next to
+ComfyUI, binds a literal private IP, and requires `Authorization: Bearer <auth.bearerEnv>` on every
+route. Its server-owned registry holds the raw ComfyUI origin, the pinned template graphs, the
+execution profiles with their price tables and the CAS authority — none of which the worker, Studio
+or an HTTP caller can name. `--export-profile-snapshot` writes the read-only execution-profile
+snapshot (per-profile canonical digest, duration grid and price table) that the worker's
+`executionProfileSnapshotFile` reads; prices exist in exactly one place. The registry schema and
+snapshot format are in `references/config-schema.md`; the strict-parsed fixture is AI-SPEC §9B.1.
 The installed package also exposes a hermetic example smoke:
 
 ```sh
@@ -248,6 +258,15 @@ stage/job/output Gateway kernels behind one strict router. Endpoint, profile and
 remain server-only and cannot be supplied by Studio or enqueue argv. Raw ComfyUI is limited to an
 uncredentialed literal-loopback development escape hatch; remote production goes through the
 authenticated Gateway.
+
+Phase 1 of the video provider work adds the deployable gateway process itself: a server-owned
+registry (`production-gateway-runtime-config.ts`), the `writing-loop-production-gateway`
+entrypoint, its read-only execution-profile snapshot export, and an owner-only
+`transport: "insecure-private-http"` option that lets the worker's gateway adapter, input stager and
+artifact ingestor reach a private-IP endpoint over a VPC without TLS. That option accepts only
+`http://` on a literal RFC1918/127.0.0.1 address with a non-empty credential; its threat model and
+preconditions are in `references/config-schema.md`, and the default transport keeps the existing
+HTTPS rules unchanged.
 
 This is a deployable control plane and private Gateway kernel, not a bundled GPU appliance. A real
 deployment must still supply H3/ComfyUI inference, TLS/mTLS, credential issuance, pinned server

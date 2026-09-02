@@ -1,0 +1,13 @@
+[Unit]
+Description=writing-loop production worker timer (interval <= 6 h, §4.7)
+
+[Timer]
+# 开机后 5 min 起第一轮，之后每 4 h 一轮；上界 6 h 由规格给定，不要放宽。
+OnBootSec=5min
+OnUnitActiveSec=4h
+AccuracySec=1min
+Persistent=true
+Unit=writing-loop-production-worker.service
+
+[Install]
+WantedBy=timers.target

@@ -237,11 +237,17 @@ const SAFE_SCHEME = /^[a-z][a-z0-9+.-]{0,31}:$/;
 const SAFE_AUTHORITY = /^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/;
 const TOKEN = /^[\x21-\x7e]{1,8192}$/;
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/;
-const ALLOWED_MEDIA_TYPES = new Set([
+/**
+ * Exact media types this kernel will sniff and publish. The server-owned registry validates its
+ * configured stage profiles against the same set, so a profile that would fail `parseProfileInput`
+ * at request time is refused while the gateway process is still assembling.
+ */
+export const PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES: ReadonlySet<string> = Object.freeze(new Set([
   "audio/flac", "audio/mpeg", "audio/ogg", "audio/wav",
   "image/gif", "image/jpeg", "image/png", "image/webp",
   "video/mp4", "video/webm",
-]);
+]));
+const ALLOWED_MEDIA_TYPES = PRODUCTION_STAGE_ALLOWED_MEDIA_TYPES;
 const FORBIDDEN_NETWORK_SCHEMES = new Set(["http:", "https:", "file:", "data:"]);
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 const READ_FLAGS = fsConstants.O_RDONLY | O_NOFOLLOW;

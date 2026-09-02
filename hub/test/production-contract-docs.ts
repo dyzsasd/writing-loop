@@ -9,6 +9,10 @@ import {
   parseShotRevisionRef,
 } from "../src/production-domain.ts";
 import { parseProductionRuntimeConfig } from "../src/production-runtime-config.ts";
+import {
+  exportExecutionProfileSnapshot,
+  parseProductionGatewayRuntimeConfig,
+} from "../src/production-gateway-runtime-config.ts";
 
 let fails = 0;
 const ok = (condition: boolean, message: string): void => {
@@ -99,6 +103,54 @@ if (runtimeFixtureMatch) {
     "AI-SPEC runtime fixture 通过真实 strict parser，并冻结 H3 四模型、active pipeline 与 source→consumer binding");
   } catch (error) {
     ok(false, `AI-SPEC runtime fixture 与 production-runtime-config 漂移：${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+const gatewayMarkerStarts = spec.match(/<!-- writing-loop-production-gateway-registry-v1-fixture:start -->/g)?.length ?? 0;
+const gatewayMarkerEnds = spec.match(/<!-- writing-loop-production-gateway-registry-v1-fixture:end -->/g)?.length ?? 0;
+const gatewayFixtureMatch = /<!-- writing-loop-production-gateway-registry-v1-fixture:start -->\s*```json\s*([\s\S]*?)\s*```\s*<!-- writing-loop-production-gateway-registry-v1-fixture:end -->/.exec(spec);
+ok(gatewayMarkerStarts === 1 && gatewayMarkerEnds === 1 && gatewayFixtureMatch !== null,
+  "AI-SPEC 保留唯一、稳定的 Phase 1 gateway registry v1 fixture marker");
+ok(spec.includes("writing-loop-production-gateway --config FILE")
+  && spec.includes("Authorization: Bearer <auth.bearerEnv 的值>")
+  && spec.includes("只接受 RFC1918 私网 IPv4 或 `127.0.0.1` 字面地址")
+  && spec.includes("只接受 literal loopback HTTP")
+  && spec.includes("cas://<casAuthority>/sha256/<digest>")
+  && spec.includes("--export-profile-snapshot")
+  && spec.includes("价目不存在第二处")
+  && spec.includes("`ProductionLicenseEvidence` 形态的 `license`"),
+"AI-SPEC 固化 gateway 进程的 bind、bearer、loopback ComfyUI、cas resolver 与只读价目快照边界");
+
+if (gatewayFixtureMatch) {
+  try {
+    const gatewayConfig = parseProductionGatewayRuntimeConfig(JSON.parse(gatewayFixtureMatch[1]));
+    const profile = gatewayConfig.executionProfiles[0];
+    const stageProfile = gatewayConfig.stageProfiles[0];
+    const snapshot = exportExecutionProfileSnapshot(gatewayConfig);
+    ok(gatewayConfig.listen.host === "10.148.0.9" && gatewayConfig.auth.bearerEnv.length > 0
+      && gatewayConfig.backends[0]?.kind === "comfyui"
+      && gatewayConfig.backends[0].comfyBaseUrl.startsWith("http://127.0.0.1")
+      && gatewayConfig.casAuthority === "wl-sg"
+      && profile?.execution.kind === "writing-loop/execution-profile"
+      && profile.execution.modelFamily === "minimax-h3"
+      && profile.intentExecution.modelFamily === "minimax-h3"
+      && profile.intentExecution.workflowSha256 === profile.execution.workflowSha256
+      && profile.priceTable?.basis === "tariff"
+      && !("licenseObligations" in profile.execution)
+      && profile.license.obligations?.attribution === "MiniMax H3"
+      && profile.license.obligations.revenueThresholdUsd === 20_000_000
+      && profile.license.obligations.noModelImprovement === true
+      && profile.processingRegions[0] === "SG"
+      && stageProfile?.providerCasNamespace === "wlcas/sha256"
+      && stageProfile.inputs[0]?.slot === stageProfile.bindings[0]?.slot
+      && snapshot.profiles.length === 1
+      && /^[a-f0-9]{64}$/.test(snapshot.profiles[0]!.profileDigest)
+      && snapshot.profiles[0]!.execution.workflowSha256 === profile.execution.workflowSha256
+      && snapshot.profiles[0]!.durationGrid.length === 1,
+    "AI-SPEC gateway registry fixture 通过真实 strict parser（义务只在 license.obligations），并导出可校验的只读 profile 快照");
+  } catch (error) {
+    ok(false, `AI-SPEC gateway registry fixture 与 production-gateway-runtime-config 漂移：${
+      error instanceof Error ? error.message : String(error)}`);
   }
 }
 

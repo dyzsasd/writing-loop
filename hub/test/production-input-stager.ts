@@ -14,6 +14,7 @@ import {
   parseProductionWorkflowBindingVerification,
   productionInputBindingsDigest,
   productionInputStageKey,
+  type HttpProductionInputStagerOptions,
   type ProductionInputBinding,
   type ProductionInputStageRequest,
   type ProductionInputStageResult,
@@ -386,6 +387,35 @@ const badCredential = new HttpProductionInputStager({
 const credentialError = await captureError(() => badCredential.stage(intent));
 ok(credentialError?.code === "credential-unavailable" && !credentialError.message.includes(credentialSecret),
 "credential resolver 失败不泄漏 token/provider message");
+
+// §8.0 owner-only transport: VPC 私网明文 HTTP 只在「私网字面 IP + 非空 bearer」下成立，
+// 且不放宽既有 allowInsecureLoopback（无凭据 loopback 开发通道）的语义。
+const stagerConstructed = (options: Partial<HttpProductionInputStagerOptions>): boolean => {
+  try {
+    new HttpProductionInputStager({
+      baseUrl: "https://asset-gateway.example",
+      workspaceId: WS,
+      project: PROJECT,
+      fetch: async () => new Response("{}"),
+      ...options,
+    });
+    return true;
+  } catch { return false; }
+};
+ok(stagerConstructed({
+  baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http",
+  credentialResolver: () => "PRIVATE_NET_TOKEN",
+}), "input stager：insecure-private-http + RFC1918 字面 IP + credential 被接受");
+ok(!stagerConstructed({
+  baseUrl: "http://203.0.113.9:8790", transport: "insecure-private-http",
+  credentialResolver: () => "PRIVATE_NET_TOKEN",
+}), "input stager：insecure-private-http 拒绝公网 IP endpoint");
+ok(!stagerConstructed({
+  baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http",
+}), "input stager：insecure-private-http 缺 credentialResolver 时拒绝");
+ok(!stagerConstructed({
+  baseUrl: "http://10.148.0.9:8790", credentialResolver: () => "PRIVATE_NET_TOKEN",
+}), "input stager：缺省 transport 仍要求 HTTPS，私网明文 http 被拒");
 
 console.log(fails === 0 ? "\nPRODUCTION_INPUT_STAGER_OK" : `\n${fails} 项检查失败`);
 process.exit(fails === 0 ? 0 : 1);

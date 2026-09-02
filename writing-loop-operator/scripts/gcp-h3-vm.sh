@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# GPU VM（MiniMax H3 over ComfyUI）按批次启停。
+#
+# 机型与镜像由规格固定：Spot g4-standard-48、image-family wl-comfy-h3-g4-sg、asia-southeast1。
+# 持久化启动盘 200 GB 承载 job record、CAS objects 与 ingest 产物，且**不随实例删除**
+# （--no-boot-disk-auto-delete）；`--instance-termination-action=STOP` 让 Spot 抢占只停机不删盘。
+# 实例默认无外网 IP、不加 http-server / https-server 标签：gateway 只绑 VPC 内网 IP，入站由
+# VPC 内部规则承载，不对公网开放任何端口。装包等需要出网时用 `egress on` 临时挂外网 IP，装完 off。
+#
+# 用法：
+#   gcp-h3-vm.sh create            # 首次创建（已存在则报错退出，不覆盖）
+#   gcp-h3-vm.sh start|stop        # 批次启停
+#   gcp-h3-vm.sh status            # 状态、内网 IP、启动盘与 autoDelete
+#   gcp-h3-vm.sh ssh [-- CMD...]   # 登录或远程执行
+#   gcp-h3-vm.sh egress on|off     # 临时挂/摘外网 IP（只在装包、拉模型时 on）
+#   gcp-h3-vm.sh tunnel [PORT]     # 把 gateway 端口经 IAP 转到本机（默认 8790，仅调试）
+#
+# 删除实例前先对启动盘做快照：`gcloud compute disks snapshot <INSTANCE> --zone <ZONE>`。
+#
+# 环境变量（都有默认值）：
+#   WL_GPU_PROJECT WL_GPU_ZONE WL_GPU_INSTANCE WL_GPU_IMAGE_FAMILY WL_GPU_IMAGE_PROJECT
+#   WL_GPU_MACHINE WL_GPU_BOOT_GB WL_GPU_SUBNET WL_GATEWAY_PORT
+set -euo pipefail
+
+PROJECT="${WL_GPU_PROJECT:-jinko-vibe-coding}"
+ZONE="${WL_GPU_ZONE:-asia-southeast1-b}"
+INSTANCE="${WL_GPU_INSTANCE:-wl-comfy-h3-g4}"
+IMAGE_FAMILY="${WL_GPU_IMAGE_FAMILY:-wl-comfy-h3-g4-sg}"
+IMAGE_PROJECT="${WL_GPU_IMAGE_PROJECT:-$PROJECT}"
+MACHINE="${WL_GPU_MACHINE:-g4-standard-48}"
+BOOT_GB="${WL_GPU_BOOT_GB:-200}"
+SUBNET="${WL_GPU_SUBNET:-default}"
+GATEWAY_PORT="${WL_GATEWAY_PORT:-8790}"
+
+say()  { printf '[gcp-h3-vm] %s\n' "$*"; }
+fail() { printf '[gcp-h3-vm] FAIL: %s\n' "$*" >&2; exit 1; }
+
+command -v gcloud >/dev/null 2>&1 || fail "缺 gcloud CLI。先装 Google Cloud SDK 并 gcloud auth login。"
+
+gc() { gcloud --project "$PROJECT" "$@"; }
+
+require_auth() {
+  gcloud auth print-access-token >/dev/null 2>&1 \
+    || fail "gcloud 未登录或凭据过期（gcloud auth print-access-token 失败）。先跑 gcloud auth login。"
+}
+
+# 只把「实例确实不存在」判为 false；权限/网络/配额等错误一律上抛，不冒充「不存在」。
+exists() {
+  local out status
+  set +e
+  out="$(gc compute instances describe "$INSTANCE" --zone "$ZONE" --format='value(name)' 2>&1)"
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then return 0; fi
+  case "$out" in
+    *"was not found"*|*"notFound"*|*"HTTPError 404"*) return 1 ;;
+    *) fail "describe $INSTANCE 失败（非 404）：$out" ;;
+  esac
+}
+
+cmd_create() {
+  require_auth
+  if exists; then fail "实例 $INSTANCE 已存在（$ZONE）。要重建先手动删除，本脚本不覆盖。"; fi
+  say "创建 Spot $MACHINE（$IMAGE_FAMILY，启动盘 ${BOOT_GB}GB 保留，抢占时只停机）"
+  gc compute instances create "$INSTANCE" \
+    --zone "$ZONE" \
+    --machine-type "$MACHINE" \
+    --provisioning-model=SPOT \
+    --instance-termination-action=STOP \
+    --image-family "$IMAGE_FAMILY" \
+    --image-project "$IMAGE_PROJECT" \
+    --boot-disk-size "${BOOT_GB}GB" \
+    --boot-disk-type pd-balanced \
+    --no-boot-disk-auto-delete \
+    --subnet "$SUBNET" \
+    --no-address \
+    --no-service-account \
+    --no-scopes \
+    --metadata=enable-oslogin=TRUE
+  cmd_status
+}
+
+cmd_start() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在，先跑 create。"
+  gc compute instances start "$INSTANCE" --zone "$ZONE"
+  cmd_status
+}
+
+cmd_stop() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在。"
+  gc compute instances stop "$INSTANCE" --zone "$ZONE"
+  cmd_status
+}
+
+cmd_status() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在。"
+  gc compute instances describe "$INSTANCE" --zone "$ZONE" \
+    --format='table[box](name, status, machineType.basename(), scheduling.provisioningModel, scheduling.instanceTerminationAction, networkInterfaces[0].networkIP:label=INTERNAL_IP, networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP, disks[0].diskSizeGb:label=BOOT_GB, disks[0].autoDelete:label=BOOT_AUTODELETE)'
+}
+
+cmd_ssh() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在。"
+  if [ "$#" -gt 0 ]; then
+    gc compute ssh "$INSTANCE" --zone "$ZONE" --tunnel-through-iap --command "$*"
+  else
+    gc compute ssh "$INSTANCE" --zone "$ZONE" --tunnel-through-iap
+  fi
+}
+
+# --no-address 的实例在没有 Cloud NAT 时不能出网：装包/拉模型前 on，装完立即 off。
+cmd_egress() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在。"
+  case "${1:-}" in
+    on)
+      say "临时挂载外网 IP（装包完成后务必 egress off）"
+      gc compute instances add-access-config "$INSTANCE" --zone "$ZONE" \
+        --access-config-name="external-nat"
+      ;;
+    off)
+      say "摘除外网 IP，恢复只走 VPC 私网"
+      gc compute instances delete-access-config "$INSTANCE" --zone "$ZONE" \
+        --access-config-name="external-nat"
+      ;;
+    *) fail "egress 需要 on 或 off" ;;
+  esac
+  cmd_status
+}
+
+cmd_tunnel() {
+  require_auth
+  exists || fail "实例 $INSTANCE 不存在。"
+  local port="${1:-$GATEWAY_PORT}"
+  say "IAP 隧道 localhost:${port} → ${INSTANCE}:${port}（仅调试；worker 走 VPC 私网直连）"
+  gc compute start-iap-tunnel "$INSTANCE" "$port" --zone "$ZONE" --local-host-port="localhost:${port}"
+}
+
+action="${1:-}"
+shift || true
+case "$action" in
+  create) cmd_create ;;
+  start)  cmd_start ;;
+  stop)   cmd_stop ;;
+  status) cmd_status ;;
+  ssh)    if [ "${1:-}" = "--" ]; then shift; fi; cmd_ssh "$@" ;;
+  egress) cmd_egress "${1:-}" ;;
+  tunnel) cmd_tunnel "${1:-}" ;;
+  *) sed -n '2,25p' "$0" >&2; exit 2 ;;
+esac

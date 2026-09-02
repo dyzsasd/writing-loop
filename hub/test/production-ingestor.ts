@@ -14,6 +14,7 @@ import {
   ProductionIngestorError,
   productionIngestKey,
   productionScopedIngestKey,
+  type HttpProductionArtifactIngestorOptions,
   type ProductionGatewayCredentialContext,
   type ProductionGatewayIngestRequest,
 } from "../src/production-ingestor.ts";
@@ -428,6 +429,36 @@ const inputGuard = new HttpProductionArtifactIngestor({
 ok((await captureError(() => inputGuard.ingest(task, wrongRemote)))?.code === "invalid-input"
   && inputCalls.length === 0,
 "observation remoteJobId 不匹配时在 credential/network 前拒绝");
+
+// §8.0 owner-only transport: VPC 私网明文 HTTP 只在「私网字面 IP + 非空 bearer」下成立，
+// 且不放宽既有 allowInsecureLoopback（无凭据 loopback 开发通道）的语义。
+const transportCredential = (): string => "PRIVATE_NET_TOKEN";
+const constructed = (options: Partial<HttpProductionArtifactIngestorOptions>): boolean => {
+  try {
+    new HttpProductionArtifactIngestor({
+      baseUrl: "https://gateway.example",
+      workspaceId: WORKSPACE_ID,
+      project: PROJECT,
+      fetch: async () => jsonResponse({}),
+      ...options,
+    });
+    return true;
+  } catch { return false; }
+};
+ok(constructed({
+  baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http",
+  credentialResolver: transportCredential,
+}), "ingestor：insecure-private-http + RFC1918 字面 IP + credential 被接受");
+ok(!constructed({
+  baseUrl: "http://203.0.113.9:8790", transport: "insecure-private-http",
+  credentialResolver: transportCredential,
+}), "ingestor：insecure-private-http 拒绝公网 IP endpoint");
+ok(!constructed({
+  baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http",
+}), "ingestor：insecure-private-http 缺 credentialResolver 时拒绝");
+ok(!constructed({
+  baseUrl: "http://10.148.0.9:8790", credentialResolver: transportCredential,
+}), "ingestor：缺省 transport 仍要求 HTTPS，私网明文 http 被拒");
 
 if (fails) {
   console.error(`PRODUCTION_INGESTOR_FAILED ${fails}`);

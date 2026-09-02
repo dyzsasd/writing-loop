@@ -538,6 +538,17 @@ async function makeSafeDirectory(path: string, root: string): Promise<void> {
   }
 }
 
+/**
+ * Content-addressed blob path inside one ingest store root. Same-host readers — the stage kernel's
+ * `cas://` asset resolver re-registering an already-ingested last frame (§6.4) — resolve through
+ * this shared layout instead of copying the private directory constants.
+ */
+export function productionGatewayBlobPath(storeRoot: string, sha256: string): string {
+  if (typeof storeRoot !== "string" || !isAbsolute(storeRoot) || resolve(storeRoot) === sep
+    || typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256)) fail("bad-request");
+  return join(resolve(storeRoot), "blobs", "sha256", sha256.slice(0, 2), sha256);
+}
+
 async function initializeDirectories(configuredRoot: string): Promise<GatewayDirectories> {
   if (!isAbsolute(configuredRoot) || resolve(configuredRoot) === sep) fail("bad-request");
   await mkdir(configuredRoot, { recursive: true, mode: 0o700 });

@@ -1,0 +1,30 @@
+# System unit（不是 --user 单元）：装到 /etc/systemd/system/ 并填 User=/Group=。
+# 部署前先 `systemctl cat comfyui.service` 核对该单元名与其 User/WorkingDirectory；
+# 若镜像里的 ComfyUI 单元叫别的名字，同步改下面三处 comfyui.service。
+[Unit]
+Description=writing-loop production gateway (jobs / stages / ingests, private IP only)
+# ComfyUI 必须先起：gateway 的 backend comfyBaseUrl 是本机 loopback。
+After=network-online.target comfyui.service
+Wants=network-online.target
+Requires=comfyui.service
+
+[Service]
+Type=simple
+# ← 改成实际运行用户/组（与 ComfyUI 同用户，才读得到 registry 配置与 CAS 目录）
+User=writing-loop
+Group=writing-loop
+WorkingDirectory=/var/lib/writing-loop
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# 0600、仅该用户可读；只放 bearer 一行：WRITING_LOOP_GATEWAY_BEARER=...
+# 变量名必须与 registry 配置的 auth.bearerEnv 一致。
+EnvironmentFile=/etc/writing-loop/production-gateway.env
+# registry 配置必须是 0400/0600、该用户所有的单链接普通文件；
+# 其中 objectsRoot / ingestRoot / jobStateRoot 指向持久化启动盘上的目录。
+ExecStart=/usr/local/bin/writing-loop-production-gateway --config /etc/writing-loop/production-gateway.json
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

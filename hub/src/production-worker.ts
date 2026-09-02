@@ -4,6 +4,7 @@
 // It intentionally accepts only a trusted runtime-config path. Provider origins, credentials,
 // workflow files and model identities remain inside the owner-only config/composition boundary;
 // none can be overridden from argv or a Studio/browser request.
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import {
@@ -142,6 +143,18 @@ export async function productionWorkerMain(
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+/**
+ * npm installs a bin as a symlink and Node resolves an ESM entry to its realpath, so comparing
+ * `import.meta.url` with the raw `process.argv[1]` is false under `~/.npm-global/bin/...` and the
+ * process would exit 0 without ever running a pass. Compare realpaths instead.
+ */
+function invokedAsMain(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try { return realpathSync(entry) === fileURLToPath(import.meta.url); }
+  catch { return false; }
+}
+
+if (invokedAsMain()) {
   process.exitCode = await productionWorkerMain();
 }

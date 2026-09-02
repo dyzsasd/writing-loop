@@ -333,6 +333,13 @@ export type ProductionGatewayAdapterCredentialResolver = (
   signal: AbortSignal,
 ) => string | Promise<string>;
 
+/**
+ * Owner-only transport declaration mirroring the runtime config field (§8.0). `tls` keeps the
+ * credentialed-HTTPS rule unchanged; `insecure-private-http` trades TLS for VPC isolation and
+ * therefore requires a private-IP literal endpoint plus a bearer credential.
+ */
+export type ProductionGatewayAdapterTransport = "tls" | "insecure-private-http";
+
 export type ProductionGatewayAdapterOptions = {
   /** Trusted server-side job gateway root, never sourced from a task/browser payload. */
   baseUrl: string | URL;
@@ -341,6 +348,7 @@ export type ProductionGatewayAdapterOptions = {
   backendInstanceId: string;
   profileId: string;
   credentialResolver: ProductionGatewayAdapterCredentialResolver;
+  transport?: ProductionGatewayAdapterTransport;
   fetch?: FetchLike;
   timeoutMs?: number;
   maxResponseBytes?: number;
@@ -1139,12 +1147,41 @@ function parseRoute(url: URL): ParsedRoute {
   return { kind: "cancel", scope, remoteJobId, cancelKey: parts[8]! };
 }
 
-function trustedBaseUrl(value: string | URL): URL {
+/**
+ * RFC1918 IPv4 or the loopback literal, written as a literal address. WHATWG URL canonicalises
+ * numeric hosts, so a decimal-dotted match here also covers octal/hex spellings, while every domain
+ * name — which could resolve anywhere — stays outside the accepted set.
+ */
+function isPrivateIpv4Literal(hostname: string): boolean {
+  if (hostname === "127.0.0.1") return true;
+  const octets = hostname.split(".");
+  if (octets.length !== 4
+    || !octets.every((part) => /^(?:0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)) {
+    return false;
+  }
+  const [first, second] = octets.map(Number) as [number, number, number, number];
+  return first === 10
+    || (first === 172 && second >= 16 && second <= 31)
+    || (first === 192 && second === 168);
+}
+
+function trustedBaseUrl(
+  value: string | URL,
+  transport: ProductionGatewayAdapterTransport,
+  hasCredentialResolver: boolean,
+): URL {
   let url: URL;
   try { url = new URL(value); }
   catch { throw new ProductionAdapterError("remote-rejected", "Production Gateway baseUrl 无效"); }
-  if (url.protocol !== "https:" || !url.hostname
-    || url.username || url.password || url.search || url.hash) {
+  if (!url.hostname || url.username || url.password || url.search || url.hash) {
+    throw new ProductionAdapterError("remote-rejected", "Production Gateway baseUrl 配置无效");
+  }
+  if (transport === "insecure-private-http") {
+    // VPC 私网明文：只接受私网字面 IP 的 http endpoint，且仍以 bearer 鉴权（§8.0）。
+    if (url.protocol !== "http:" || !isPrivateIpv4Literal(url.hostname) || !hasCredentialResolver) {
+      throw new ProductionAdapterError("remote-rejected", "Production Gateway insecure-private-http baseUrl 配置无效");
+    }
+  } else if (url.protocol !== "https:") {
     throw new ProductionAdapterError("remote-rejected", "Production Gateway baseUrl 配置无效");
   }
   url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
@@ -2757,7 +2794,11 @@ export class ProductionGatewayAdapter implements ProductionAdapter {
   readonly #maxWorkflowBytes: number;
 
   constructor(options: ProductionGatewayAdapterOptions) {
-    this.#baseUrl = trustedBaseUrl(options.baseUrl);
+    const transport = options.transport ?? "tls";
+    if (transport !== "tls" && transport !== "insecure-private-http") {
+      throw adapterFailure("remote-rejected", "ProductionGatewayAdapter transport 配置无效");
+    }
+    this.#baseUrl = trustedBaseUrl(options.baseUrl, transport, typeof options.credentialResolver === "function");
     try {
       this.#scope = parseScope(options.workspaceId, options.project);
       this.#backendInstanceId = safeId(options.backendInstanceId);

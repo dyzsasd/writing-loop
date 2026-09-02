@@ -35,6 +35,7 @@ import {
   productionJobPutRequestDigest,
   productionJobStorageKey,
   productionJobWorkflowDigest,
+  type ProductionGatewayAdapterOptions,
   type ProductionJobGatewayOptions,
   type ProductionJobProfile,
   type ProductionJobPutRequest,
@@ -2052,6 +2053,32 @@ try {
 } finally {
   for (const path of roots) rmSync(path, { recursive: true, force: true });
 }
+
+// §8.0 owner-only transport: VPC 私网明文 HTTP 只在「私网字面 IP + 非空 bearer」下成立，
+// 缺省 transport 仍然只接受 credentialed HTTPS。
+const adapterConstructed = (options: Partial<ProductionGatewayAdapterOptions>): boolean => {
+  try {
+    new ProductionGatewayAdapter({
+      baseUrl: "https://jobs.internal.example",
+      workspaceId: SCOPE_A.workspaceId,
+      project: SCOPE_A.project,
+      backendInstanceId: BACKEND,
+      profileId: PROFILE_ID,
+      credentialResolver: () => TOKEN_A,
+      ...options,
+    });
+    return true;
+  } catch { return false; }
+};
+ok(adapterConstructed({ baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http" }),
+  "gateway adapter：insecure-private-http + RFC1918 字面 IP + credential 被接受");
+ok(!adapterConstructed({ baseUrl: "http://203.0.113.9:8790", transport: "insecure-private-http" }),
+  "gateway adapter：insecure-private-http 拒绝公网 IP endpoint");
+ok(!adapterConstructed({
+  baseUrl: "http://10.148.0.9:8790", transport: "insecure-private-http", credentialResolver: undefined,
+}), "gateway adapter：insecure-private-http 缺 credentialResolver 时拒绝");
+ok(!adapterConstructed({ baseUrl: "http://10.148.0.9:8790" }),
+  "gateway adapter：缺省 transport 仍要求 HTTPS，私网明文 http 被拒");
 
 if (fails) {
   console.error(`\n${fails} production job gateway assertion(s) failed`);
